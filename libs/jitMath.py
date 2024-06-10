@@ -19,6 +19,7 @@
 
 from __main__ import jitter
 
+
 @jitter("void(f4[:, ::1], f4[::1], f4[::1])")
 def sgemv(A, x, b):
     # matrix-vector multiplication
