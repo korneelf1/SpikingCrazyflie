@@ -20,7 +20,7 @@ from tianshou.data import to_numpy, Batch
 from helpers import NumpyDeque
 
 GRAVITY = 9.80665
-
+print('\nNOTE NOW REWARD IS MODIFIED TO JUST MAKE STABILIZING CONTROLLER (DISREGARDING ANY POSITIONS)\n')
 class Drone_Sim(gym.Env):
     def __init__(self, gpu=False, drone='CrazyFlie', action_buffer=True, dt=0.01, T=2, N_cpu=1, spiking_model=None):
         super(Drone_Sim, self).__init__()
@@ -100,8 +100,14 @@ class Drone_Sim(gym.Env):
         if self.gpu:
             jitter = lambda signature: nb.cuda.jit(signature, fastmath=False, device=True, inline=False)
             kerneller = lambda signature: nb.cuda.jit(signature, fastmath=False, device=False)
+
             from libs.gpuKernels import step as kernel_step
+            from libs.gpuKernels import reward_function, check_done
+
             self.kernel_step = kernel_step
+            self.reward_function = reward_function
+            self.check_done      = check_done
+
         else:
             jitter = lambda signature: nb.jit(signature, nopython=True, fastmath=False)
             kerneller = lambda signature, map: nb.guvectorize(signature, map, target='parallel', nopython=True, fastmath=False)
@@ -228,7 +234,7 @@ class Drone_Sim(gym.Env):
         '''Compute reward, reward function from learning to fly in 18sec paper
         TODO: optimize with cpuKernels and gpuKernels'''	
         if self.gpu:
-            raise NotImplementedError("Not implemented for GPU yet")
+            self.reward_function[self.blocks,self.threads_per_block](self.xs, self.pSets, self.us, self.global_step_counter,self.r)
         else:
             self.reward_function(self.xs, self.pSets, self.us, self.global_step_counter,self.r)
              
@@ -276,7 +282,6 @@ class Drone_Sim(gym.Env):
             if self.action_buffer:
                 self.xs = np.concatenate((self.xs[:,0:17],self.action_history),axis=1,dtype=np.float32)
             
-
     async def _step(self, enable_reset = True):
         '''
         Perform a step:
@@ -429,14 +434,20 @@ class Drone_Sim(gym.Env):
         pass
 
 global jitter; global kerneller
+gpu = torch.cuda.is_available()
+print(gpu)
 # debug mode
-jitter = lambda signature: nb.jit(signature, nopython=True, fastmath=False)
-kerneller = lambda signature, map: nb.guvectorize(signature, map, target='parallel', nopython=True, fastmath=False)
-GRAVITY = 9.80665
+if gpu:
+    jitter = lambda signature: nb.cuda.jit(signature, fastmath=False, device=True, inline=False)
+    kerneller = lambda signature: nb.cuda.jit(signature, fastmath=False, device=False)
+else:
+    jitter = lambda signature: nb.jit(signature, nopython=True, fastmath=False)
+    kerneller = lambda signature, map: nb.guvectorize(signature, map, target='parallel', nopython=True, fastmath=False)
+
 if __name__ == "__main__":
     N_drones = 3
 
-    sim = Drone_Sim(gpu=False, dt=0.01, T=10, N_cpu=N_drones, spiking_model=None, action_buffer=True)
+    sim = Drone_Sim(gpu=gpu, dt=0.01, T=10, N_cpu=N_drones, spiking_model=None, action_buffer=True)
     from libs.cpuKernels import controller_rl
     # position controller gains (attitude/rate hardcoded for now, sorry)
     posPs = 2*np.ones((N_drones, 3), dtype=np.float32)
