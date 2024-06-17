@@ -1,25 +1,8 @@
-#!/usr/bin/env python3
 """
-    Vectorized quadrotor simulation with websocket pose output
+    Vectorized quadrotor simulation using gymnasium API
 
     
     maybe it would be better to provide step function which takes a model and performs a complete rollout where model is optimized
-
-
-    Copyright (C) 2024 Till Blaha -- TU Delft
-
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import numpy as np
@@ -34,11 +17,12 @@ from numba import cuda
 import gymnasium as gym
 import torch
 from tianshou.data import to_numpy, Batch
+from helpers import NumpyDeque
 
 GRAVITY = 9.80665
 
 class Drone_Sim(gym.Env):
-    def __init__(self, gpu=False, viz=False, log=True, realtime=False, action_buffer=True, dt=0.01, T=2, N_cpu=1, spiking_model=None):
+    def __init__(self, gpu=False, drone='CrazyFlie', action_buffer=True, dt=0.01, T=2, N_cpu=1, spiking_model=None):
         super(Drone_Sim, self).__init__()
         '''
         Vectorized quadrotor simulation with websocket pose output
@@ -46,9 +30,7 @@ class Drone_Sim(gym.Env):
         
         Args:
             gpu (bool): run on the gpu using cuda
-            viz (bool): stream pose to a websocket connection
-            log (bool): log states from gpu back to the CPU (setting False has no speedup on CPU)
-            realtime (bool): wait every timestep to try and be real time
+            drone (str): 'CrazyFlie' or 'Default'
             dt (float): step time is dt seconds (forward Euler)
             T (float): run for T seconds
             N_cpu (int): number of simulations to run in parallel
@@ -57,10 +39,6 @@ class Drone_Sim(gym.Env):
 
         ### sim config ###
         self.gpu = gpu              # run on the self.gpu using cuda
-        self.viz = viz              # stream pose to a websocket connection
-        self.log = log              # log states from self.gpu back to the CPU (setting False has no speedup on CPU)
-        self.realtime = realtime    # wait every timestep to try and be real time
-
         # length / number of parallel sims
         self.action_buffer = action_buffer
         self.dt = dt                # step time is self.dt seconds (forward Euler)
@@ -79,10 +57,8 @@ class Drone_Sim(gym.Env):
 
         
         if action_buffer: # add last 25 inputs as observation
-            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(17+25*4,), dtype=np.float32)
-            self.action_history = deque(maxlen=25)
-            for i in range(25):
-                self.action_history.append(np.zeros((self.N,4),dtype=np.float32))
+            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(117,), dtype=np.float32)
+            self.action_history = NumpyDeque((self.N,100)) # 25 timesteps, 4 actions
 
         else:
         # create gymnasium observation and action space
@@ -99,7 +75,10 @@ class Drone_Sim(gym.Env):
         self.log_interval = 1    # log state every x iterations. Too low may cause out_of_memory on the self.gpu. False == 0
 
         # create the drones
-        self._create_drones(og_drones=True)
+        if drone=='CrazyFlie':
+            self._create_drones(og_drones=False)
+        else:
+            self._create_drones(og_drones=True)
 
         # precompute stuff
         self.itaus = 1. / self.taus
@@ -138,6 +117,7 @@ class Drone_Sim(gym.Env):
             # self.termination = termination
 
         # allocate sim data
+        log=1
         self.log_interval = log*5
         self.iters = int(self.T / self.dt)
         self.Nlog = int(self.iters / self.log_interval) if self.log_interval > 0 else 0
@@ -147,11 +127,6 @@ class Drone_Sim(gym.Env):
         # create logs
         self._create_logs()
 
-        if viz:
-            print("initializing websocket. Awaiting connection... ")
-            self.wsI = wsInterface(8765)
-        else:
-            self.wsI = dummyInterface()
 
         self.r = np.empty(self.N, dtype=np.float32)
 
@@ -177,7 +152,7 @@ class Drone_Sim(gym.Env):
         Number of drones that are simulated.'''
         return self.N
     
-    def _create_drones(self, og_drones=False):
+    def _create_drones(self, og_drones=True):
         '''Creates drones, crazyflies
         parameters retrieved from:
         https://github.com/arplaboratory/learning_to_fly_media/blob/ae72456e879137b840b9dfde366253886c3ec131/parameters.pdf
@@ -218,18 +193,22 @@ class Drone_Sim(gym.Env):
             for i in tqdm(range(self.N), desc="Building crafts"):
                 q = QuadRotor()
                 q.setInertia(self.m, self.I)
-                q.rotors.append(Rotor([-0.028, 0.028, 0], dir='cw', wmax = max_rads, tau=0.015, Izz= 3.16e-10,k=0.005964552)) # rotor 3
-                q.rotors.append(Rotor([0.028, 0.028, 0], dir='ccw', wmax = max_rads, tau=0.015, Izz= 3.16e-10,k=0.005964552)) # rotor 4
-                q.rotors.append(Rotor([-0.028, -0.028, 0], dir='ccw', wmax = max_rads, tau=0.015, Izz= 3.16e-10,k=0.005964552)) # rotor 2	
-                q.rotors.append(Rotor([0.028, -0.028, 0], dir='cw', wmax = max_rads, tau=0.015, Izz= 3.16e-10,k=0.005964552)) # rotor 1
+                q.rotors.append(Rotor([-0.028, 0.028, 0], dir='cw', wmax = max_rads, tau=0.15, Izz= 3.16e-10,k=0.005964552)) # rotor 3
+                q.rotors.append(Rotor([0.028, 0.028, 0], dir='ccw', wmax = max_rads, tau=0.15, Izz= 3.16e-10,k=0.005964552)) # rotor 4
+                q.rotors.append(Rotor([-0.028, -0.028, 0], dir='ccw', wmax = max_rads, tau=0.15, Izz= 3.16e-10,k=0.005964552)) # rotor 2	
+                q.rotors.append(Rotor([0.028, -0.028, 0], dir='cw', wmax = max_rads, tau=0.15, Izz= 3.16e-10,k=0.005964552)) # rotor 1
 
                 q.fillArrays(i, self.G1s, self.G2s, self.omegaMaxs, self.taus)
 
     def _create_logs(self,):
         '''Creates logs
         NOTE: currently not used'''	
-        self.xs_log = np.empty(
-            (self.N, self.Nlog, 17), dtype=np.float32)
+        if self.action_buffer:
+            self.xs_log = np.empty(
+            (self.N, self.Nlog, 117), dtype=np.float32)
+        else:
+            self.xs_log = np.empty(
+                (self.N, self.Nlog, 17), dtype=np.float32)
         self.xs_log[:] = np.nan
 
     def _simulate_step(self):
@@ -241,6 +220,9 @@ class Drone_Sim(gym.Env):
             self.kernel_step[self.blocks,self.threads_per_block](self.d_xs, self.d_us, self.d_itaus, self.d_omegaMaxs, self.d_G1s, self.d_G2s, self.dt, self.log_idx, self.d_xs_log)
         else:
             self.kernel_step(self.xs, self.us, self.itaus, self.omegaMaxs, self.G1s, self.G2s, self.dt, int(0), self.xs_log)
+        if self.action_buffer:
+            self.action_history.append(self.us)
+            self.xs = np.concatenate((self.xs[:,0:17], np.array(self.action_history)),axis=1)
 
     def _compute_reward(self):
         '''Compute reward, reward function from learning to fly in 18sec paper
@@ -283,15 +265,17 @@ class Drone_Sim(gym.Env):
             raise NotImplementedError("This function is not implemented yet, see dones!")
             self.reset_subenvs(self.done, seed,self.xs)
         else:
+            if self.action_buffer:
+                self.action_history.reset(self.done)
             # create new states
             xs_new = np.random.random((self.N, 17)).astype(np.float32) - 0.5
             xs_new[:, 6:10] /= np.linalg.norm(xs_new[:, 6:10], axis=1)[:, np.newaxis]
 
             # mask with done array
-            self.xs[self.done,:] = xs_new[self.done,:]
-            # xs_new = self.xs * (1-self.done.reshape((self.N,1))) + xs_new * self.done.reshape((self.N,1)) # first sets dones o zero, then adds the new states with inverse zero mask (zeros everywhere but the relevant states)
-            # load in states into self.xs
-            # self.xs = xs_new.copy()
+            self.xs[:,0:17][self.done,:] = xs_new[self.done,:]
+            if self.action_buffer:
+                self.xs = np.concatenate((self.xs[:,0:17],self.action_history),axis=1,dtype=np.float32)
+            
 
     async def _step(self, enable_reset = True):
         '''
@@ -368,8 +352,10 @@ class Drone_Sim(gym.Env):
         ei = 0
         for i in tqdm(range(iters), desc="Running simulation"):
             # self.global_step_counter += int(self.N)
+
             obs_arr[i] = self.xs
             self._simulate_step()
+
             # print('action: ',self.us[1])
             # print('motor speeds: ',self.xs[1,13:17])
             obs_next_arr[i] = self.xs
@@ -383,7 +369,10 @@ class Drone_Sim(gym.Env):
 
             with torch.no_grad():
                 # self.us = to_numpy(policy(Batch(obs=self.xs, info={})).act)
-                self.us = to_numpy(policy(self.xs))
+                if self.action_buffer:
+                    self.us = to_numpy(policy(np.concatenate((self.xs[:,0:17],self.action_history.array),axis=1,dtype=np.float32)))
+                else:
+                    self.us = to_numpy(policy(self.xs))
 
                 act_arr[i] =self.us
             
@@ -412,9 +401,9 @@ class Drone_Sim(gym.Env):
             self.spiking_model.reset_hidden()
 
         if self.action_buffer:
-            for i in range(25):
-                self.action_history.append(np.zeros((self.N,4),dtype=np.float32))
-            return np.concatenate((x0, np.array(self.action_history).reshape(self.N,100)), axis=1), {}
+            self.action_history.reset()
+            self.xs = np.concatenate((self.xs,self.action_history),axis=1,dtype=np.float32)
+            # return x0,{}
         # YOU CAN RESET YOUR MODEL IN THE ENVIRONMENT RESET FUNCTION!!!!!!!
         return self.xs,{} # state, info
                 
@@ -424,10 +413,6 @@ class Drone_Sim(gym.Env):
         # self.done =np.zeros((self.N,1),dtype=bool)
         # done = self._check_done()
         asyncio.run(self._step(enable_reset=enable_reset))
-
-        # if self.action_buffer:
-        #     self.action_history.append(np.array(action).reshape(self.N,4))
-        #     return np.concatenate((self.xs, np.array(self.action_history).reshape(self.N,100)), axis=1), self.r, done, done,{}
 
         return self.xs,self.r, self.done,self.done, {}
    
@@ -442,9 +427,6 @@ class Drone_Sim(gym.Env):
     
     def render(self, mode='human'):
         pass
-    
-
-        
 
 global jitter; global kerneller
 # debug mode
@@ -452,9 +434,9 @@ jitter = lambda signature: nb.jit(signature, nopython=True, fastmath=False)
 kerneller = lambda signature, map: nb.guvectorize(signature, map, target='parallel', nopython=True, fastmath=False)
 GRAVITY = 9.80665
 if __name__ == "__main__":
-    N_drones = 1
+    N_drones = 3
 
-    sim = Drone_Sim(gpu=False, viz=False, log=True, realtime=False, dt=0.01, T=10, N_cpu=N_drones, spiking_model=None, action_buffer=False)
+    sim = Drone_Sim(gpu=False, dt=0.01, T=10, N_cpu=N_drones, spiking_model=None, action_buffer=True)
     from libs.cpuKernels import controller_rl
     # position controller gains (attitude/rate hardcoded for now, sorry)
     posPs = 2*np.ones((N_drones, 3), dtype=np.float32)
@@ -463,13 +445,13 @@ if __name__ == "__main__":
     
     print("Environment created!")
 
-    iters = int(1e3)
+    iters = int(1e4)
     sim.reset()
     # create actor
     t0 = time()
     t_steps = []
     import networks as n
-    policy = n.Actor_ANN(17,4,1)
+    policy = n.Actor_ANN(117,4,1)
     print("\nTest step_rollout")
     sim.step_rollout(policy=policy, n_step=iters)
     # t_steps.append(time()-t_step)
@@ -497,7 +479,6 @@ if __name__ == "__main__":
     print("Average step time: ",  (time()-t0)/iters)
     # print("Total step time: ", np.sum(t_steps))
     print("Done")
-
         
 '''
 Issue:
