@@ -17,7 +17,7 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
-from __main__ import jitter
+from gym_sim import jitter
 
 
 @jitter("void(f4[:, ::1], f4[::1], f4[::1])")

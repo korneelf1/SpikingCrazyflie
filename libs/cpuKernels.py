@@ -17,7 +17,7 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
-from __main__ import kerneller, GRAVITY
+from gym_sim import kerneller, GRAVITY
 from libs.jitMath import motorDot, forcesAndMoments, quatRotate, quatDot, sgemv
 import networks as n
 import numba as nb
@@ -25,10 +25,9 @@ from numba import cuda
 from math import sqrt, acos, hypot
 import numpy as np
 # import numba.np as np
-
+        
 # sim reward function
-@kerneller(["void(f4[::1],f4[::1],f4[::1],i2,f4[:])"],
-            "(states),(three),(four),()->()")
+@kerneller(["void(f4[::1],f4[::1],f4[::1],i8,f4[:])"], "(states),(three),(four),()->()")
 def reward_function(x, pset, motor_commands, global_step_counter,r): # now computes for a single state thing
     '''NOTE: paper uses orientation error, but is unclear as they use a scalar'''
     # reward scheduling
@@ -40,15 +39,6 @@ def reward_function(x, pset, motor_commands, global_step_counter,r): # now compu
     Cw = 0.0 # angular velocity weight
     Crs = 2 # reward for survival
     Cab = 0.334 # action baseline
-
-    # target parameters
-    # CpT = 1.2 # position weight
-    # CvT = .5 # velocity weight
-    # CqT = 2.5 # orientation weight
-    # CaT = .5 # action weight
-    # CwT = 0.0 # angular velocity weight
-    # CrsT = 2 # reward for survival
-    # CabT = 0.334 # action baseline
 
     # curriculum parameters
     Nc = 1e5 # interval of application of curriculum
@@ -69,31 +59,50 @@ def reward_function(x, pset, motor_commands, global_step_counter,r): # now compu
     omega = x[13:17]
 
     # curriculum
-    # curriculum
     if global_step_counter % Nc == 0:
         Cp = min(Cp*CpC, Cplim)
         Cv = min(Cv*CvC, Cvlim)
         Ca = min(Ca*CaC, Calim)
-    
-    # print(omega,motor_commands)
-    # print("position error: ", -Cp*np.linalg.norm(((pos-pset))**2))
-    # print("velocity error: ", -Cv*np.linalg.norm(vel)**2)
-    # # print("orientation error: ", -Cq*np.sum((1-q**2)))
-    # print("action error: ", -Ca*np.linalg.norm((motor_commands-Cab))**2)
-    # print("angular velocity error: ", -Cw*np.linalg.norm((qd))**2)
-    # print("reward for survival: ", Crs)
 
     # sum over axis 1, along position and NOT allong nr of drones
-    r[0] = -Cp*np.sum((pos-pset)**2) \
+    r[0] = max(-1e5,-Cp*np.sum((pos-pset)**2) \
             - Cv*np.sum((vel)**2) \
                 - Ca*np.sum((motor_commands-Cab)**2) \
                     - Cw*np.sum((qd)**2) \
-                        + Crs
-    # print(r[0])
+                        + Crs)
 
-#%% sim stepper
-@kerneller(["void(f4[::1], f4[::1], f4[::1], f4[::1], f4[:, ::1], f4[:, ::1], f4, i4, f4[:, ::1])"],
-            "(states),(n),(n),(n),(four,n),(one,n),(),(),(iters,states)")
+# sim reset function
+# @kerneller(["void(b1[::1],i4,f4[::1])"], "(one),(one)->(states)") # ,done,seed,states
+# def reset_subenvs(done,seed,states):
+#         '''Reset subenvs'''
+#         xs = np.random.random((17)).astype(np.float32) - 0.5
+#         xs[6:10] /= np.linalg.norm(xs[6:10]) # this is different from original
+
+#         # mask with done array
+#         xs = xs * (1-done) + xs * done # first sets dones o zero, then adds the new states with inverse zero mask (zeros everywhere but the relevant states)
+#         states[0] = xs.copy()
+
+# sim done function
+@kerneller(["void(f4[::1],b1[::1])"], "(states)->()")
+def check_done(xs,done):
+        '''Check if the episode is done'''
+        # if any velocity in the abs(self.xs) array is greater than 10 m/s, then the episode is done
+        # if any rotational velocity in the abs(self.xs) array is greater than 10 rad/s, then the episode is done
+        done[0] = False
+        if np.sum(np.isnan(xs))!=0:
+            print("something is nan...?!")
+            done[0] = True
+        if np.sum((np.abs(xs[3:6]) > 10)) +  np.sum((np.abs(xs[10:13]) > 20)) != 0: # if not zero at least one would be true
+            done[0] = True
+
+        # did it crash
+        if xs[2] < 0.0:
+            done[0] = True
+            
+        # done[0] = np.any(np.abs(xs[3:6]) > 10) or np.any(np.abs(xs[10:13]) > 10)
+
+# sim stepper
+@kerneller(["void(f4[::1], f4[::1], f4[::1], f4[::1], f4[:, ::1], f4[:, ::1], f4, i4, f4[:, ::1])"], "(states),(n),(n),(n),(four,n),(one,n),(),(),(iters,states)")
 def step(x, d, itau, wmax, G1, G2, dt, log_to_idx, x_log):
     #pos   = x[0:3]
     #vel   = x[3:6]
@@ -150,10 +159,8 @@ def step(x, d, itau, wmax, G1, G2, dt, log_to_idx, x_log):
         for j in range(17):
             x_log[log_to_idx, j] = x[j]
 
-
-#%% position controller
-@kerneller(["void(f4[::1], f4[::1], f4[::1], f4[::1], f4[::1], f4[:, ::1])"],
-            "(states),(n),(three),(three),(three),(n,four)")
+# position controller
+@kerneller(["void(f4[::1], f4[::1], f4[::1], f4[::1], f4[::1], f4[:, ::1])"],  "(states),(n),(three),(three),(three),(n,four)")
 def controller(x, d, posPs, velPs, pSets, G1pinv):
     '''
     x: state vector
@@ -245,11 +252,9 @@ def controller(x, d, posPs, velPs, pSets, G1pinv):
     for j in range(4):
         d[j] = 0. if d[j] < 0. else 1. if d[j] > 1. else d[j]
 
-
 # create actor
 single_actor = n.Actor_ANN(20,4,1)
-
-def controller_rl(x, d, posPs, velPs, pSets, G1pinv):
+def controller_rl(x, d, pSets, G1pinv):
     '''
     x: state vector
     d: output vector which returns the motor commands
@@ -261,5 +266,5 @@ def controller_rl(x, d, posPs, velPs, pSets, G1pinv):
     x = np.hstack((x, pSets))
 
 
-    d = single_actor.forward(x)
+    d = single_actor.forward(x).detach().numpy()
     return d

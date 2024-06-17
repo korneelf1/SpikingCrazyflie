@@ -2,7 +2,7 @@ import torch
 
 
 class Actor_ANN(torch.nn.Module):
-    def __init__(self, state_dim, action_dim, max_action):
+    def __init__(self, state_dim, action_dim, max_action=1):
         super(Actor_ANN, self).__init__()
 
         self.layer_1 = torch.nn.Linear(state_dim, 400)
@@ -15,7 +15,7 @@ class Actor_ANN(torch.nn.Module):
         state =  torch.from_numpy(state).float()
         a = torch.nn.ReLU()(self.layer_1(state))
         a = torch.nn.ReLU()(self.layer_2(a))
-        return self.max_action * torch.nn.Tanh()(self.layer_3(a))
+        return self.max_action * torch.nn.Sigmoid()(self.layer_3(a))
     
 class Critic_ANN(torch.nn.Module):
     def __init__(self, state_dim, action_dim):
