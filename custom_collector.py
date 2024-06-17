@@ -416,7 +416,7 @@ class ParallelCollector(Collector):
             start_time = time.time()
 
             # interact with environment
-            obs, act, rew, dones, obs_next, info = self.env.step_rollout(self.policy, n_step=n_step)
+            obs, act, rew, dones, obs_next, info = self.env.step_rollout(self.policy, n_step=n_step, tianshou_policy=True)
             print("Collection itself: ", time.time()-start_time)
 
             # add rollout into the replay buffer, cut it up into single transitions
@@ -477,59 +477,42 @@ if __name__ == "__main__":
     from gym_sim import Drone_Sim
     import torch.nn as nn
     from tianshou.policy import SACPolicy
-    from tianshou.utils.net.continuous import Actor, Critic
-
-    class Net(nn.Module):
-        def __init__(self, obs_shape, action_shape):
-            super().__init__()
-            self.model = nn.Sequential(
-                nn.Linear(obs_shape, 128), nn.ReLU(inplace=True),
-
-                nn.Linear(128, action_shape),
-            )
-
-        def forward(self, obs, state=None, info={}):
-            obs = torch.tensor(obs, dtype=torch.float32)
-            return self.model(obs), None
-    class Cont_Actor(nn.Module):
-        def __init__(self, obs_shape, action_shape):
-            super().__init__()
-            self.model = nn.Sequential(
-                nn.Linear(obs_shape, 128), nn.ReLU(inplace=True),
-            )
-            self.means = nn.Linear(128, action_shape)
-            self.log_stds = nn.Linear(128, action_shape)
-
-        def forward(self, obs, state=None, info={},cheat=True):
-            obs = torch.tensor(obs, dtype=torch.float32)
-            hid = self.model(obs)
-            means = self.means(hid)
-            log_stds = self.log_stds(hid)
-            log_stds = torch.clamp(nn.ReLU()(log_stds),min=1e-3, max=1)
-            means = torch.clamp(nn.ReLU()(means),min=1e-3, max=1)
-            if cheat:
-                means = torch.ones_like(means)*.3
-                log_stds = torch.ones_like(log_stds)*.01
-            return (means,log_stds), None
+    from tianshou.utils.net.continuous import ActorProb, Critic
+    from tianshou.utils.net.common import Net
 
     N_envs = 100
     env = Drone_Sim(N_cpu=N_envs, action_buffer=False)
     import networks as n
     policy = n.Actor_ANN(17,4,1)
     
+    observation_space = env.observation_space.shape or env.observation_space.n
+    action_space = env.action_space.shape or env.action_space.n
 
-    # actor = Actor(action_shape=env.action_space,)
-    # critic = Critic(action_shape= env.action_space)
-    # critic2 = Critic(action_shape= env.action_space)
+    net_a = Net(state_shape=observation_space,
+                hidden_sizes=[64,64], device='cpu')
+    actor = ActorProb(
+        net_a,
+        action_space,
+        unbounded=True,
+        conditioned_sigma=True,
+    )
+    net_c1 = Net(state_shape=observation_space,action_shape=action_space,
+                 hidden_sizes=[64,64],
+                 concat=True,)
+    net_c2 = Net(state_shape=observation_space,action_shape=action_space,
+                 hidden_sizes=[64,64],
+                 concat=True,)
+    critic1 = Critic(net_c1, device='cpu')
+    critic2 = Critic(net_c2, device='cpu')
 
-    # actor_optim = torch.optim.Adam(actor.parameters(), lr=1e-3)
-    # critic_optim = torch.optim.Adam(critic.parameters(), lr=1e-3)
-    # critic2_optim = torch.optim.Adam(critic2.parameters(), lr=1e-3)
+    actor_optim = torch.optim.Adam(actor.parameters(), lr=1e-3)
+    critic_optim = torch.optim.Adam(critic1.parameters(), lr=1e-3)
+    critic2_optim = torch.optim.Adam(critic2.parameters(), lr=1e-3)
 
-    # policy = SACPolicy(actor=actor, actor_optim=actor_optim, \
-    #                    critic=critic, critic_optim=critic_optim,\
-    #                     critic2=critic2, critic2_optim=critic2_optim\
-    #                         ,action_space=env.action_space,observation_space=env.observation_space)
+    policy = SACPolicy(actor=actor, actor_optim=actor_optim, \
+                       critic=critic1, critic_optim=critic_optim,\
+                        critic2=critic2, critic2_optim=critic2_optim\
+                            ,action_space=env.action_space,observation_space=env.observation_space, action_scaling=True)
 
     buffer=VectorReplayBuffer(total_size=200000,buffer_num=N_envs, stack_num=1)
     collector = ParallelCollector(policy=policy, env=env, buffer=buffer)
@@ -547,4 +530,4 @@ if __name__ == "__main__":
     print("Speedup: ", t_ind/t_roll)
 
     sample = buffer.sample(2)
-    print(sample, len(sample))
+    # print(sample, len(sample))

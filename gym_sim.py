@@ -22,7 +22,7 @@ from helpers import NumpyDeque
 GRAVITY = 9.80665
 print('\nNOTE NOW REWARD IS MODIFIED TO JUST MAKE STABILIZING CONTROLLER (DISREGARDING ANY POSITIONS)\n')
 class Drone_Sim(gym.Env):
-    def __init__(self, gpu=False, drone='CrazyFlie', action_buffer=True, dt=0.01, T=2, N_cpu=1, spiking_model=None):
+    def __init__(self, gpu=False, drone='CrazyFlie', action_buffer=True,action_buffer_len=32, dt=0.01, T=2, N_cpu=1, spiking_model=None):
         super(Drone_Sim, self).__init__()
         '''
         Vectorized quadrotor simulation with websocket pose output
@@ -32,7 +32,7 @@ class Drone_Sim(gym.Env):
             gpu (bool): run on the gpu using cuda
             drone (str): 'CrazyFlie' or 'Default'
             dt (float): step time is dt seconds (forward Euler)
-            T (float): run for T seconds
+            T (float): run for T seconds NOT USED
             N_cpu (int): number of simulations to run in parallel
             spiking_model (object): spiking model, which will be reset at environment reset (spiking_model.reset_hidden())
             '''
@@ -57,8 +57,8 @@ class Drone_Sim(gym.Env):
 
         
         if action_buffer: # add last 25 inputs as observation
-            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(117,), dtype=np.float32)
-            self.action_history = NumpyDeque((self.N,100)) # 25 timesteps, 4 actions
+            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(4*action_buffer_len+17,), dtype=np.float32)
+            self.action_history = NumpyDeque((self.N,4*action_buffer_len)) # 25 timesteps, 4 actions
 
         else:
         # create gymnasium observation and action space
@@ -211,7 +211,7 @@ class Drone_Sim(gym.Env):
         NOTE: currently not used'''	
         if self.action_buffer:
             self.xs_log = np.empty(
-            (self.N, self.Nlog, 117), dtype=np.float32)
+            (self.N, self.Nlog, 17+len(self.action_history)), dtype=np.float32)
         else:
             self.xs_log = np.empty(
                 (self.N, self.Nlog, 17), dtype=np.float32)
@@ -221,6 +221,8 @@ class Drone_Sim(gym.Env):
         '''Simulates a single step using gpu or cpu kernels'''
         self.log_idx =0
         # make sure xs is float32
+        if np.min(self.us)<0.0 or np.max(self.us)>1.0:
+            raise RuntimeWarning('Action is not in action space!')
         self.xs = self.xs.astype(np.float32)
         if self.gpu:
             self.kernel_step[self.blocks,self.threads_per_block](self.d_xs, self.d_us, self.d_itaus, self.d_omegaMaxs, self.d_G1s, self.d_G2s, self.dt, self.log_idx, self.d_xs_log)
@@ -314,7 +316,7 @@ class Drone_Sim(gym.Env):
         if enable_reset:
             self._reset_subenvs(numba_opt=False)
 
-    async def _step_rollout(self, policy, nr_steps):
+    async def _step_rollout(self, policy, nr_steps,tianshou_policy=False):
         '''
         Collects a series of rollouts, 
         policy: is tianshou policy that uses act method for interaction
@@ -338,8 +340,8 @@ class Drone_Sim(gym.Env):
         print("Running simulation for ", iters, " steps, with ", self.N, " drones")
 
         if self.action_buffer:
-            obs_arr = np.zeros((iters, self.N, 17+25*4), dtype=np.float32)
-            obs_next_arr = np.zeros((iters, self.N, 17+25*4), dtype=np.float32)
+            obs_arr = np.zeros((iters, self.N, 17+len(self.action_history)), dtype=np.float32)
+            obs_next_arr = np.zeros((iters, self.N, 17+len(self.action_history)), dtype=np.float32)
         else:
             obs_arr = np.zeros((iters, self.N, 17), dtype=np.float32)
             obs_next_arr = np.zeros((iters, self.N, 17), dtype=np.float32)
@@ -374,12 +376,18 @@ class Drone_Sim(gym.Env):
 
             with torch.no_grad():
                 # self.us = to_numpy(policy(Batch(obs=self.xs, info={})).act)
-                if self.action_buffer:
-                    self.us = to_numpy(policy(np.concatenate((self.xs[:,0:17],self.action_history.array),axis=1,dtype=np.float32)))
+                if tianshou_policy:
+                    if self.action_buffer:
+                        self.us = to_numpy(policy.map_action(policy(Batch({'obs':np.concatenate((self.xs[:,0:17],self.action_history.array),axis=1,dtype=np.float32), 'info':{}})).act))
+                    else:
+                        self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.xs, 'info':{}})).act))
                 else:
-                    self.us = to_numpy(policy(self.xs))
-
-                act_arr[i] =self.us
+                    if self.action_buffer:
+                        self.us = to_numpy(policy(np.concatenate((self.xs[:,0:17],self.action_history.array),axis=1,dtype=np.float32)))
+                    else:
+                        self.us = to_numpy(policy(self.xs))
+                
+                act_arr[i] = self.us
             
             self._reset_subenvs(numba_opt=False)
 
@@ -421,20 +429,21 @@ class Drone_Sim(gym.Env):
 
         return self.xs,self.r, self.done,self.done, {}
    
-    def step_rollout(self, policy, n_step = 1e3, numba_policy=False):
+    def step_rollout(self, policy, n_step = 1e3, numba_policy=False, tianshou_policy=False):
         '''Step function for collecting and entire rollout, which can be faster in this vectorized environment
         policy: is tianshou policy that uses:
          action = policy.act(observation) method for interaction
         NOTE: you need random steps for exploration, in this case, the policy will be a stochastic SNN, so it is inherrent in the policy'''
         if numba_policy:
             print("gotta fix this!")
-        return asyncio.run(self._step_rollout(policy,nr_steps=n_step))
+        return asyncio.run(self._step_rollout(policy,nr_steps=n_step,tianshou_policy=tianshou_policy))
     
     def render(self, mode='human'):
         pass
 
 global jitter; global kerneller
 gpu = torch.cuda.is_available()
+gpu = False
 print(gpu)
 # debug mode
 if gpu:
@@ -456,13 +465,13 @@ if __name__ == "__main__":
     
     print("Environment created!")
 
-    iters = int(1e4)
+    iters = int(1e3)
     sim.reset()
     # create actor
     t0 = time()
     t_steps = []
     import networks as n
-    policy = n.Actor_ANN(117,4,1)
+    policy = n.Actor_ANN(sim.observation_space.shape[0],4,1)
     print("\nTest step_rollout")
     sim.step_rollout(policy=policy, n_step=iters)
     # t_steps.append(time()-t_step)
