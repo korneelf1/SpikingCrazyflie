@@ -34,8 +34,6 @@ from numba import cuda
 import gymnasium as gym
 import torch
 from tianshou.data import to_numpy, Batch
-# from stable_baselines3.common.vec_env.base_vec_env import VecEnv, VecEnvStepReturn, VecEnvWrapper
-from stable_baselines3.common.vec_env.base_vec_env import VecEnv, VecEnvIndices, VecEnvObs, VecEnvStepReturn
 
 GRAVITY = 9.80665
 
@@ -164,19 +162,28 @@ class Drone_Sim(gym.Env):
 
     @property
     def n(self):
+        '''
+        Number of drones that are simulated.'''
         return self.N
     
     @property
     def num_envs(self):
+        '''
+        Number of drones that are simulated.'''
         return self.N
     
     def __len__(self):
+        '''
+        Number of drones that are simulated.'''
         return self.N
     
     def _create_drones(self, og_drones=False):
         '''Creates drones, crazyflies
         parameters retrieved from:
         https://github.com/arplaboratory/learning_to_fly_media/blob/ae72456e879137b840b9dfde366253886c3ec131/parameters.pdf
+
+        Args:   
+            og_drones (bool): if True, simulates the drones from the original FastPyDroneSim, else CrazyFlie
         '''
         # OG drone data
         if og_drones:
@@ -218,14 +225,15 @@ class Drone_Sim(gym.Env):
 
                 q.fillArrays(i, self.G1s, self.G2s, self.omegaMaxs, self.taus)
 
-
     def _create_logs(self,):
-        '''Creates logs'''	
+        '''Creates logs
+        NOTE: currently not used'''	
         self.xs_log = np.empty(
             (self.N, self.Nlog, 17), dtype=np.float32)
         self.xs_log[:] = np.nan
 
     def _simulate_step(self):
+        '''Simulates a single step using gpu or cpu kernels'''
         self.log_idx =0
         # make sure xs is float32
         self.xs = self.xs.astype(np.float32)
@@ -243,7 +251,7 @@ class Drone_Sim(gym.Env):
             self.reward_function(self.xs, self.pSets, self.us, self.global_step_counter,self.r)
              
     def _check_done(self, numba_opt = True):
-        '''Check if the episode is done'''
+        '''Check if the episode is done, sets done array to True for respective environments.'''
         if numba_opt:
             self.check_done(self.xs, self.done)
             # self.done = np.expand_dims(self.done, axis=1)
@@ -269,7 +277,8 @@ class Drone_Sim(gym.Env):
         cuda.synchronize()
 
     def _reset_subenvs(self, numba_opt = True, seed = None):
-        '''Reset subenvs'''
+        '''Reset subenvs, uses the done array
+        NOTE: First call _check_done()'''
         if numba_opt:
             raise NotImplementedError("This function is not implemented yet, see dones!")
             self.reset_subenvs(self.done, seed,self.xs)
@@ -284,7 +293,13 @@ class Drone_Sim(gym.Env):
             # load in states into self.xs
             # self.xs = xs_new.copy()
 
-    async def _step(self):
+    async def _step(self, enable_reset = True):
+        '''
+        Perform a step:
+        Simulate step
+        Compute reward
+        Check if any env is done
+        Reset respective envs'''
         self.episode_counter += 1
         self.global_step_counter += 1
         
@@ -297,7 +312,7 @@ class Drone_Sim(gym.Env):
         self._compute_reward()
         
         self._check_done()
-        print(self.done)
+        # print(self.done)
 
         # self.termination(self.xs, self.done)
         # make sure all threads complete before stopping the count
@@ -306,13 +321,23 @@ class Drone_Sim(gym.Env):
 
         if self.gpu and (self.log_interval > 0):
             self.xs_log[:] = self.d_xs_log.copy_to_host()
-        self._reset_subenvs(numba_opt=False)
+        
+        if enable_reset:
+            self._reset_subenvs(numba_opt=False)
 
     async def _step_rollout(self, policy, nr_steps):
         '''
         Collects a series of rollouts, 
         policy: is tianshou policy that uses act method for interaction
         nr_steps: number of steps to collect
+
+        Stores info in arrays.
+
+        To perform a step
+        Simulate step
+        Compute reward
+        Check if any env is done
+        Reset respective envs
         '''
         # if True:
         #     raise NotImplementedError("This function is not implemented yet, see dones!")
@@ -393,12 +418,12 @@ class Drone_Sim(gym.Env):
         # YOU CAN RESET YOUR MODEL IN THE ENVIRONMENT RESET FUNCTION!!!!!!!
         return self.xs,{} # state, info
                 
-    def step(self, action):
+    def step(self, action, enable_reset=True):
         '''Step function for gym'''
         self.us = action
         # self.done =np.zeros((self.N,1),dtype=bool)
         # done = self._check_done()
-        asyncio.run(self._step())
+        asyncio.run(self._step(enable_reset=enable_reset))
 
         # if self.action_buffer:
         #     self.action_history.append(np.array(action).reshape(self.N,4))
@@ -461,8 +486,10 @@ if __name__ == "__main__":
     t0 = time()
     
     for i in tqdm(range(iters), desc="Running simulation steps"):
-        sim.step(policy(sim.xs).detach().numpy().astype(np.float32))
+        # sim.step(policy(sim.xs).detach().numpy().astype(np.float32), enable_reset=False)
+        sim.step(sim.us,enable_reset=True)
         controller(sim.xs, sim.us,posPs, velPs, sim.pSets,G1pinvs)
+
     # t_steps.append(time()-t_step)
       
         # sim._compute_reward()
