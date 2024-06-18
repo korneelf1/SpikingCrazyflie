@@ -71,6 +71,12 @@ def reward_function(x, pset, motor_commands, global_step_counter,r): # now compu
                     - Cw*np.sum((qd)**2) \
                         + Crs)
 
+    # # no position penalty
+    # r[0] = max(-1e5,- Cv*np.sum((vel)**2) \
+    #         - Ca*np.sum((motor_commands-Cab)**2) \
+    #             - Cw*np.sum((qd)**2) \
+    #                 + Crs)
+
 # sim reset function
 # @kerneller(["void(b1[::1],i4,f4[::1])"], "(one),(one)->(states)") # ,done,seed,states
 # def reset_subenvs(done,seed,states):
@@ -96,10 +102,19 @@ def check_done(xs,done):
             done[0] = True
 
         # did it crash
-        if xs[2] < 0.0:
-            done[0] = True
+        # if xs[2] < 0.0:
+        #     done[0] = True
             
         # done[0] = np.any(np.abs(xs[3:6]) > 10) or np.any(np.abs(xs[10:13]) > 10)
+
+
+
+        # did it crash
+        # if xs[2] < 0.0:
+        #     done[0] = True
+            
+        # done[0] = np.any(np.abs(xs[3:6]) > 10) or np.any(np.abs(xs[10:13]) > 10)
+
 
 # sim stepper
 @kerneller(["void(f4[::1], f4[::1], f4[::1], f4[::1], f4[:, ::1], f4[:, ::1], f4, i4, f4[:, ::1])"], "(states),(n),(n),(n),(four,n),(one,n),(),(),(iters,states)")

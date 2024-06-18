@@ -20,7 +20,7 @@ from tianshou.data import to_numpy, Batch
 from helpers import NumpyDeque
 
 GRAVITY = 9.80665
-print('\nNOTE NOW REWARD IS MODIFIED TO JUST MAKE STABILIZING CONTROLLER (DISREGARDING ANY POSITIONS)\n')
+# print('\nNOTE NOW REWARD IS MODIFIED TO JUST MAKE STABILIZING CONTROLLER (DISREGARDING ANY POSITIONS)\n')
 class Drone_Sim(gym.Env):
     def __init__(self, gpu=False, drone='CrazyFlie', action_buffer=True,action_buffer_len=32, dt=0.01, T=2, N_cpu=1, spiking_model=None):
         super(Drone_Sim, self).__init__()
@@ -316,7 +316,7 @@ class Drone_Sim(gym.Env):
         if enable_reset:
             self._reset_subenvs(numba_opt=False)
 
-    async def _step_rollout(self, policy, nr_steps,tianshou_policy=False):
+    async def _step_rollout(self, policy, nr_steps,tianshou_policy=False, test=False):
         '''
         Collects a series of rollouts, 
         policy: is tianshou policy that uses act method for interaction
@@ -369,7 +369,9 @@ class Drone_Sim(gym.Env):
             self._compute_reward()
 
             rew_arr[i] = self.r
-            
+            if test:
+                print('Reward: \taverage: ',np.mean(self.r),\
+                    '\tmax: ',np.max(self.r), '\tmin: ', np.min(self.r))
             self._check_done()
             done_arr[i] = self.done
             # print(self.done)
@@ -429,14 +431,14 @@ class Drone_Sim(gym.Env):
 
         return self.xs,self.r, self.done,self.done, {}
    
-    def step_rollout(self, policy, n_step = 1e3, numba_policy=False, tianshou_policy=False):
+    def step_rollout(self, policy, n_step = 1e3, numba_policy=False, tianshou_policy=False, test=False):
         '''Step function for collecting and entire rollout, which can be faster in this vectorized environment
         policy: is tianshou policy that uses:
          action = policy.act(observation) method for interaction
         NOTE: you need random steps for exploration, in this case, the policy will be a stochastic SNN, so it is inherrent in the policy'''
         if numba_policy:
             print("gotta fix this!")
-        return asyncio.run(self._step_rollout(policy,nr_steps=n_step,tianshou_policy=tianshou_policy))
+        return asyncio.run(self._step_rollout(policy,nr_steps=n_step,tianshou_policy=tianshou_policy, test=test))
     
     def render(self, mode='human'):
         pass

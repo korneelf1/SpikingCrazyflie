@@ -23,9 +23,94 @@ import numba as nb
 from numba import cuda
 from math import sqrt, acos, hypot
 import numpy as np
+import cmath
+
+# check done
+@kerneller("void(f4[:, ::1],b1[:, ::1])")
+def check_done(xs,done):
+        '''Check if the episode is done
+        if any velocity in the abs(self.xs) array is greater than 10 m/s, then the episode is done
+        if any rotational velocity in the abs(self.xs) array is greater than 10 rad/s, then the episode is done'''
+        i1 = cuda.grid(1)
+
+        x_local = cuda.local.array(17, dtype=nb.float32)
+        for j in range(0,17):
+            x_local[j] = xs[i1, j]
+        
+        done[i1,0] = False
+        for i in x_local:
+            if cmath.isnan(i):
+                done[i1,0] = True
+                break
+
+        if not done[i1,0]:
+            for i in x_local[3:6]:
+                if abs(i)>10:
+                    done[i1,0] = True
+                    break
+        if not done[i1,0]:
+            for i in x_local[10:13]:
+                if abs(i)>20:
+                    done[i1,0] = True
+                    break
+# sim reward function
+@kerneller("void(f4[:, ::1],f4[:, ::1],f4[:, ::1],i8,f4[:, ::1])")
+def reward_function(x, pset, motor_commands, global_step_counter,r): # now computes for a single state thing
+    '''NOTE: paper uses orientation error, but is unclear as they use a scalar'''
+    # reward scheduling
+    # intial parameters
+    Cp = 2.5 # position weight
+    Cv = .005 # velocity weight
+    Cq = 2.5 # orientation weight
+    Ca = .005 # action weight
+    Cw = 0.0 # angular velocity weight
+    Crs = 2 # reward for survival
+    Cab = 0.334 # action baseline
+
+    # curriculum parameters
+    Nc = 1e5 # interval of application of curriculum
+
+    CpC = 1.2 # position factor
+    Cplim = 20 # position limit
+
+    CvC = 1.4 # velocity factor
+    Cvlim = .5 # velocity limit
+
+    CaC = 1.4 # orientation factor
+    Calim = .5 # orientation limit
+
+    i1 = cuda.grid(1)
+
+    x_local = cuda.local.array(17, dtype=nb.float32)
+    for j in range(0,17):
+        x_local[j] = x[i1, j]
+    
+    pos   = x_local[0:3]
+    vel   = x_local[3:6]
+    q     = x_local[6:10]
+    qd    = x_local[10:13]
+    omega = x_local[13:17]
+    # curriculum
+    if global_step_counter % Nc == 0:
+        Cp = min(Cp*CpC, Cplim)
+        Cv = min(Cv*CvC, Cvlim)
+        Ca = min(Ca*CaC, Calim)
+
+    # sum over axis 1, along position and NOT allong nr of drones
+    # r[0] = max(-1e5,-Cp*np.sum((pos-pset)**2) \
+    #         - Cv*np.sum((vel)**2) \
+    #             - Ca*np.sum((motor_commands-Cab)**2) \
+    #                 - Cw*np.sum((qd)**2) \
+    #                     + Crs)
+
+    # no position penalty
+    r[i1,0] = max(-1e5,- Cv*np.sum((vel)**2) \
+            - Ca*np.sum((motor_commands-Cab)**2) \
+                - Cw*np.sum((qd)**2) \
+                    + Crs)
 
 
-#%% sim stepper
+# sim stepper
 @kerneller("void(f4[:, ::1], f4[:, ::1], f4[:, ::1], f4[:, ::1], f4[:, :, ::1], f4[:, :, ::1], f4, i4, f4[:, :, ::1])")
 def step(x, d, itau, wmax, G1, G2, dt, log_to_idx, x_log):
     i1 = cuda.grid(1)

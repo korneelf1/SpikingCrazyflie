@@ -15,6 +15,8 @@ from tianshou.data import (
     VectorReplayBuffer,
     CachedReplayBuffer,
     to_numpy,
+    CollectStats,
+    SequenceSummaryStats
 )
 from tianshou.data import Collector
 
@@ -177,66 +179,69 @@ class ParallelCollector(Collector):
                 state.empty_(id)
 
     def collect(
-            self,
-            n_step: Optional[int] = None,
-            n_episode: Optional[int] = None,
-            random: bool = False,
-            render: Optional[float] = None,
-            no_grad: bool = True,
-        ) -> Dict[str, Any]:
-            """Collect a specified number of step or episode.
+        self,
+        n_step: Optional[int] = None,
+        n_episode: Optional[int] = None,
+        random: bool = False,
+        render: Optional[float] = None,
+        no_grad: bool = True,
+        default: bool = False
+    ) -> Dict[str, Any]:
+        """Collect a specified number of step or episode.
 
-            To ensure unbiased sampling result with n_episode option, this function will
-            first collect ``n_episode - env_num`` episodes, then for the last ``env_num``
-            episodes, they will be collected evenly from each env.
+        To ensure unbiased sampling result with n_episode option, this function will
+        first collect ``n_episode - env_num`` episodes, then for the last ``env_num``
+        episodes, they will be collected evenly from each env.
 
-            :param int n_step: how many steps you want to collect.
-            :param int n_episode: how many episodes you want to collect.
-            :param bool random: whether to use random policy for collecting data. Default
-                to False.
-            :param float render: the sleep time between rendering consecutive frames.
-                Default to None (no rendering).
-            :param bool no_grad: whether to retain gradient in policy.forward(). Default to
-                True (no gradient retaining).
+        :param int n_step: how many steps you want to collect.
+        :param int n_episode: how many episodes you want to collect.
+        :param bool random: whether to use random policy for collecting data. Default
+            to False.
+        :param float render: the sleep time between rendering consecutive frames.
+            Default to None (no rendering).
+        :param bool no_grad: whether to retain gradient in policy.forward(). Default to
+            True (no gradient retaining).
+        :param bool default: whether to use original implementation or custom accelerated implementations
 
-            .. note::
 
-                One and only one collection number specification is permitted, either
-                ``n_step`` or ``n_episode``.
+        .. note::
 
-            :return: A dict including the following keys
+            One and only one collection number specification is permitted, either
+            ``n_step`` or ``n_episode``.
 
-                * ``n/ep`` collected number of episodes.
-                * ``n/st`` collected number of steps.
-                * ``rews`` array of episode reward over collected episodes.
-                * ``lens`` array of episode length over collected episodes.
-                * ``idxs`` array of episode start index in buffer over collected episodes.
-            """
-            # assert not self.env.is_async, "Please use AsyncCollector if using async venv."
-            
-            if n_step is not None:
-                assert n_episode is None, (
-                    f"Only one of n_step or n_episode is allowed in Collector."
-                    f"collect, got n_step={n_step}, n_episode={n_episode}."
+        :return: A dict including the following keys
+
+            * ``n/ep`` collected number of episodes.
+            * ``n/st`` collected number of steps.
+            * ``rews`` array of episode reward over collected episodes.
+            * ``lens`` array of episode length over collected episodes.
+            * ``idxs`` array of episode start index in buffer over collected episodes.
+        """
+        # assert not self.env.is_async, "Please use AsyncCollector if using async venv."
+        
+        if n_step is not None:
+            assert n_episode is None, (
+                f"Only one of n_step or n_episode is allowed in Collector."
+                f"collect, got n_step={n_step}, n_episode={n_episode}."
+            )
+            assert n_step > 0
+            if not n_step % self.env_num == 0:
+                warnings.warn(
+                    f"n_step={n_step} is not a multiple of #env ({self.env_num}), "
+                    "which may cause extra transitions collected into the buffer."
                 )
-                assert n_step > 0
-                if not n_step % self.env_num == 0:
-                    warnings.warn(
-                        f"n_step={n_step} is not a multiple of #env ({self.env_num}), "
-                        "which may cause extra transitions collected into the buffer."
-                    )
-                ready_env_ids = np.arange(self.env_num)
-            elif n_episode is not None:
-                assert n_episode > 0
-                assert n_episode % self.env_num == 0, (
-                    f"n_episode={n_episode} is not a multiple of #env ({self.env_num})."
-                )
-                ready_env_ids = np.arange(min(self.env_num, n_episode))
-                self.data = self.data[:min(self.env_num, n_episode)]
-            else:
-                raise TypeError("Please specify at least one (either n_step or n_episode) "
-                                "in AsyncCollector.collect().")
-
+            ready_env_ids = np.arange(self.env_num)
+        elif n_episode is not None:
+            assert n_episode > 0
+            assert n_episode % self.env_num == 0, (
+                f"n_episode={n_episode} is not a multiple of #env ({self.env_num})."
+            )
+            ready_env_ids = np.arange(min(self.env_num, n_episode))
+            self.data = self.data[:min(self.env_num, n_episode)]
+        else:
+            raise TypeError("Please specify at least one (either n_step or n_episode) "
+                            "in AsyncCollector.collect().")
+        if default:
             start_time = time.time()
 
             step_count = 0
@@ -351,14 +356,21 @@ class ParallelCollector(Collector):
             else:
                 rews, lens, idxs = np.array([]), np.array([], np.int16), np.array([], np.int16)
 
-            return {
-                "n/ep": episode_count,
-                "n/st": step_count,
-                "rews": rews,
-                "lens": lens,
-                "idxs": idxs,
-            }
-
+            # return {
+            #     "n/ep": episode_count,
+            #     "n/st": step_count,
+            #     "rews": rews,
+            #     "lens": lens,
+            #     "idxs": idxs,
+            # }
+        else:
+            if n_step is not None:
+                result = self.collect_rollout(n_step=n_step)
+            else:
+                n_step = n_episode*self.env_num
+                result = self.collect_rollout(n_step=n_step)
+        return result
+    
     def collect_rollout(
             self,
             n_step: Optional[int] = None,
@@ -450,7 +462,7 @@ class ParallelCollector(Collector):
 
             # generate statistics
             self.collect_step += step_count
-            self.collect_episode += episode_count
+            self.collect_episode += episode_count + np.sum(dones) # how often done
             self.collect_time += max(time.time() - start_time, 1e-9)
 
             if n_episode:
@@ -463,15 +475,30 @@ class ParallelCollector(Collector):
             #         np.concatenate, [episode_rews, episode_lens, episode_start_indices]))
             # else:
             #     rews, lens, idxs = np.array([]), np.array([], np.int16), np.array([], np.int16)
-
-            return {
-                "n/ep": episode_count,
-                "n/st": step_count,
-                # "rews": rews,
-                # "lens": lens,
-                # "idxs": idxs,
-            }
-
+            # compute lens
+            lens = []
+            len_cur = 0
+            for i in range(dones.shape[0]):
+                for j in range(dones.shape[1]):
+                    if dones[i,j] != 0:
+                        len_cur+=1
+                    else:
+                        lens.append(len_cur)
+                        len_cur = 0
+            return CollectStats(
+                n_collected_episodes=episode_count,
+                n_collected_steps=step_count,
+                collect_time=self.collect_time,
+                collect_speed=step_count / self.collect_time,
+                returns=np.array(rew),
+                returns_stat=SequenceSummaryStats.from_sequence(rew)
+                if len(rew) > 0
+                else None,
+                lens=np.array(lens, int),
+                lens_stat=SequenceSummaryStats.from_sequence(lens)
+                if len(lens) > 0
+                else None,
+            )
 
 if __name__ == "__main__":
     from gym_sim import Drone_Sim
