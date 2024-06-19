@@ -3,7 +3,7 @@ import time
 import torch
 import warnings
 import numpy as np
-from typing import Any, Dict, List, Union, Optional, Callable
+from typing import Any, Dict, List, Union, Optional, Callable, cast
 
 from tianshou.policy import BasePolicy
 # from tianshou.data.batch import _alloc_by_keys_diff
@@ -19,6 +19,7 @@ from tianshou.data import (
     SequenceSummaryStats
 )
 from tianshou.data import Collector
+from tianshou.data.types import RolloutBatchProtocol
 
 class StackPreprocessor:
     def __init__(self, stack_num: int, data_key: str = "obs") -> None:
@@ -193,7 +194,8 @@ class ParallelCollector(Collector):
         random: bool = False,
         render: Optional[float] = None,
         no_grad: bool = True,
-        default: bool = False
+        default: bool = False,
+        gym_reset_kwargs: dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         """Collect a specified number of step or episode.
 
@@ -217,13 +219,7 @@ class ParallelCollector(Collector):
             One and only one collection number specification is permitted, either
             ``n_step`` or ``n_episode``.
 
-        :return: A dict including the following keys
-
-            * ``n/ep`` collected number of episodes.
-            * ``n/st`` collected number of steps.
-            * ``rews`` array of episode reward over collected episodes.
-            * ``lens`` array of episode length over collected episodes.
-            * ``idxs`` array of episode start index in buffer over collected episodes.
+        :return: A dataclass object
         """
         # assert not self.env.is_async, "Please use AsyncCollector if using async venv."
         
@@ -249,7 +245,8 @@ class ParallelCollector(Collector):
         else:
             raise TypeError("Please specify at least one (either n_step or n_episode) "
                             "in AsyncCollector.collect().")
-        if default:
+        
+        if default or n_episode is not None:
             start_time = time.time()
 
             step_count = 0
@@ -257,6 +254,8 @@ class ParallelCollector(Collector):
             episode_rews = []
             episode_lens = []
             episode_start_indices = []
+            episode_returns: list[float] = []
+
 
             while True:
                 assert len(self.data) == len(ready_env_ids)
@@ -287,8 +286,9 @@ class ParallelCollector(Collector):
                     
                     self.data.update(policy=policy, act=act)
 
+                action_remap = self.policy.map_action(self.data.act)
                 # step in env
-                obs_next, rew, done,_, info = self.env.step(np.array(self.data.act,dtype=np.float32))
+                obs_next, rew, done,_, info = self.env.step(np.array(action_remap,dtype=np.float32))
 
                 self.data.update(obs_next=obs_next, rew=rew, terminated=done, truncated=done, info=info)
                 if self.preprocess_fn:
@@ -319,17 +319,14 @@ class ParallelCollector(Collector):
                 if np.any(done):
                     env_ind_local = np.where(done)[0]
                     env_ind_global = ready_env_ids[env_ind_local]
-                    # episode_count += len(env_ind_local)
-                    episode_count += np.sum(done)
-                    episode_lens.append(ep_len[env_ind_local])
-                    episode_rews.append(ep_rew[env_ind_local])
-                    episode_start_indices.append(ep_idx[env_ind_local])
+                    episode_count += len(env_ind_local)
+                    episode_lens.extend(ep_len[env_ind_local])
+                    episode_returns.extend(ep_rew[env_ind_local])
+                    episode_start_indices.extend(ep_idx[env_ind_local])
                     # now we copy obs_next to obs, but since there might be
                     # finished episodes, we have to reset finished envs first.
-                    obs_reset = self.env.reset(int(np.mean(env_ind_global)))
-                    if self.preprocess_fn:
-                        obs_reset = self.preprocess_fn(obs=obs_reset).get("obs", obs_reset)
-                    self.data.obs_next[env_ind_local] = obs_reset[0]
+                    self.env._reset_subenvs(numba_opt=False)
+                    # self._reset_env_with_ids(env_ind_local, env_ind_global, gym_reset_kwargs)
                     for i in env_ind_local:
                         self._reset_state(i)
 
@@ -338,7 +335,7 @@ class ParallelCollector(Collector):
                     if n_episode:
                         surplus_env_num = len(ready_env_ids) - (n_episode - episode_count)
                         if surplus_env_num > 0:
-                            mask = np.ones_like(ready_env_ids, np.bool)
+                            mask = np.ones_like(ready_env_ids, dtype=bool)
                             mask[env_ind_local[:surplus_env_num]] = False
                             ready_env_ids = ready_env_ids[mask]
                             self.data = self.data[mask]
@@ -352,38 +349,47 @@ class ParallelCollector(Collector):
             # generate statistics
             self.collect_step += step_count
             self.collect_episode += episode_count
-            self.collect_time += max(time.time() - start_time, 1e-9)
+            collect_time = max(time.time() - start_time, 1e-9)
+            self.collect_time += collect_time
 
             if n_episode:
-                self.data = Batch(obs={}, act={}, rew={}, done={},
-                                obs_next={}, info={}, policy={})
+                data = Batch(
+                    obs={},
+                    act={},
+                    rew={},
+                    terminated={},
+                    truncated={},
+                    done={},
+                    obs_next={},
+                    info={},
+                    policy={},
+                )
+                self.data = cast(RolloutBatchProtocol, data)
                 self.reset_env()
 
-            if episode_count > 0:
-                rews, lens, idxs = list(map(
-                    np.concatenate, [episode_rews, episode_lens, episode_start_indices]))
-            else:
-                rews, lens, idxs = np.array([]), np.array([], np.int16), np.array([], np.int16)
-
-            # return {
-            #     "n/ep": episode_count,
-            #     "n/st": step_count,
-            #     "rews": rews,
-            #     "lens": lens,
-            #     "idxs": idxs,
-            # }
+            return CollectStats(
+                n_collected_episodes=episode_count,
+                n_collected_steps=step_count,
+                collect_time=collect_time,
+                collect_speed=step_count / collect_time,
+                returns=np.array(episode_returns),
+                returns_stat=SequenceSummaryStats.from_sequence(episode_returns)
+                if len(episode_returns) > 0
+                else None,
+                lens=np.array(episode_lens, int),
+                lens_stat=SequenceSummaryStats.from_sequence(episode_lens)
+                if len(episode_lens) > 0
+                else None,
+            )
         elif n_step is not None:
-            result = self.collect_rollout(n_step=n_step)
-        elif n_episode is not None:
-            result = self.collect_rollout(n_episode=n_episode)
+            result = self.collect_rollout(n_step=n_step, no_grad=no_grad)
+
         return result
     
     def collect_rollout(
             self,
             n_step: Optional[int] = None,
-            n_episode: Optional[int] = None,
             random: bool = False,
-            render: Optional[float] = None,
             no_grad: bool = True,
         ) -> Dict[str, Any]:
             """Collect a specified number of step or episode.
@@ -406,22 +412,12 @@ class ParallelCollector(Collector):
                 One and only one collection number specification is permitted, either
                 ``n_step`` or ``n_episode``.
 
-            :return: A dict including the following keys
-
-                * ``n/ep`` collected number of episodes.
-                * ``n/st`` collected number of steps.
-                * ``rews`` array of episode reward over collected episodes.
-                * ``lens`` array of episode length over collected episodes.
-                * ``idxs`` array of episode start index in buffer over collected episodes.
+            :return: A dataclass object
             """
             if not hasattr(self.env, 'step_rollout'):
                 raise NotImplementedError("This environment does not support rollout collection.")
-            # assert not self.env.is_async, "Please use AsyncCollector if using async venv."
+
             if n_step is not None:
-                assert n_episode is None, (
-                    f"Only one of n_step or n_episode is allowed in Collector."
-                    f"collect, got n_step={n_step}, n_episode={n_episode}."
-                )
                 assert n_step > 0
                 if not n_step % self.env_num == 0:
                     warnings.warn(
@@ -429,24 +425,17 @@ class ParallelCollector(Collector):
                         "which may cause extra transitions collected into the buffer."
                     )
                 ready_env_ids = np.arange(self.env_num)
-            elif n_episode is not None:
-                assert self.env_num==1
 
             start_time = time.time()
             if n_step is not None:
                 
                 # interact with environment
-                obs, act, rew, dones, obs_next, info = self.env.step_rollout(self.policy, n_step=n_step, tianshou_policy=True)
+                obs, act, rew, dones, obs_next, info = self.env.step_rollout(self.policy, n_step=n_step/self.env_num, tianshou_policy=True)
                 # print("Collection itself: ", time.time()-start_time)
                 episode_count = np.sum(dones)
                 # add rollout into the replay buffer, cut it up into single transitions
                 add_rolout(self.buffer, Batch(obs=obs, act=act, rew=rew, terminated=dones, truncated=dones, obs_next=obs_next, info=info))
-            elif n_episode is not None:
-                episode_count = 0
-                while episode_count<n_episode:
-                    obs, act, rew, dones, obs_next, info = self.env.step_rollout(self.policy, n_step=1, tianshou_policy=True)
-                    add_rolout(self.buffer, Batch(obs=obs, act=act, rew=rew, terminated=dones, truncated=dones, obs_next=obs_next, info=info))
-                    episode_count += np.sum(dones)
+            
             step_count = n_step
             
             # episode_rews = []
@@ -465,23 +454,10 @@ class ParallelCollector(Collector):
             # episode_lens.append(n_step)
             # episode_rews.append(rew)
 
-
-
-            # remove surplus env id from ready_env_ids
-            # to avoid bias in selecting environments
-            if n_episode:
-                raise NotImplementedError("n_episode is not supported for rollout collection.")
- 
-
             # generate statistics
             self.collect_step += step_count
             self.collect_episode += episode_count + np.sum(dones) # how often done
             self.collect_time += max(time.time() - start_time, 1e-9)
-
-            if n_episode:
-                self.data = Batch(obs={}, act={}, rew={}, done={},
-                                obs_next={}, info={}, policy={})
-                self.reset_env()
 
             # if episode_count > 0:
             #     rews, lens, idxs = list(map(

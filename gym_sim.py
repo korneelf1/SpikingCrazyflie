@@ -344,7 +344,7 @@ class Drone_Sim(gym.Env):
         
         # iters = int(nr_steps/self.N)
         iters = int(nr_steps)
-        print("Running simulation for ", iters, " steps, with ", self.N, " drones")
+        # print("Running simulation for ", iters, " steps, with ", self.N, " drones")
 
         if self.action_buffer:
             obs_arr = np.zeros((iters, self.N, 17+len(self.action_history)), dtype=np.float32)

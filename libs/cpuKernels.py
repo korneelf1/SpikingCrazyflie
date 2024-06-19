@@ -64,29 +64,17 @@ def reward_function(x, pset, motor_commands, global_step_counter,r): # now compu
         Cv = min(Cv*CvC, Cvlim)
         Ca = min(Ca*CaC, Calim)
 
-    # # sum over axis 1, along position and NOT allong nr of drones
-    r[0] = max(-1e5,-Cp*np.sum((pos-pset)**2) \
-            - Cv*np.sum((vel)**2) \
-                - Ca*np.sum((motor_commands-Cab)**2) \
-                    - Cw*np.sum((qd)**2) \
-                        + Crs)
+    # r[0] = max(-1e5,-Cp*np.sum((pos-pset)**2) \
+    #         - Cv*np.sum((vel)**2) \
+    #             - Ca*np.sum((motor_commands-Cab)**2) \
+    #                 - Cw*np.sum((qd)**2) \
+    #                     + Crs)
 
     # no position penalty
-    # r[0] = max(-1e5,- Cv*np.sum((vel)**2) \
-            # - Ca*np.sum((motor_commands-Cab)**2) \
-                # - Cw*np.sum((qd)**2) \
-                    # + Crs)
-
-# sim reset function
-# @kerneller(["void(b1[::1],i4,f4[::1])"], "(one),(one)->(states)") # ,done,seed,states
-# def reset_subenvs(done,seed,states):
-#         '''Reset subenvs'''
-#         xs = np.random.random((17)).astype(np.float32) - 0.5
-#         xs[6:10] /= np.linalg.norm(xs[6:10]) # this is different from original
-
-#         # mask with done array
-#         xs = xs * (1-done) + xs * done # first sets dones o zero, then adds the new states with inverse zero mask (zeros everywhere but the relevant states)
-#         states[0] = xs.copy()
+    r[0] = max(-1e5,- Cv*np.sum((vel)**2) \
+            - Ca*np.sum((motor_commands-Cab)**2) \
+                - Cw*np.sum((qd)**2) \
+                    + Crs)
 
 # sim done function
 @kerneller(["void(f4[::1],b1[::1])"], "(states)->()")
