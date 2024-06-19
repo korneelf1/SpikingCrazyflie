@@ -21,7 +21,7 @@ from tianshou.utils.net.continuous import ActorProb, Critic
 from tianshou.utils import WandbLogger
 
 from gym_sim import Drone_Sim
-import wandb
+# import wandb
 
 
 def create_policy():
