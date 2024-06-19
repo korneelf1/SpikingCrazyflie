@@ -92,6 +92,14 @@ class ParallelCollector(Collector):
         # avoid creating attribute outside __init__
         self.reset()
 
+    @property
+    def env_num(self):
+        return self._env_num
+    
+    @env_num.setter
+    def env_num(self, value):
+        self._env_num = value
+        
     def _assign_buffer(self, buffer: Optional[ReplayBuffer]) -> None:
         """Check if the buffer matches the constraint."""
         if buffer is None:

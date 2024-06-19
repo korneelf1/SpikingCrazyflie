@@ -1,4 +1,4 @@
-numba==0.59.1
+numba==0.57.1
 numpy==1.21.5
 tqdm==4.31.1
 websockets==12.0
