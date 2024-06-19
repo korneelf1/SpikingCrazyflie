@@ -22,7 +22,7 @@ from helpers import NumpyDeque
 GRAVITY = 9.80665
 # print('\nNOTE NOW REWARD IS MODIFIED TO JUST MAKE STABILIZING CONTROLLER (DISREGARDING ANY POSITIONS)\n')
 class Drone_Sim(gym.Env):
-    def __init__(self, gpu=False, drone='CrazyFlie', action_buffer=True,action_buffer_len=32, dt=0.01, T=2, N_cpu=1, spiking_model=None):
+    def __init__(self, gpu=False, drone='CrazyFlie', action_buffer=True,action_buffer_len=32, dt=0.01, T=2, N_cpu=1, spiking_model=None, test=False):
         super(Drone_Sim, self).__init__()
         '''
         Vectorized quadrotor simulation with websocket pose output
@@ -67,6 +67,13 @@ class Drone_Sim(gym.Env):
 
 
         self.done = np.zeros((self.N),dtype=bool) # for resetting all vectorized envs
+        
+        self.test = test
+        if self.test:
+            self.r_means = [0]
+            self.r_maxs  = [0]
+            self.r_mins  = [0]
+        
         self.reset()
 
         # other settings (vizualition and logging)
@@ -74,6 +81,7 @@ class Drone_Sim(gym.Env):
         self.Nviz = 512 # max number of quadrotors to visualize
         self.log_interval = 1    # log state every x iterations. Too low may cause out_of_memory on the self.gpu. False == 0
 
+        
         # create the drones
         if drone=='CrazyFlie':
             self._create_drones(og_drones=False)
@@ -94,7 +102,7 @@ class Drone_Sim(gym.Env):
         X, Y = np.meshgrid(x_vals, y_vals)
         vectors = np.column_stack((X.ravel(), Y.ravel(), -1.5*np.ones_like(X.ravel())))
         self.pSets = vectors[:N].astype(np.float32) # position setpoint
-
+        self.pSets = np.zeros_like(self.pSets)
         # import compute kernels
         global kerneller; global jitter
         if self.gpu:
@@ -132,7 +140,6 @@ class Drone_Sim(gym.Env):
 
         # create logs
         self._create_logs()
-
 
         self.r = np.empty(self.N, dtype=np.float32)
 
@@ -316,7 +323,7 @@ class Drone_Sim(gym.Env):
         if enable_reset:
             self._reset_subenvs(numba_opt=False)
 
-    async def _step_rollout(self, policy, nr_steps,tianshou_policy=False, test=False):
+    async def _step_rollout(self, policy, nr_steps,tianshou_policy=False):
         '''
         Collects a series of rollouts, 
         policy: is tianshou policy that uses act method for interaction
@@ -350,14 +357,15 @@ class Drone_Sim(gym.Env):
         info_arr = np.zeros((iters, self.N, 1), dtype=bool)
         rew_arr = np.zeros((iters, self.N, ), dtype=np.float32)
 
-        self.reset()
+        if not self.test:
+            self.reset()
         
         if self.gpu:
             self._move_to_cuda()
 
         ts = time()
         ei = 0
-        for i in tqdm(range(iters), desc="Running simulation"):
+        for i in range(iters):
             # self.global_step_counter += int(self.N)
 
             obs_arr[i] = self.xs
@@ -369,9 +377,10 @@ class Drone_Sim(gym.Env):
             self._compute_reward()
 
             rew_arr[i] = self.r
-            if test:
-                print('Reward: \taverage: ',np.mean(self.r),\
-                    '\tmax: ',np.max(self.r), '\tmin: ', np.min(self.r))
+            if self.test:
+                self.r_means.append(np.mean(self.r))
+                self.r_maxs.append(np.max(self.r))
+                self.r_mins.append(np.min(self.r))
             self._check_done()
             done_arr[i] = self.done
             # print(self.done)
@@ -412,9 +421,16 @@ class Drone_Sim(gym.Env):
         self.xs = x0.copy() # states
         self.t = 0
         self.episode_counter = 0
+        if self.test:
+            print('Rewards \tmean: ', np.mean(self.r_means),'\tmax: ', np.max(self.r_maxs),'\tmin: ', np.min(self.r_mins))
+            self.r_means = [0]
+            self.r_maxs = [0]
+            self.r_mins = [0]
+        self.r = np.empty(self.N, dtype=np.float32)
         if self.spiking_model:
             self.spiking_model.reset_hidden()
-
+            print('Reward: \taverage: ',np.mean(self.r),\
+                    '\tmax: ',np.max(self.r), '\tmin: ', np.min(self.r))
         if self.action_buffer:
             self.action_history.reset()
             self.xs = np.concatenate((self.xs,self.action_history),axis=1,dtype=np.float32)
@@ -431,14 +447,14 @@ class Drone_Sim(gym.Env):
 
         return self.xs,self.r, self.done,self.done, {}
    
-    def step_rollout(self, policy, n_step = 1e3, numba_policy=False, tianshou_policy=False, test=False):
+    def step_rollout(self, policy, n_step = 1e3, numba_policy=False, tianshou_policy=False):
         '''Step function for collecting and entire rollout, which can be faster in this vectorized environment
         policy: is tianshou policy that uses:
          action = policy.act(observation) method for interaction
         NOTE: you need random steps for exploration, in this case, the policy will be a stochastic SNN, so it is inherrent in the policy'''
         if numba_policy:
             print("gotta fix this!")
-        return asyncio.run(self._step_rollout(policy,nr_steps=n_step,tianshou_policy=tianshou_policy, test=test))
+        return asyncio.run(self._step_rollout(policy,nr_steps=n_step,tianshou_policy=tianshou_policy))
     
     def render(self, mode='human'):
         pass

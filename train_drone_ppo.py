@@ -3,28 +3,30 @@ from custom_collector import ParallelCollector
 from gym_sim import Drone_Sim
 
 # tianshou code
-from tianshou.policy import SACPolicy, BasePolicy
+from tianshou.policy import SACPolicy, BasePolicy, PPOPolicy
 from tianshou.utils.net.continuous import ActorProb, Critic
-from tianshou.utils.net.common import Net
+from tianshou.utils.net.common import Net, ActorCritic
 from tianshou.data import VectorReplayBuffer
-from tianshou.trainer import OffpolicyTrainer
+from tianshou.trainer import OffpolicyTrainer, OnpolicyTrainer
 from tianshou.highlevel.logger import LoggerFactoryDefault
 from tianshou.utils import WandbLogger
 
-
 import torch
 import os
+from torch.distributions import Distribution, Independent, Normal
+
+
+def dist(loc: torch.Tensor, scale: torch.Tensor) -> Distribution:
+        return Independent(Normal(loc, scale), 1)
 
 def create_policy():
+    print('Observation space: ',observation_space)
     # create the networks behind actors and critics
     net_a = Net(state_shape=observation_space,
                 hidden_sizes=[64,64], device='cpu')
     net_c1 = Net(state_shape=observation_space,action_shape=action_space,
                     hidden_sizes=[64,64],
-                    concat=True,)
-    net_c2 = Net(state_shape=observation_space,action_shape=action_space,
-                    hidden_sizes=[64,64],
-                    concat=True,)
+                    concat=False,)
 
     # create actors and critics
     actor = ActorProb(
@@ -34,20 +36,15 @@ def create_policy():
         conditioned_sigma=True,
     )
     critic1 = Critic(net_c1, device='cpu')
-    critic2 = Critic(net_c2, device='cpu')
+    actor_critic = ActorCritic(actor=actor, critic=critic1)
+    
 
-    # create the optimizers
-    actor_optim = torch.optim.Adam(actor.parameters(), lr=1e-3)
-    critic_optim = torch.optim.Adam(critic1.parameters(), lr=1e-3)
-    critic2_optim = torch.optim.Adam(critic2.parameters(), lr=1e-3)
+    # create the optimizer
+    optim = torch.optim.Adam(actor_critic.parameters(), lr=1e-3)
 
-    # create the policy
-    policy = SACPolicy(actor=actor, actor_optim=actor_optim, \
-                        critic=critic1, critic_optim=critic_optim,\
-                        critic2=critic2, critic2_optim=critic2_optim,\
-                        action_space=env.action_space,\
-                        observation_space=env.observation_space, \
-                        action_scaling=True) # make sure actions are scaled properly
+
+    
+    policy = PPOPolicy(actor=actor, critic = critic1, optim=optim, action_space=env.action_space,action_scaling=True, dist_fn= dist)
     return policy
 
 # define training args
@@ -56,6 +53,7 @@ args = {
       'step_per_epoch': 5e3,
       'step_per_collect': 5e2, # 5 s
       'test_num': 10,
+      'repeat_per_collect': 10,
       'update_per_step': 2,
       'batch_size': 128,
       'wandb_project': 'FastPyDroneGym',
@@ -111,26 +109,24 @@ log_path = os.path.join(args['logdir'], log_name)
 # )
 
 def save_best_fn(policy: BasePolicy, log_path='') -> None:
-    torch.save(policy.state_dict(), os.path.join(log_path, "policy.pth"))
+    torch.save(policy.state_dict(), os.path.join(log_path, "policy_ppo.pth"))
 
 
 print("Start training")
 # trainer
-result = OffpolicyTrainer(
-    policy=policy,
-    train_collector=train_collector,
-    test_collector=None, # no testing performed 
-    max_epoch=args['epoch'],
-    step_per_epoch=args['step_per_epoch'],
-    step_per_collect=args['step_per_collect'],
-    episode_per_test=args['test_num'],
-    batch_size=args['batch_size'],
-    save_best_fn=save_best_fn,
-    # logger=logger,
-    update_per_step=args['update_per_step'],
-    test_in_train=False,
-    buffer=buffer,).run()
-
+result = OnpolicyTrainer(
+            policy=policy,
+            train_collector=train_collector,
+            test_collector=None,
+            max_epoch=args['epoch'],
+            step_per_epoch=args['step_per_epoch'],
+            repeat_per_collect=args['repeat_per_collect'],
+            episode_per_test=args['test_num'],
+            batch_size=args['batch_size'],
+            step_per_collect=args['step_per_collect'],
+            save_best_fn=save_best_fn,
+            test_in_train=False,
+        ).run()
 # print with nice formatting
 import pprint
 pprint.pprint(result)

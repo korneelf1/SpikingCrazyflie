@@ -231,7 +231,7 @@ class ParallelCollector(Collector):
                     "which may cause extra transitions collected into the buffer."
                 )
             ready_env_ids = np.arange(self.env_num)
-        elif n_episode is not None:
+        elif n_episode is not None: # testing
             assert n_episode > 0
             assert n_episode % self.env_num == 0, (
                 f"n_episode={n_episode} is not a multiple of #env ({self.env_num})."
@@ -311,7 +311,8 @@ class ParallelCollector(Collector):
                 if np.any(done):
                     env_ind_local = np.where(done)[0]
                     env_ind_global = ready_env_ids[env_ind_local]
-                    episode_count += len(env_ind_local)
+                    # episode_count += len(env_ind_local)
+                    episode_count += np.sum(done)
                     episode_lens.append(ep_len[env_ind_local])
                     episode_rews.append(ep_rew[env_ind_local])
                     episode_start_indices.append(ep_idx[env_ind_local])
@@ -363,12 +364,10 @@ class ParallelCollector(Collector):
             #     "lens": lens,
             #     "idxs": idxs,
             # }
-        else:
-            if n_step is not None:
-                result = self.collect_rollout(n_step=n_step)
-            else:
-                n_step = n_episode*self.env_num
-                result = self.collect_rollout(n_step=n_step)
+        elif n_step is not None:
+            result = self.collect_rollout(n_step=n_step)
+        elif n_episode is not None:
+            result = self.collect_rollout(n_episode=n_episode)
         return result
     
     def collect_rollout(
@@ -423,19 +422,25 @@ class ParallelCollector(Collector):
                     )
                 ready_env_ids = np.arange(self.env_num)
             elif n_episode is not None:
-                raise NotImplementedError("n_episode is not supported for rollout collection. Please pass a number of episodes.")
+                assert self.env_num==1
 
             start_time = time.time()
-
-            # interact with environment
-            obs, act, rew, dones, obs_next, info = self.env.step_rollout(self.policy, n_step=n_step, tianshou_policy=True)
-            print("Collection itself: ", time.time()-start_time)
-
-            # add rollout into the replay buffer, cut it up into single transitions
-            add_rolout(self.buffer, Batch(obs=obs, act=act, rew=rew, terminated=dones, truncated=dones, obs_next=obs_next, info=info))
-            
+            if n_step is not None:
+                
+                # interact with environment
+                obs, act, rew, dones, obs_next, info = self.env.step_rollout(self.policy, n_step=n_step, tianshou_policy=True)
+                # print("Collection itself: ", time.time()-start_time)
+                episode_count = np.sum(dones)
+                # add rollout into the replay buffer, cut it up into single transitions
+                add_rolout(self.buffer, Batch(obs=obs, act=act, rew=rew, terminated=dones, truncated=dones, obs_next=obs_next, info=info))
+            elif n_episode is not None:
+                episode_count = 0
+                while episode_count<n_episode:
+                    obs, act, rew, dones, obs_next, info = self.env.step_rollout(self.policy, n_step=1, tianshou_policy=True)
+                    add_rolout(self.buffer, Batch(obs=obs, act=act, rew=rew, terminated=dones, truncated=dones, obs_next=obs_next, info=info))
+                    episode_count += np.sum(dones)
             step_count = n_step
-            episode_count = self.env_num
+            
             # episode_rews = []
             # episode_lens = []
             # episode_start_indices = []
