@@ -60,7 +60,7 @@ def create_policy():
     return policy
 
 policy_path = 'policy.pth'
-env = Drone_Sim()
+env = Drone_Sim(test=True)
 observation_space = env.observation_space.shape or env.observation_space.n
 action_space = env.action_space.shape or env.action_space.n
 
@@ -72,4 +72,8 @@ policy.load_state_dict(torch.load("policy.pth"))
 # actor = SACPolicy.actor
 
 state,_ = env.reset()
-env.step_rollout(policy, tianshou_policy=True, test = True)
+print(state[:,0:17])
+obs_arr, act_arr, rew_arr, done_arr, obs_next_arr, info_arr = env.step_rollout(policy, tianshou_policy=True)
+print(np.sum(done_arr))
+print(env.xs[:,0:17])
+env.mpl_render(obs_arr)

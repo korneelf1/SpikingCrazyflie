@@ -456,8 +456,79 @@ class Drone_Sim(gym.Env):
             print("gotta fix this!")
         return asyncio.run(self._step_rollout(policy,nr_steps=n_step,tianshou_policy=tianshou_policy))
     
-    def render(self, mode='human'):
-        pass
+    def render(self, mode='human', policy=None, n_step=1e3, tianshou_policy=False):
+        # other settings
+        viz_interval = 0.05 # visualize every viz_interval simulation-seconds
+        Nviz = 512 # max number of quadrotors to visualize
+        log_interval = 1    # log state every x iterations. Too low may cause out_of_memory on the GPU. False == 0
+        viz = False
+        if mode=='human':
+            viz = True
+        if viz:
+            print("initializing websocket. Awaiting connection... ")
+            wsI = wsInterface(8765)
+        else:
+            wsI = dummyInterface()
+        with wsI as ws:
+            tsAll = time()
+
+            for i in range(n_step):
+            # self.global_step_counter += int(self.N)
+                self._simulate_step()
+
+            # print('action: ',self.us[1])
+            # print('motor speeds: ',self.xs[1,13:17])
+                self._compute_reward()
+            # print(self.done)
+
+            with torch.no_grad():
+                # self.us = to_numpy(policy(Batch(obs=self.xs, info={})).act)
+                if tianshou_policy:
+                    if self.action_buffer:
+                        self.us = to_numpy(policy.map_action(policy(Batch({'obs':np.concatenate((self.xs[:,0:17],self.action_history.array),axis=1,dtype=np.float32), 'info':{}})).act))
+                    else:
+                        self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.xs, 'info':{}})).act))
+                else:
+                    if self.action_buffer:
+                        self.us = to_numpy(policy(np.concatenate((self.xs[:,0:17],self.action_history.array),axis=1,dtype=np.float32)))
+                    else:
+                        self.us = to_numpy(policy(self.xs))
+                
+            if viz  and  ws.ws is not None  and  not i % int(viz_interval/self.dt):
+                # visualize every 0.1 seconds
+ 
+                ws.sendData(self.xs[::int(np.ceil(self.N/Nviz))].astype(np.float64))
+
+    def mpl_render(self, observations):
+        import matplotlib.pyplot as plt
+        from mpl_toolkits.mplot3d import Axes3D
+        from matplotlib.animation import FuncAnimation
+
+        xyz = observations[:,0, :3]
+        # Set up the figure and the 3D axis
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+
+        # Initialize a point in the plot
+        point, = ax.plot([], [], [], 'bo')
+
+        # Set the limits of the plot
+        ax.set_xlim(np.min(xyz[:, 0]), np.max(xyz[:, 0]))
+        ax.set_ylim(np.min(xyz[:, 1]), np.max(xyz[:, 1]))
+        ax.set_zlim(np.min(xyz[:, 2]), np.max(xyz[:, 2]))
+
+        # Update function for the animation
+        def update(frame):
+            # Update the point's position
+            point.set_data(xyz[frame, 0], xyz[frame, 1])
+            point.set_3d_properties(xyz[frame, 2])
+            return point,
+
+        # Create the animation
+        ani = FuncAnimation(fig, update, frames=xyz.shape[0], interval=self.dt * 10000, blit=True)
+
+        # Show the plot
+        plt.show()
 
 global jitter; global kerneller
 gpu = torch.cuda.is_available()

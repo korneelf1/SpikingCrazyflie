@@ -1,5 +1,16 @@
 import numpy as np
 
+# tianshou code
+from tianshou.policy import SACPolicy, BasePolicy
+from tianshou.utils.net.continuous import ActorProb, Critic
+from tianshou.utils.net.common import Net
+from tianshou.data import VectorReplayBuffer
+from tianshou.trainer import OffpolicyTrainer
+from tianshou.highlevel.logger import LoggerFactoryDefault
+from tianshou.utils import WandbLogger
+
+
+import torch
 class NumpyDeque(object):
     def __init__(self, shape:tuple) -> None:
         self.shape_arr = shape
@@ -33,6 +44,45 @@ class NumpyDeque(object):
     def shape(self):
         return self.shape_arr
 
+def create_policy(env):
+    observation_space = env.observation_space.shape or env.observation_space.n
+    action_space = env.action_space.shape or env.action_space.n
+    # create the networks behind actors and critics
+    net_a = Net(state_shape=observation_space,
+                hidden_sizes=[64,64], device='cpu')
+    net_c1 = Net(state_shape=observation_space,action_shape=action_space,
+                    hidden_sizes=[64,64],
+                    concat=True,)
+    net_c2 = Net(state_shape=observation_space,action_shape=action_space,
+                    hidden_sizes=[64,64],
+                    concat=True,)
+
+    # create actors and critics
+    actor = ActorProb(
+        net_a,
+        action_space,
+        unbounded=True,
+        conditioned_sigma=True,
+    )
+    critic1 = Critic(net_c1, device='cpu')
+    critic2 = Critic(net_c2, device='cpu')
+
+    # create the optimizers
+    actor_optim = torch.optim.Adam(actor.parameters(), lr=1e-3)
+    critic_optim = torch.optim.Adam(critic1.parameters(), lr=1e-3)
+    critic2_optim = torch.optim.Adam(critic2.parameters(), lr=1e-3)
+
+    # create the policy
+    policy = SACPolicy(actor=actor, actor_optim=actor_optim, \
+                        critic=critic1, critic_optim=critic_optim,\
+                        critic2=critic2, critic2_optim=critic2_optim,\
+                        action_space=env.action_space,\
+                        observation_space=env.observation_space, \
+                        action_scaling=True) # make sure actions are scaled properly
+    return policy
+
+def forward_policy(policy, state):
+    return policy(state)
 if __name__=='__main__':
     test_qeue = NumpyDeque((3,5))
     print(type(test_qeue.array))
