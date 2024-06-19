@@ -53,8 +53,8 @@ def create_policy():
 # define training args
 args = {
       'epoch': 1e2,
-      'step_per_epoch': 5e3,
-      'step_per_collect': 5e2, # 5 s
+      'step_per_epoch': 1e4,
+      'step_per_collect': 1e3, # 5 s
       'test_num': 10,
       'update_per_step': 2,
       'batch_size': 128,
@@ -119,7 +119,7 @@ print("Start training")
 result = OffpolicyTrainer(
     policy=policy,
     train_collector=train_collector,
-    test_collector=None, # no testing performed 
+    test_collector=test_collector, # no testing performed 
     max_epoch=args['epoch'],
     step_per_epoch=args['step_per_epoch'],
     step_per_collect=args['step_per_collect'],
