@@ -33,10 +33,10 @@ def reward_function(x, pset, motor_commands, global_step_counter,r): # now compu
     # reward scheduling
     # intial parameters
     Cp = 2.5 # position weight
-    Cv = .005 # velocity weight
+    Cv = .5 # velocity weight
     Cq = 2.5 # orientation weight
     Ca = .005 # action weight
-    Cw = 0.0 # angular velocity weight
+    Cw = 2.0 # angular velocity weight 
     Crs = 2 # reward for survival
     Cab = 0.334 # action baseline
 
@@ -47,7 +47,7 @@ def reward_function(x, pset, motor_commands, global_step_counter,r): # now compu
     Cplim = 20 # position limit
 
     CvC = 1.4 # velocity factor
-    Cvlim = .5 # velocity limit
+    Cvlim = 1.5 # velocity limit
 
     CaC = 1.4 # orientation factor
     Calim = .5 # orientation limit
@@ -64,18 +64,18 @@ def reward_function(x, pset, motor_commands, global_step_counter,r): # now compu
         Cv = min(Cv*CvC, Cvlim)
         Ca = min(Ca*CaC, Calim)
 
-    # sum over axis 1, along position and NOT allong nr of drones
+    # # sum over axis 1, along position and NOT allong nr of drones
     r[0] = max(-1e5,-Cp*np.sum((pos-pset)**2) \
             - Cv*np.sum((vel)**2) \
                 - Ca*np.sum((motor_commands-Cab)**2) \
                     - Cw*np.sum((qd)**2) \
                         + Crs)
 
-    # # no position penalty
+    # no position penalty
     # r[0] = max(-1e5,- Cv*np.sum((vel)**2) \
-    #         - Ca*np.sum((motor_commands-Cab)**2) \
-    #             - Cw*np.sum((qd)**2) \
-    #                 + Crs)
+            # - Ca*np.sum((motor_commands-Cab)**2) \
+                # - Cw*np.sum((qd)**2) \
+                    # + Crs)
 
 # sim reset function
 # @kerneller(["void(b1[::1],i4,f4[::1])"], "(one),(one)->(states)") # ,done,seed,states
