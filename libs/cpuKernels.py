@@ -34,7 +34,7 @@ def reward_function(x, pset, motor_commands, global_step_counter,r): # now compu
     # intial parameters
     Cp = 2.5 # position weight
     Cv = .5 # velocity weight
-    Cq = 2.5 # orientation weight
+    Cq = .5 # orientation weight
     Ca = .005 # action weight
     Cw = 2.0 # angular velocity weight 
     Crs = 2 # reward for survival
@@ -71,8 +71,9 @@ def reward_function(x, pset, motor_commands, global_step_counter,r): # now compu
     #                     + Crs)
 
     # no position penalty
-    r[0] = max(-1e5,- Cv*np.sum((vel)**2) \
+    r[0] = max(-1e3,- Cv*np.sum((vel)**2) \
             - Ca*np.sum((motor_commands-Cab)**2) \
+                -Cq*(q[0]**2)\
                 - Cw*np.sum((qd)**2) \
                     + Crs)
 
@@ -88,20 +89,6 @@ def check_done(xs,done):
             done[0] = True
         if np.sum((np.abs(xs[3:6]) > 10)) +  np.sum((np.abs(xs[10:13]) > 20)) != 0: # if not zero at least one would be true
             done[0] = True
-
-        # did it crash
-        # if xs[2] < 0.0:
-        #     done[0] = True
-            
-        # done[0] = np.any(np.abs(xs[3:6]) > 10) or np.any(np.abs(xs[10:13]) > 10)
-
-
-
-        # did it crash
-        # if xs[2] < 0.0:
-        #     done[0] = True
-            
-        # done[0] = np.any(np.abs(xs[3:6]) > 10) or np.any(np.abs(xs[10:13]) > 10)
 
 
 # sim stepper
