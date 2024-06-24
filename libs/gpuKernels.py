@@ -24,9 +24,11 @@ from numba import cuda, float32, boolean
 from math import sqrt, acos, hypot
 import numpy as np
 import cmath
+import operator
+import math
 
 # check done
-@kerneller("void(float32[:, ::1],boolean[:, ::1])")
+@kerneller
 def check_done(xs,done):
         '''Check if the episode is done
         if any velocity in the abs(self.xs) array is greater than 10 m/s, then the episode is done
@@ -38,19 +40,19 @@ def check_done(xs,done):
             for j in range(0,17):
                 x_local[j] = xs[i1, j]
             
-            done[i1,0] = False
+            done[i1] = False
 
             for count, i in enumerate(x_local):
                 if cmath.isnan(i):
-                    done[i1,0] = True
+                    done[i1] = True
                 if (count > 3 and count < 6) or (count > 10 and count < 13):
                     if abs(i) > 10:
-                        done[i1,0] = True
+                        done[i1] = True
 
 # sim reward function
 # @kerneller("void(f4[:, ::1],f4[:, ::1],f4[:, ::1],int32[:],f4[:, ::1])")
-@kerneller("void(f4[:, ::1],f4[:, ::1])")
-def reward_function(x,r): # now computes for a single state thing
+@kerneller
+def reward_function(x, pset, motor_commands, global_step_counter,r): # now computes for a single state thing
     '''NOTE: paper uses orientation error, but is unclear as they use a scalar'''
     # reward scheduling
     # intial parameters
@@ -63,7 +65,7 @@ def reward_function(x,r): # now computes for a single state thing
     Cab = 0.334 # action baseline
 
     # curriculum parameters
-    Nc = 1e5 # interval of application of curriculum
+    Nc = int(1e5) # interval of application of curriculum
 
     CpC = 1.2 # position factor
     Cplim = 20 # position limit
@@ -86,15 +88,17 @@ def reward_function(x,r): # now computes for a single state thing
     qd    = x_local[10:13]
     omega = x_local[13:17]
     # curriculum
-    # if global_step_counter[i1] % Nc == 0:
-    #     Cp = min(Cp*CpC, Cplim)
-    #     Cv = min(Cv*CvC, Cvlim)
-    #     Ca = min(Ca*CaC, Calim)
+    
+    # cmath.mod(global_step_counter, Nc)
+    if global_step_counter % Nc== 0:
+        Cp = min(Cp*CpC, Cplim)
+        Cv = min(Cv*CvC, Cvlim)
+        Ca = min(Ca*CaC, Calim)
 
     pos_term = 0
     for i in range(3):
-        # pos_term += (pos[i]-pset[i1,i])**2
-        pos_term += (pos[i])**2
+        pos_term += (pos[i]-pset[i1,i])**2
+        # pos_term += (pos[i])**2
 
     pos_term = -Cp*pos_term
 
@@ -109,16 +113,16 @@ def reward_function(x,r): # now computes for a single state thing
     q_term = -Cq*q_term
 
     motor_term = 0
-    # for i in range(4):
-    #     motor_term += (motor_commands[i1,i]-Cab)**2
-    # motor_term = -Ca*motor_term
+    for i in range(4):
+        motor_term += (motor_commands[i1,i]-Cab)**2
+    motor_term = -Ca*motor_term
 
     w_term = 0
     for i in range(3):
         w_term += (qd[i])**2
     w_term = -Cw*w_term
 
-    r[i1,0] = max(-1e5,pos_term+vel_term+q_term+motor_term+w_term+Crs)
+    r[i1] = max(-1e5,pos_term+vel_term+q_term+motor_term+w_term+Crs)
     
     # sum over axis 1, along position and NOT allong nr of drones
     # r[0] = max(-1e5,-Cp*np.sum((pos-pset)**2) \

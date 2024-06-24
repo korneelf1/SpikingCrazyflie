@@ -243,7 +243,7 @@ class Drone_Sim(gym.Env):
         '''Compute reward, reward function from learning to fly in 18sec paper
         TODO: optimize with cpuKernels and gpuKernels'''	
         if self.gpu:
-            self.reward_function[self.blocks,self.threads_per_block](self.d_xs, self.d_r)
+            self.reward_function[self.blocks,self.threads_per_block](self.d_xs, self.d_pSets, self.d_us, self.global_step_counter,self.d_r)
         else:
             self.reward_function(self.xs, self.pSets, self.us, self.global_step_counter,self.r)
              
@@ -280,7 +280,7 @@ class Drone_Sim(gym.Env):
         self.d_G1pinvs = cuda.to_device(self.G1pinvs)
 
         self.d_r = cuda.to_device(self.r)
-        self.d_global_step_counter = cuda.to_device(self.global_step_counter)
+        # self.d_global_step_counter = cuda.to_device(self.global_step_counter)
         self.d_done = cuda.to_device(self.done)
 
         cuda.synchronize()
@@ -310,8 +310,8 @@ class Drone_Sim(gym.Env):
         Compute reward
         Check if any env is done
         Reset respective envs'''
-        self.episode_counter += 1
-        self.global_step_counter += 1
+        # self.episode_counter += 1
+        self.global_step_counter += self.N 
         
         if self.gpu:
             self._move_to_cuda()
@@ -388,7 +388,7 @@ class Drone_Sim(gym.Env):
         ei = 0
         for i in range(iters):
         # for i in tqdm(range(iters), desc="Running simulation"):
-            # self.global_step_counter += int(self.N)
+            self.global_step_counter += int(self.N)
             if self.gpu:
                 obs_arr[i] = self.d_xs.copy_to_host()
             else:
@@ -408,7 +408,7 @@ class Drone_Sim(gym.Env):
 
             if self.gpu:
                 obs_next_arr[i] = self.d_xs.copy_to_host()
-                # rew_arr[i] = self.d_r.copy_to_host()
+                rew_arr[i] = self.d_r.copy_to_host()
             else:
                 obs_next_arr[i] = self.xs
                 rew_arr[i] = self.r
@@ -592,7 +592,7 @@ global jitter; global kerneller
 
 torch.cuda.init()
 gpu = torch.cuda.is_available()
-gpu = False
+# gpu = False
 print(gpu)
 # debug mode
 if gpu:
@@ -620,7 +620,7 @@ if __name__ == "__main__":
     t0 = time()
     t_steps = []
     import networks as n
-    policy = n.Actor_ANN(sim.observation_space.shape[0],4,1)
+    policy = n.Actor_ANN(sim.observation_space.shape[0],4,1).to(device=torch.device('cuda:0'))
     print("\nTest step_rollout")
     _,_,_,_,_,_, info = sim.step_rollout(policy=policy, n_step=iters)
     # t_steps.append(time()-t_step)
