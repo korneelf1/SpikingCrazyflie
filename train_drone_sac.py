@@ -1,5 +1,5 @@
 # custom code
-from custom_collector import ParallelCollector
+from custom_collector import ParallelCollector, FastPyDroneSimCollector
 from gym_sim import Drone_Sim
 
 # tianshou code
@@ -82,9 +82,9 @@ policy = create_policy()
 # create buffer (stack_num defines the number of sequenctial samples)
 buffer=VectorReplayBuffer(total_size=200000,buffer_num=N_envs, stack_num=1)
 # create the parallel train_collector, which is optimized to gather custom vectorized envs
-train_collector = ParallelCollector(policy=policy, env=env, buffer=buffer)
+train_collector = FastPyDroneSimCollector(policy=policy, env=env, buffer=buffer)
 train_collector.reset()
-test_collector = ParallelCollector(policy=policy,env=test_env)
+test_collector = FastPyDroneSimCollector(policy=policy,env=test_env)
 # define a number of start timesteps to fill buffer (now one sec of data *100 drones )
 train_collector.collect(n_step=1e2)
 

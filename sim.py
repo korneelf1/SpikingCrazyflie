@@ -29,7 +29,7 @@ GRAVITY = 9.80665
 
 
 #%% sim config
-gpu = False              # run on the GPU using cuda
+gpu = True              # run on the GPU using cuda
 viz = True              # stream pose to a websocket connection
 log = True              # log states from GPU back to the CPU (setting False has no speedup on CPU)
 position_control = True # use a simple position/attitude NDI controller

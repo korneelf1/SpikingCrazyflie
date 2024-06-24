@@ -18,8 +18,9 @@ from tianshou.data import (
     CollectStats,
     SequenceSummaryStats
 )
-from tianshou.data import Collector
+from tianshou.data.collector import Collector, _nullable_slice
 from tianshou.data.types import RolloutBatchProtocol
+from overrides import override
 
 class StackPreprocessor:
     def __init__(self, stack_num: int, data_key: str = "obs") -> None:
@@ -489,6 +490,127 @@ class ParallelCollector(Collector):
                 else None,
             )
 
+class FastPyDroneSimCollector(Collector):
+    """FastPyDroneSim Collector handles async vector environment.
+
+    Please refer to :class:`~tianshou.data.Collector` for a more detailed explanation.
+    """
+
+    def __init__(
+        self,
+        policy: BasePolicy,
+        env: BaseVectorEnv,
+        buffer: ReplayBuffer | None = None,
+        exploration_noise: bool = False,
+    ) -> None:
+        super().__init__(
+            policy,
+            env,
+            buffer,
+            exploration_noise,
+        )
+        # E denotes the number of parallel environments: self.env_num
+        # At init, E=R but during collection R <= E
+        # Keep in sync with reset!
+        # self._ready_env_ids_R: np.ndarray = np.arange(self.env_num)
+        # self._current_obs_in_all_envs_EO: np.ndarray | None = copy(self._pre_collect_obs_RO)
+        # self._current_info_in_all_envs_E: np.ndarray | None = copy(self._pre_collect_info_R)
+        # self._current_hidden_state_in_all_envs_EH: np.ndarray | torch.Tensor | Batch | None = copy(
+        #     self._pre_collect_hidden_state_RH,
+        # )
+        # self._current_action_in_all_envs_EA: np.ndarray = np.empty(self.env_num)
+        # self._current_policy_in_all_envs_E: Batch | None = None
+
+    @override
+    def reset(
+        self,
+        reset_buffer: bool = True,
+        reset_stats: bool = True,
+        gym_reset_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        # This sets the _pre_collect attrs
+        result = super().reset(
+            reset_buffer=reset_buffer,
+            reset_stats=reset_stats,
+            gym_reset_kwargs=gym_reset_kwargs,
+        )
+        # Keep in sync with init!
+        self._ready_env_ids_R = np.arange(self.env_num)
+        # E denotes the number of parallel environments self.env_num
+        # self._current_obs_in_all_envs_EO = copy(self._pre_collect_obs_RO)
+        # self._current_info_in_all_envs_E = copy(self._pre_collect_info_R)
+        # self._current_hidden_state_in_all_envs_EH = copy(self._pre_collect_hidden_state_RH)
+        # self._current_action_in_all_envs_EA = np.empty(self.env_num)
+        # self._current_policy_in_all_envs_E = None
+        return result
+
+    @override
+    def reset_env(
+        self,
+        gym_reset_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        # # we need to step through the envs and wait until they are ready to be able to interact with them
+        # if self.env.waiting_id:
+        #     self.env.step(None, id=self.env.waiting_id)
+        return super().reset_env(gym_reset_kwargs=gym_reset_kwargs)
+
+    @override
+    def _collect(
+        self,
+        n_step: int | None = None,
+        n_episode: int | None = None,
+        random: bool = False,
+        render: float | None = None,
+        gym_reset_kwargs: dict[str, Any] | None = None,
+    ) -> CollectStats:
+        start_time = time.time()
+
+        step_count = 0
+        num_collected_episodes = 0
+        episode_returns: list[float] = []
+        episode_lens: list[int] = []
+        episode_start_indices: list[int] = []
+
+        # ready_env_ids_R = self._ready_env_ids_R
+        # last_obs_RO= self._current_obs_in_all_envs_EO[ready_env_ids_R] # type: ignore[index]
+        # last_info_R = self._current_info_in_all_envs_E[ready_env_ids_R] # type: ignore[index]
+        # last_hidden_state_RH = self._current_hidden_state_in_all_envs_EH[ready_env_ids_R] # type: ignore[index]
+        # last_obs_RO = self._pre_collect_obs_RO
+        # last_info_R = self._pre_collect_info_R
+        # last_hidden_state_RH = self._pre_collect_hidden_state_RH
+        # if self._current_obs_in_all_envs_EO is None or self._current_info_in_all_envs_E is None:
+        #     raise RuntimeError(
+        #         "Current obs or info array is None, did you call reset or pass reset_at_collect=True?",
+        #     )
+
+        # last_obs_RO = self._current_obs_in_all_envs_EO[ready_env_ids_R]
+        # last_info_R = self._current_info_in_all_envs_E[ready_env_ids_R]
+        # last_hidden_state_RH = _nullable_slice(
+        #     self._current_hidden_state_in_all_envs_EH,
+        #     ready_env_ids_R,
+        # )
+        # Each iteration of the AsyncCollector is only stepping a subset of the
+        # envs. The last observation/ hidden state of the ones not included in
+        # the current iteration has to be retained.
+        obs, act, rew, dones, obs_next, info, stats = self.env.step_rollout(n_step = n_step, n_episode=n_episode, policy=self.policy, random=random, tianshou_policy=True)
+        add_rolout(self.buffer, Batch(obs=obs, act=act, rew=rew, terminated=dones, truncated=dones, obs_next=obs_next, info=info))
+
+        episode_lens = stats["episode_lens"]
+        episode_returns = stats["episode_rews"]
+        step_count = np.sum(obs.shape)
+        num_collected_episodes = stats['episode_ctr']
+        collect_time = stats['time']
+
+
+        return CollectStats.with_autogenerated_stats(
+            returns=np.array(episode_returns),
+            lens=np.array(episode_lens),
+            n_collected_episodes=num_collected_episodes,
+            n_collected_steps=step_count,
+            collect_time=collect_time,
+            collect_speed=step_count / collect_time,
+        )
+
 if __name__ == "__main__":
     from gym_sim import Drone_Sim
     import torch.nn as nn
@@ -531,13 +653,14 @@ if __name__ == "__main__":
                             ,action_space=env.action_space,observation_space=env.observation_space, action_scaling=True)
 
     buffer=VectorReplayBuffer(total_size=200000,buffer_num=N_envs, stack_num=1)
-    collector = ParallelCollector(policy=policy, env=env, buffer=buffer)
+    # collector = ParallelCollector(policy=policy, env=env, buffer=buffer)
+    collector = FastPyDroneSimCollector(policy=policy, env=env, buffer=buffer)
     import time
 
     print("Starting rollout collection (1 000 000 steps)...") 
     collector.reset_buffer()
     start = time.time()
-    collector.collect_rollout(n_step=1e3, random=False)
+    collector.collect(n_step=1e3, random=False)
     t_roll = time.time()-start
     print("Done in: ",t_roll)
     print(len(buffer))

@@ -243,20 +243,27 @@ class Drone_Sim(gym.Env):
         '''Compute reward, reward function from learning to fly in 18sec paper
         TODO: optimize with cpuKernels and gpuKernels'''	
         if self.gpu:
-            self.reward_function[self.blocks,self.threads_per_block](self.xs, self.pSets, self.us, self.global_step_counter,self.r)
+            self.reward_function[self.blocks,self.threads_per_block](self.d_xs, self.d_r)
         else:
             self.reward_function(self.xs, self.pSets, self.us, self.global_step_counter,self.r)
              
     def _check_done(self, numba_opt = True):
         '''Check if the episode is done, sets done array to True for respective environments.'''
         if numba_opt:
-            self.check_done(self.xs, self.done)
+            if self.gpu:
+                self.check_done[self.blocks,self.threads_per_block](self.d_xs, self.d_done)
+            else:
+                self.check_done(self.xs, self.done)
             # self.done = np.expand_dims(self.done, axis=1)
         else:
             # if any velocity in the abs(self.xs) array is greater than 10 m/s, then the episode is done
             # if any rotational velocity in the abs(self.xs) array is greater than 10 rad/s, then the episode is done
-            self.done = np.logical_or(np.any(np.abs(self.xs[:,3:6]) > 10, axis=1), \
-                                    np.any(np.abs(self.xs[:,10:13]) > 20, axis=1))
+            if self.gpu:
+                self.done = np.logical_or(np.any(np.abs(self.d_xs[:,3:6]) > 10, axis=1), \
+                                    np.any(np.abs(self.d_xs[:,10:13]) > 20, axis=1))
+            else:
+                self.done = np.logical_or(np.any(np.abs(self.xs[:,3:6]) > 10, axis=1), \
+                                        np.any(np.abs(self.xs[:,10:13]) > 20, axis=1))
 
     def _move_to_cuda(self):
         '''Move data to cuda'''
@@ -271,6 +278,11 @@ class Drone_Sim(gym.Env):
         # position setpoints
         self.d_pSets = cuda.to_device(self.pSets)
         self.d_G1pinvs = cuda.to_device(self.G1pinvs)
+
+        self.d_r = cuda.to_device(self.r)
+        self.d_global_step_counter = cuda.to_device(self.global_step_counter)
+        self.d_done = cuda.to_device(self.done)
+
         cuda.synchronize()
 
     def _reset_subenvs(self, numba_opt = True, seed = None):
@@ -323,11 +335,13 @@ class Drone_Sim(gym.Env):
         if enable_reset:
             self._reset_subenvs(numba_opt=False)
 
-    async def _step_rollout(self, policy, nr_steps,tianshou_policy=False):
+    async def _step_rollout(self, policy, nr_steps=None,nr_episodes=None,tianshou_policy=False):
         '''
         Collects a series of rollouts, 
         policy: is tianshou policy that uses act method for interaction
         nr_steps: number of steps to collect
+        nr_episodes: number of episodes to collect
+        tianshou_policy: if True, uses tianshou policy, else uses normal policy
 
         Stores info in arrays.
 
@@ -339,11 +353,13 @@ class Drone_Sim(gym.Env):
         '''
         # if True:
         #     raise NotImplementedError("This function is not implemented yet, see dones!")
-        
-        self.episode_counter += nr_steps
-        
-        # iters = int(nr_steps/self.N)
-        iters = int(nr_steps)
+        if nr_steps:
+            iters = int(nr_steps)
+        elif nr_episodes:
+            iters = int(nr_episodes*1e3) # huge nr of steps (we will exit with break statement)
+
+        else:
+            raise ValueError("Either nr_steps or nr_episodes should be provided!")
         # print("Running simulation for ", iters, " steps, with ", self.N, " drones")
 
         if self.action_buffer:
@@ -357,6 +373,11 @@ class Drone_Sim(gym.Env):
         info_arr = np.zeros((iters, self.N, 1), dtype=bool)
         rew_arr = np.zeros((iters, self.N, ), dtype=np.float32)
 
+        # for statistics
+        episode_lens = []
+        episode_rews = []
+        episode_len_arr = np.zeros((self.N,),dtype=np.int32)
+
         if not self.test:
             self.reset()
         
@@ -366,24 +387,39 @@ class Drone_Sim(gym.Env):
         ts = time()
         ei = 0
         for i in range(iters):
+        # for i in tqdm(range(iters), desc="Running simulation"):
             # self.global_step_counter += int(self.N)
-
-            obs_arr[i] = self.xs
+            if self.gpu:
+                obs_arr[i] = self.d_xs.copy_to_host()
+            else:
+                obs_arr[i] = self.xs
             self._simulate_step()
 
-            # print('action: ',self.us[1])
-            # print('motor speeds: ',self.xs[1,13:17])
-            obs_next_arr[i] = self.xs
+
             self._compute_reward()
 
-            rew_arr[i] = self.r
+
             if self.test:
                 self.r_means.append(np.mean(self.r))
                 self.r_maxs.append(np.max(self.r))
                 self.r_mins.append(np.min(self.r))
             self._check_done()
+
+
+            if self.gpu:
+                obs_next_arr[i] = self.d_xs.copy_to_host()
+                # rew_arr[i] = self.d_r.copy_to_host()
+            else:
+                obs_next_arr[i] = self.xs
+                rew_arr[i] = self.r
+            
             done_arr[i] = self.done
-            # print(self.done)
+            episode_len_arr += 1 - self.done # adds an increment for every step
+            if np.any(self.done):
+                episode_lens.extend(episode_len_arr[self.done].tolist())
+                episode_rews.extend(rew_arr[i][self.done].tolist())
+                episode_len_arr[self.done] = 0
+                ei += np.sum(self.done)
 
             with torch.no_grad():
                 # self.us = to_numpy(policy(Batch(obs=self.xs, info={})).act)
@@ -399,14 +435,27 @@ class Drone_Sim(gym.Env):
                         self.us = to_numpy(policy(self.xs))
                 
                 act_arr[i] = self.us
-            
+
+            if nr_episodes and ei >= nr_episodes:
+                self.episode_counter += ei
+                # trim the arrays
+                obs_arr = obs_arr[:i+1]
+                act_arr = act_arr[:i+1]
+                rew_arr = rew_arr[:i+1]
+                done_arr = done_arr[:i+1]
+                obs_next_arr = obs_next_arr[:i+1]
+                info_arr = info_arr[:i+1]
+                
+                break
+
             self._reset_subenvs(numba_opt=False)
 
         # make sure all threads complete before stopping the count
         if self.gpu:
             cuda.synchronize()
         # done_arr[i] = np.ones((self.N, 1), dtype=bool)
-        return obs_arr, act_arr, rew_arr, done_arr, obs_next_arr, info_arr
+        ei+= self.N - np.sum(done_arr[i])
+        return obs_arr, act_arr, rew_arr, done_arr, obs_next_arr, info_arr, {'episode_lens': episode_lens, 'episode_rews': episode_rews, 'episode_ctr': ei, 'time': time()-ts}
     
     def reset(self,seed=None, dones = None):
         '''
@@ -447,14 +496,14 @@ class Drone_Sim(gym.Env):
 
         return self.xs,self.r, self.done,self.done, {}
    
-    def step_rollout(self, policy, n_step = 1e3, numba_policy=False, tianshou_policy=False):
+    def step_rollout(self, policy, n_step = None, n_episode=None, numba_policy=False, tianshou_policy=False, random=False):
         '''Step function for collecting and entire rollout, which can be faster in this vectorized environment
         policy: is tianshou policy that uses:
          action = policy.act(observation) method for interaction
         NOTE: you need random steps for exploration, in this case, the policy will be a stochastic SNN, so it is inherrent in the policy'''
         if numba_policy:
             print("gotta fix this!")
-        return asyncio.run(self._step_rollout(policy,nr_steps=n_step,tianshou_policy=tianshou_policy))
+        return asyncio.run(self._step_rollout(policy,nr_steps=n_step,nr_episodes=n_episode,tianshou_policy=tianshou_policy))
     
     def render(self, mode='human', policy=None, n_step=1e3, tianshou_policy=False):
         # other settings
@@ -531,6 +580,12 @@ class Drone_Sim(gym.Env):
         plt.show()
 
 global jitter; global kerneller
+# NOTE if linux went into suspend mode, might not be able to communicate with GPU, run:
+# sudo rmmod nvidia_uvm
+# sudo modprobe nvidia_uvm
+# in terminal 
+
+torch.cuda.init()
 gpu = torch.cuda.is_available()
 gpu = False
 print(gpu)
@@ -545,8 +600,8 @@ else:
 if __name__ == "__main__":
     N_drones = 3
 
-    sim = Drone_Sim(gpu=gpu, dt=0.01, T=10, N_cpu=N_drones, spiking_model=None, action_buffer=True)
-    from libs.cpuKernels import controller_rl
+    sim = Drone_Sim(gpu=gpu, dt=0.01, T=10, N_cpu=N_drones, spiking_model=None, action_buffer=False, drone='default')
+    # from libs.cpuKernels import controller_rl
     # position controller gains (attitude/rate hardcoded for now, sorry)
     posPs = 2*np.ones((N_drones, 3), dtype=np.float32)
     velPs = 2*np.ones((N_drones, 3), dtype=np.float32)
@@ -562,9 +617,9 @@ if __name__ == "__main__":
     import networks as n
     policy = n.Actor_ANN(sim.observation_space.shape[0],4,1)
     print("\nTest step_rollout")
-    sim.step_rollout(policy=policy, n_step=iters)
+    _,_,_,_,_,_, info = sim.step_rollout(policy=policy, n_step=iters)
     # t_steps.append(time()-t_step)
-      
+    print(info) 
         # sim._compute_reward()
     print("1e3 steps took: ", time()-t0, " seconds")
     print("Average step time: ",  (time()-t0)/iters)
@@ -580,6 +635,7 @@ if __name__ == "__main__":
         # sim.step(policy(sim.xs).detach().numpy().astype(np.float32), enable_reset=False)
         sim.step(sim.us,enable_reset=True)
         controller(sim.xs, sim.us,posPs, velPs, sim.pSets,G1pinvs)
+        # print(sim.r)
 
     # t_steps.append(time()-t_step)
       
