@@ -560,7 +560,9 @@ class Drone_Sim(gym.Env):
 
         # Initialize a point in the plot
         point, = ax.plot([], [], [], 'bo')
-
+        # set point at (0,0,0)
+        origin, = ax.plot([], [], [], 'ro')
+        
         # Set the limits of the plot
         ax.set_xlim(np.min(xyz[:, 0]), np.max(xyz[:, 0]))
         ax.set_ylim(np.min(xyz[:, 1]), np.max(xyz[:, 1]))
@@ -570,8 +572,11 @@ class Drone_Sim(gym.Env):
         def update(frame):
             # Update the point's position
             point.set_data(xyz[frame, 0], xyz[frame, 1])
+            origin.set_data(0,0)
+
             point.set_3d_properties(xyz[frame, 2])
-            return point,
+            origin.set_3d_properties(0.1)
+            return point,origin,
 
         # Create the animation
         ani = FuncAnimation(fig, update, frames=xyz.shape[0], interval=self.dt * 10000, blit=True)
@@ -630,13 +635,16 @@ if __name__ == "__main__":
     # position controller gains (attitude/rate hardcoded for now, sorry)
     G1pinvs = np.linalg.pinv(sim.G1s) / (sim.omegaMaxs*sim.omegaMaxs)[:, :, np.newaxis]
     t0 = time()
+    obs = []
     
     for i in tqdm(range(iters), desc="Running simulation steps"):
         # sim.step(policy(sim.xs).detach().numpy().astype(np.float32), enable_reset=False)
         sim.step(sim.us,enable_reset=True)
         controller(sim.xs, sim.us,posPs, velPs, sim.pSets,G1pinvs)
+        obs.append(sim.xs.tolist())
         # print(sim.r)
-
+    obs = np.array(obs).reshape(-1, sim.N, 17)
+    sim.mpl_render(obs)
     # t_steps.append(time()-t_step)
       
         # sim._compute_reward()

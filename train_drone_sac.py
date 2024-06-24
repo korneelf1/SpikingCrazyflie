@@ -6,7 +6,7 @@ from gym_sim import Drone_Sim
 from tianshou.policy import SACPolicy, BasePolicy
 from tianshou.utils.net.continuous import ActorProb, Critic
 from tianshou.utils.net.common import Net
-from tianshou.data import VectorReplayBuffer
+from tianshou.data import VectorReplayBuffer,HERVectorReplayBuffer,PrioritizedVectorReplayBuffer
 from tianshou.trainer import OffpolicyTrainer
 from tianshou.highlevel.logger import LoggerFactoryDefault
 from tianshou.utils import WandbLogger
@@ -14,17 +14,18 @@ from tianshou.utils import WandbLogger
 
 import torch
 import os
-
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cpu')
 def create_policy():
     # create the networks behind actors and critics
     net_a = Net(state_shape=observation_space,
-                hidden_sizes=[64,64], device='cpu')
+                hidden_sizes=[64,64], device=device)
     net_c1 = Net(state_shape=observation_space,action_shape=action_space,
                     hidden_sizes=[64,64],
-                    concat=True,)
+                    concat=True,device=device)
     net_c2 = Net(state_shape=observation_space,action_shape=action_space,
                     hidden_sizes=[64,64],
-                    concat=True,)
+                    concat=True,device=device)
 
     # create actors and critics
     actor = ActorProb(
@@ -32,9 +33,10 @@ def create_policy():
         action_space,
         unbounded=True,
         conditioned_sigma=True,
+        device=device
     )
-    critic1 = Critic(net_c1, device='cpu')
-    critic2 = Critic(net_c2, device='cpu')
+    critic1 = Critic(net_c1, device=device)
+    critic2 = Critic(net_c2, device=device)
 
     # create the optimizers
     actor_optim = torch.optim.Adam(actor.parameters(), lr=1e-3)
@@ -80,7 +82,7 @@ action_space = env.action_space.shape or env.action_space.n
 policy = create_policy()
 
 # create buffer (stack_num defines the number of sequenctial samples)
-buffer=VectorReplayBuffer(total_size=200000,buffer_num=N_envs, stack_num=1)
+buffer=PrioritizedVectorReplayBuffer(total_size=200000,buffer_num=N_envs, stack_num=1, alpha=0.4, beta=0.6)
 # create the parallel train_collector, which is optimized to gather custom vectorized envs
 train_collector = FastPyDroneSimCollector(policy=policy, env=env, buffer=buffer)
 train_collector.reset()
