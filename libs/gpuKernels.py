@@ -17,7 +17,7 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
-from __main__ import kerneller, GRAVITY
+from gym_sim import kerneller, GRAVITY
 from libs.jitMath import motorDot, forcesAndMoments, quatRotate, quatDot, sgemv
 import numba as nb
 from numba import cuda, float32, boolean

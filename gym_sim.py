@@ -22,7 +22,7 @@ from helpers import NumpyDeque
 GRAVITY = 9.80665
 # print('\nNOTE NOW REWARD IS MODIFIED TO JUST MAKE STABILIZING CONTROLLER (DISREGARDING ANY POSITIONS)\n')
 class Drone_Sim(gym.Env):
-    def __init__(self, gpu=False, drone='CrazyFlie', action_buffer=True,action_buffer_len=32, dt=0.01, T=2, N_cpu=1, spiking_model=None, test=False):
+    def __init__(self, gpu=False, drone='CrazyFlie', action_buffer=True,action_buffer_len=32, dt=0.01, T=2, N_drones=1, spiking_model=None, test=False):
         super(Drone_Sim, self).__init__()
         '''
         Vectorized quadrotor simulation with websocket pose output
@@ -33,7 +33,7 @@ class Drone_Sim(gym.Env):
             drone (str): 'CrazyFlie' or 'Default'
             dt (float): step time is dt seconds (forward Euler)
             T (float): run for T seconds NOT USED
-            N_cpu (int): number of simulations to run in parallel
+            N_drones (int): number of simulations to run in parallel
             spiking_model (object): spiking model, which will be reset at environment reset (spiking_model.reset_hidden())
             '''
 
@@ -46,10 +46,12 @@ class Drone_Sim(gym.Env):
         if self.gpu:                # number of simulations to run in parallel
             self.blocks = 128       # 128 or 256 seem best. Should be multiple of 32
             self.threads_per_block = 64 # depends on global memorty usage. 256 seems best without. Should be multiple of 64
-            # self.dt 0.01, self.T 10, no viz, self.log_interval 0, no controller, self.blocks 256, threads 256, self.gpu = True --> 250M ticks/sec
+            # # self.dt 0.01, self.T 10, no viz, self.log_interval 0, no controller, self.blocks 256, threads 256, self.gpu = True --> 250M ticks/sec
             self.N = self.blocks * self.threads_per_block
+            if self.N != N_drones:
+                print("N_drones is set to ", N_drones, " but will be overwritten by the number of threads and blocks")
         else:
-            self.N = N_cpu # cpu
+            self.N = N_drones # cpu
         N = self.N
 
         self.spiking_model = spiking_model
@@ -356,7 +358,7 @@ class Drone_Sim(gym.Env):
         if nr_steps:
             iters = int(nr_steps)
         elif nr_episodes:
-            iters = int(nr_episodes*1e3) # huge nr of steps (we will exit with break statement)
+            iters = int(nr_episodes*1e2) # huge nr of steps (we will exit with break statement)
 
         else:
             raise ValueError("Either nr_steps or nr_episodes should be provided!")
@@ -424,10 +426,16 @@ class Drone_Sim(gym.Env):
             with torch.no_grad():
                 # self.us = to_numpy(policy(Batch(obs=self.xs, info={})).act)
                 if tianshou_policy:
-                    if self.action_buffer:
-                        self.us = to_numpy(policy.map_action(policy(Batch({'obs':np.concatenate((self.xs[:,0:17],self.action_history.array),axis=1,dtype=np.float32), 'info':{}})).act))
+                    if self.gpu:
+                        if self.action_buffer:
+                            self.us = to_numpy(policy.map_action(policy(Batch({'obs':np.concatenate((self.d_xs[:,0:17],self.action_history.array),axis=1,dtype=np.float32), 'info':{}})).act))
+                        else:
+                            self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.xs, 'info':{}})).act))
                     else:
-                        self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.xs, 'info':{}})).act))
+                        if self.action_buffer:
+                            self.us = to_numpy(policy.map_action(policy(Batch({'obs':np.concatenate((self.xs[:,0:17],self.action_history.array),axis=1,dtype=np.float32), 'info':{}})).act))
+                        else:
+                            self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.xs, 'info':{}})).act))
                 else:
                     if self.action_buffer:
                         self.us = to_numpy(policy(np.concatenate((self.xs[:,0:17],self.action_history.array),axis=1,dtype=np.float32)))
@@ -471,7 +479,7 @@ class Drone_Sim(gym.Env):
         self.t = 0
         self.episode_counter = 0
         if self.test:
-            print('Rewards \tmean: ', np.mean(self.r_means),'\tmax: ', np.max(self.r_maxs),'\tmin: ', np.min(self.r_mins))
+            # print('Rewards \tmean: ', np.mean(self.r_means),'\tmax: ', np.max(self.r_maxs),'\tmin: ', np.min(self.r_mins))
             self.r_means = [0]
             self.r_maxs = [0]
             self.r_mins = [0]
@@ -592,7 +600,7 @@ global jitter; global kerneller
 
 torch.cuda.init()
 gpu = torch.cuda.is_available()
-# gpu = False
+gpu = False
 print(gpu)
 # debug mode
 if gpu:
@@ -605,7 +613,7 @@ else:
 if __name__ == "__main__":
     N_drones = 3
 
-    sim = Drone_Sim(gpu=gpu, dt=0.01, T=10, N_cpu=N_drones, spiking_model=None, action_buffer=False, drone='default')
+    sim = Drone_Sim(gpu=gpu, dt=0.01, T=10, N_drones=N_drones, spiking_model=None, action_buffer=False, drone='default')
     # from libs.cpuKernels import controller_rl
     # position controller gains (attitude/rate hardcoded for now, sorry)
     posPs = 2*np.ones((N_drones, 3), dtype=np.float32)

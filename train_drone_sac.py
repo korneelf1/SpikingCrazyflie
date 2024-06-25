@@ -4,7 +4,7 @@ from gym_sim import Drone_Sim
 
 # tianshou code
 from tianshou.policy import SACPolicy, BasePolicy
-from tianshou.utils.net.continuous import ActorProb, Critic
+from tianshou.utils.net.continuous import ActorProb, Critic, RecurrentActorProb, RecurrentCritic
 from tianshou.utils.net.common import Net
 from tianshou.data import VectorReplayBuffer,HERVectorReplayBuffer,PrioritizedVectorReplayBuffer
 from tianshou.trainer import OffpolicyTrainer
@@ -14,8 +14,15 @@ from tianshou.utils import WandbLogger
 
 import torch
 import os
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# torch.cuda.set_device(0)
+# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 device = torch.device('cpu')
+if device == torch.device('cuda'):
+    gpu = True
+else:   
+    gpu = False
+print('Device in use:', device)
 def create_policy():
     # create the networks behind actors and critics
     net_a = Net(state_shape=observation_space,
@@ -52,6 +59,46 @@ def create_policy():
                         action_scaling=True) # make sure actions are scaled properly
     return policy
 
+def create_recurrent_policy():
+    # create actors and critics
+    actor = RecurrentActorProb(
+        layer_num=2,
+        state_shape=observation_space,
+        action_shape=action_space,
+        hidden_layer_size=64,
+        device=device,
+        unbounded=True
+    )
+
+    critic1 = RecurrentCritic(
+        layer_num=2,
+        state_shape=observation_space,
+        action_shape=action_space,
+        hidden_layer_size=64,
+        device=device,
+    )
+    critic2 = RecurrentCritic(
+        layer_num=2,
+        state_shape=observation_space,
+        action_shape=action_space,
+        hidden_layer_size=64,
+        device=device,
+    )
+
+    # create the optimizers
+    actor_optim = torch.optim.Adam(actor.parameters(), lr=1e-3)
+    critic_optim = torch.optim.Adam(critic1.parameters(), lr=1e-3)
+    critic2_optim = torch.optim.Adam(critic2.parameters(), lr=1e-3)
+
+    # create the policy
+    policy = SACPolicy(actor=actor, actor_optim=actor_optim, \
+                        critic=critic1, critic_optim=critic_optim,\
+                        critic2=critic2, critic2_optim=critic2_optim,\
+                        action_space=env.action_space,\
+                        observation_space=env.observation_space, \
+                        action_scaling=True) # make sure actions are scaled properly
+    return policy
+
 # define training args
 args = {
       'epoch': 1e2,
@@ -59,7 +106,7 @@ args = {
       'step_per_collect': 1e3, # 5 s
       'test_num': 10,
       'update_per_step': 2,
-      'batch_size': 128,
+      'batch_size': 256,
       'wandb_project': 'FastPyDroneGym',
       'resume_id':1,
       'logger':'wandb',
@@ -67,22 +114,43 @@ args = {
       'task': 'stabilize',
       'seed': int(3),
       'logdir':'/',
+      'recurrent':True,
       }
 
 # define number of drones to be simulated
-N_envs = 100
+if device == torch.device('cpu'):
+    N_envs = 100
+else:
+    blocks = 128
+    threads = 64
+    N_envs = blocks*threads
 
-# define action buffer True to encapsulate action history in observation space
-env = Drone_Sim(N_cpu=N_envs, action_buffer=True,test=False)
-test_env = Drone_Sim(N_cpu=1, action_buffer=True, test=True)
+if args['recurrent']:
+    # define action buffer True to encapsulate action history in observation space
+    env = Drone_Sim(N_drones=N_envs, action_buffer=False,test=False, gpu=gpu)
+    test_env = Drone_Sim(N_drones=1, action_buffer=False, test=True, gpu=gpu)
 
-observation_space = env.observation_space.shape or env.observation_space.n
-action_space = env.action_space.shape or env.action_space.n
+    observation_space = env.observation_space.shape or env.observation_space.n
+    action_space = env.action_space.shape or env.action_space.n
 
-policy = create_policy()
+    policy = create_recurrent_policy()
 
-# create buffer (stack_num defines the number of sequenctial samples)
-buffer=PrioritizedVectorReplayBuffer(total_size=200000,buffer_num=N_envs, stack_num=1, alpha=0.4, beta=0.6)
+    # create buffer (stack_num defines the number of sequenctial samples)
+    buffer=PrioritizedVectorReplayBuffer(total_size=200000,buffer_num=N_envs, stack_num=64, alpha=0.4, beta=0.6)
+else:
+    # define action buffer True to encapsulate action history in observation space
+    env = Drone_Sim(N_drones=N_envs, action_buffer=True,test=False, gpu=gpu)
+    test_env = Drone_Sim(N_drones=1, action_buffer=True, test=True, gpu=gpu)
+
+    observation_space = env.observation_space.shape or env.observation_space.n
+    action_space = env.action_space.shape or env.action_space.n
+
+    policy = create_policy()
+    # create buffer (stack_num defines the number of sequenctial samples)
+    buffer=PrioritizedVectorReplayBuffer(total_size=200000,buffer_num=N_envs, stack_num=1, alpha=0.4, beta=0.6)
+if not device == torch.device('cpu'):
+    policy = policy.cuda()
+
 # create the parallel train_collector, which is optimized to gather custom vectorized envs
 train_collector = FastPyDroneSimCollector(policy=policy, env=env, buffer=buffer)
 train_collector.reset()
@@ -115,6 +183,8 @@ log_path = os.path.join(args['logdir'], log_name)
 def save_best_fn(policy: BasePolicy, log_path='') -> None:
     torch.save(policy.state_dict(), os.path.join(log_path, "policy.pth"))
 
+print('Observation space: ', observation_space)
+print('Action space: ', action_space)
 
 print("Start training")
 # trainer
