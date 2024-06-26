@@ -64,7 +64,7 @@ args = {
       'algo_name': 'sac',
       'task': 'stabilize',
       'seed': int(3),
-      'logdir':'/',
+      'logdir':'',
       }
 
 # define number of drones to be simulated
@@ -92,23 +92,16 @@ train_collector.collect(n_step=1e2)
 import datetime
 now = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
 # args['algo_name = "sac"
-log_name = os.path.join(args['task'], "sac", str(args['seed']), now)
-log_path = os.path.join(args['logdir'], log_name)
+current_path = os.path.dirname(os.path.abspath(__file__))
+log_path = os.path.join(current_path,args['logdir'], args['task'], "sac")
+from tianshou.utils import WandbLogger
+from torch.utils.tensorboard import SummaryWriter
 
-# logger
-# logger = WandbLogger()
-# logger_factory = LoggerFactoryDefault()
-# if args['logger'] == "wandb":
-#     logger_factory.logger_type = "wandb"
-#     logger_factory.wandb_project = 'test'
-# else:
-#     logger_factory.logger_type = "tensorboard"
-# logger = logger_factory.create_logger(
-#     log_dir=log_path,
-#     experiment_name=log_name,
-#     run_id=args['resume_id'],
-#     config_dict=args,
-# )
+logger = WandbLogger()
+writer = SummaryWriter(log_path)
+writer.add_text("args", str(args))
+logger.load(writer)
+
 
 def save_best_fn(policy: BasePolicy, log_path='') -> None:
     torch.save(policy.state_dict(), os.path.join(log_path, "policy.pth"))
@@ -126,7 +119,7 @@ result = OffpolicyTrainer(
     episode_per_test=args['test_num'],
     batch_size=args['batch_size'],
     save_best_fn=save_best_fn,
-    # logger=logger,
+    logger=logger,
     update_per_step=args['update_per_step'],
     test_in_train=False,
     buffer=buffer,).run()

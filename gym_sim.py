@@ -235,9 +235,7 @@ class Drone_Sim(gym.Env):
             self.kernel_step[self.blocks,self.threads_per_block](self.d_xs, self.d_us, self.d_itaus, self.d_omegaMaxs, self.d_G1s, self.d_G2s, self.dt, self.log_idx, self.d_xs_log)
         else:
             self.kernel_step(self.xs, self.us, self.itaus, self.omegaMaxs, self.G1s, self.G2s, self.dt, int(0), self.xs_log)
-        if self.action_buffer:
-            self.action_history.append(self.us)
-            self.xs = np.concatenate((self.xs[:,0:17], np.array(self.action_history)),axis=1)
+        
 
     def _compute_reward(self):
         '''Compute reward, reward function from learning to fly in 18sec paper
@@ -426,6 +424,9 @@ class Drone_Sim(gym.Env):
                 if tianshou_policy:
                     if self.action_buffer:
                         self.us = to_numpy(policy.map_action(policy(Batch({'obs':np.concatenate((self.xs[:,0:17],self.action_history.array),axis=1,dtype=np.float32), 'info':{}})).act))
+
+                        self.action_history.append(self.us)
+                        self.xs = np.concatenate((self.xs[:,0:17], np.array(self.action_history)),axis=1)
                     else:
                         self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.xs, 'info':{}})).act))
                 else:
@@ -585,8 +586,8 @@ global jitter; global kerneller
 # sudo modprobe nvidia_uvm
 # in terminal 
 
-torch.cuda.init()
-gpu = torch.cuda.is_available()
+# torch.cuda.init()
+# gpu = torch.cuda.is_available()
 gpu = False
 print(gpu)
 # debug mode
