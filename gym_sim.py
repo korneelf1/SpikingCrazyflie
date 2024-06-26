@@ -238,10 +238,8 @@ class Drone_Sim(gym.Env):
             self.kernel_step[self.blocks,self.threads_per_block](self.d_xs, self.d_us, self.d_itaus, self.d_omegaMaxs, self.d_G1s, self.d_G2s, self.dt, self.log_idx, self.d_xs_log)
         else:
             self.kernel_step(self.xs, self.us, self.itaus, self.omegaMaxs, self.G1s, self.G2s, self.dt, int(0), self.xs_log)
-            self.xs = np.concatenate((self.xs, self.pSets),axis=1)
-            if self.action_buffer:
-                self.action_history.append(self.us)
-                self.xs = np.concatenate((self.xs[:,0:17], np.array(self.action_history)),axis=1)
+            # self.xs = np.concatenate((self.xs, self.pSets),axis=1)
+            
             
     def _compute_reward(self):
         '''Compute reward, reward function from learning to fly in 18sec paper
@@ -304,7 +302,7 @@ class Drone_Sim(gym.Env):
 
             # mask with done array
             self.xs[:,0:17][self.done,:] = xs_new[self.done,:]
-            self.xs = np.concatenate((self.xs[:,0:17],self.pSets),axis=1)
+            # self.xs = np.concatenate((self.xs[:,0:17],self.pSets),axis=1) # pos should still be in xs!
             if self.action_buffer:
                 self.xs = np.concatenate((self.xs[:,0:20],self.action_history),axis=1,dtype=np.float32)
             
@@ -391,8 +389,10 @@ class Drone_Sim(gym.Env):
 
         ts = time()
         ei = 0
-        for i in range(iters):
-        # for i in tqdm(range(iters), desc="Running simulation"):
+        # for i in range(iters):
+        for i in tqdm(range(iters), desc="Running simulation"):
+            if self.gpu:
+                self._move_to_cuda()
             self.global_step_counter += int(self.N)
             if self.gpu:
                 obs_arr[i] = self.d_xs.copy_to_host()
@@ -400,10 +400,8 @@ class Drone_Sim(gym.Env):
                 obs_arr[i] = self.xs
             self._simulate_step()
 
-            self.xs = np.concatenate((self.xs[:,0:17], self.pSets),axis=1)
-            if self.action_buffer:
-                self.action_history.reset()
-                self.xs = np.concatenate((self.xs,self.action_history),axis=1,dtype=np.float32)
+            
+            
             self._compute_reward()
 
 
@@ -444,23 +442,28 @@ class Drone_Sim(gym.Env):
                 # self.us = to_numpy(policy(Batch(obs=self.xs, info={})).act)
                 if tianshou_policy:
                     if self.gpu:
-                        raise UserWarning('Position setpoints not passed on GPU yet.')
+                        # raise UserWarning('Position setpoints not passed on GPU yet.')
                         if self.action_buffer:
-                            self.us = to_numpy(policy.map_action(policy(Batch({'obs':np.concatenate((self.d_xs[:,0:17],self.action_history.array),axis=1,dtype=np.float32), 'info':{}})).act))
+                            self.us = to_numpy(policy.map_action(policy(Batch({'obs':np.concatenate((self.d_xs[:,0:20],self.action_history.array),axis=1,dtype=np.float32), 'info':{}})).act))
+                            self.action_history.append(self.us)
                         else:
-                            self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.xs, 'info':{}})).act))
+                            self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.d_xs, 'info':{}})).act))
                     else:
                         # self.xs = np.concatenate((self.xs[:,0:17],self.pSets),axis=1)
                         if self.action_buffer:
-                            self.us = to_numpy(policy.map_action(policy(Batch({'obs':np.concatenate((self.xs[:,0:20],self.action_history.array),axis=1,dtype=np.float32), 'info':{}})).act))
+                            self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.xs, 'info':{}})).act))
+                            self.action_history.append(self.us)
                         else:
                             self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.xs, 'info':{}})).act))
                 else:
+                    if self.gpu:
+                        raise UserWarning('GPU support not yet implemented for non tianshou policies.')
                     if self.action_buffer:
-                        self.us = to_numpy(policy(np.concatenate((self.xs[:,0:17],self.action_history.array),axis=1,dtype=np.float32)))
+                        self.us = to_numpy(policy(np.concatenate((self.xs[:,0:20],self.action_history.array),axis=1,dtype=np.float32)))
                     else:
                         self.us = to_numpy(policy(self.xs))
-                
+                if self.action_buffer:
+                    self.xs = np.concatenate((self.xs[:,0:20],self.action_history),axis=1,dtype=np.float32)
                 act_arr[i] = self.us
 
             if nr_episodes and ei >= nr_episodes:
@@ -507,7 +510,7 @@ class Drone_Sim(gym.Env):
             self.spiking_model.reset_hidden()
             print('Reward: \taverage: ',np.mean(self.r),\
                     '\tmax: ',np.max(self.r), '\tmin: ', np.min(self.r))
-        self.xs = np.concatenate((self.xs, self.pSets),axis=1)
+        self.xs = np.concatenate((self.xs[:,0:17], self.pSets),axis=1)
         if self.action_buffer:
             self.action_history.reset()
             self.xs = np.concatenate((self.xs,self.action_history),axis=1,dtype=np.float32)
@@ -563,13 +566,16 @@ class Drone_Sim(gym.Env):
                 if tianshou_policy:
                     if self.action_buffer:
                         self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.xs, 'info':{}})).act))
+                        self.action_history.append(self.us)
                     else:
                         self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.xs, 'info':{}})).act))
                 else:
                     if self.action_buffer:
                         self.us = to_numpy(policy(np.concatenate((self.xs[:,0:17],self.action_history.array),axis=1,dtype=np.float32)))
+                        self.action_history.append(self.us)
                     else:
                         self.us = to_numpy(policy(self.xs))
+
                 
             if viz  and  ws.ws is not None  and  not i % int(viz_interval/self.dt):
                 # visualize every 0.1 seconds
