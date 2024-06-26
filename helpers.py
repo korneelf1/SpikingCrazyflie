@@ -12,7 +12,7 @@ from tianshou.utils import WandbLogger
 
 import torch
 class NumpyDeque(object):
-    def __init__(self, shape:tuple) -> None:
+    def __init__(self, shape:tuple, device='cpu') -> None:
         self.shape_arr = shape
 
         self.array = np.zeros((self.shape_arr), dtype=np.float32)

@@ -43,31 +43,38 @@ def quaternion_rotation_matrix(Q):
     return rot_matrix
 
 class IMU:
-    def __init__(self, noise=0.0, bias=0.0, offset=np.array([0, 0, 0])):
+    def __init__(self, noise=np.array([0, 0, 0, 0, 0, 0]), bias=np.array([0, 0, 0, 0, 0, 0]), dt=0.01, offset=np.array([0, 0, 0])):
         '''
         noise: standard deviation of the noise
-        bias: standard deviation of the bias
+        bias: initial value of the bias (modelled as brownian motion)
         offset: offset of the sensor in body frame'''
-        self.noise = noise
+        assert len(noise) == 6
+        assert len(bias) == 6
+        assert len(offset) == 3
+
+        self.dt = dt
+
+        self.noise = noise/np.sqrt(self.dt)
         self.bias = bias
 
         self.accel = np.array([0, 0, 0])
         self.gyro = np.array([0, 0, 0])
-        self.mag = np.array([0, 0, 0])
 
         self.offset = offset
 
         self.vel_history = NumpyDeque((100, 3))
         self.accel_history = NumpyDeque((100, 3))
         self.gyro_history = NumpyDeque((100, 3))
-        self.mag_history = NumpyDeque((100, 3))
 
-    def add_noise(self, dt):
+    def add_brownian_bias(self):
+        self.bias += np.random.normal(0, 0.01, size=(6,)) * np.sqrt(self.dt)
+    def add_noise(self):
+        self.add_brownian_bias()
         self.accel = np.random.normal(self.accel, self.noise) - self.bias
         self.gyro = np.random.normal(self.gyro, self.noise) - self.bias
-        self.mag = np.random.normal(self.mag, self.noise) - self.bias
 
-    def simulate(self, state, dt):
+
+    def simulate(self, state):
         '''
         state: [x, y, z, vx, vy, vz, qw, qx, qy, qz, wx, wy, wz]
         '''
@@ -82,7 +89,7 @@ class IMU:
         # transform gravity to body frame
         accel_grav = np.dot(R, np.array([0, 0, -9.81])) 
         # compute acceleration from velocity history
-        accel_vel_change = (self.vel_history[0] - self.vel_history[1]) / dt
+        accel_vel_change = (self.vel_history[0] - self.vel_history[1]) / self.dt
 
         self.accel = accel_grav + accel_vel_change
 
@@ -91,12 +98,14 @@ class IMU:
         # update angular velocity
         self.gyro = state[10:13]
 
-        self.add_noise(dt)
+        self.add_noise()
+        return np.concatenate([self.accel, self.gyro])
 
     def reset(self):
         self.accel = np.array([0, 0, 0])
         self.gyro = np.array([0, 0, 0])
-        self.mag = np.array([0, 0, 0])
+        self.bias = np.array([0, 0, 0, 0, 0, 0])
+
 
     def render(self):
         pass
