@@ -64,18 +64,18 @@ def reward_function(x, pset, motor_commands, global_step_counter,r): # now compu
         Cv = min(Cv*CvC, Cvlim)
         Ca = min(Ca*CaC, Calim)
 
-    r[0] = max(-1e5,-Cp*np.sum((pos-pset)**2) \
-            - Cv*np.sum((vel)**2) \
-                - Ca*np.sum((motor_commands-Cab)**2) \
-                    - Cw*np.sum((qd)**2) \
-                        + Crs)
+    # r[0] = max(-1e5,-Cp*np.sum((pos-pset)**2) \
+    #         - Cv*np.sum((vel)**2) \
+    #             - Ca*np.sum((motor_commands-Cab)**2) \
+    #                 - Cw*np.sum((qd)**2) \
+    #                     + Crs)
 
     # no position penalty
-    # r[0] = max(-1e3,- Cv*np.sum((vel)**2) \
-    #         - Ca*np.sum((motor_commands-Cab)**2) \
-    #             -Cq*(q[0]**2)\
-    #             - Cw*np.sum((qd)**2) \
-    #                 + Crs)
+    r[0] = max(-1e3,- Cv*np.sum((vel)**2) \
+            - Ca*np.sum((motor_commands-Cab)**2) \
+                -Cq*(q[0]**2)\
+                - Cw*np.sum((qd)**2) \
+                    + Crs)
 
 # sim done function
 @kerneller(["void(f4[::1],b1[::1])"], "(states)->()")
