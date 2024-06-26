@@ -44,8 +44,8 @@ class Drone_Sim(gym.Env):
         self.dt = dt                # step time is self.dt seconds (forward Euler)
         self.T = T                  # run for self.T seconds
         if self.gpu:                # number of simulations to run in parallel
-            self.blocks = 128       # 128 or 256 seem best. Should be multiple of 32
-            self.threads_per_block = 64 # depends on global memorty usage. 256 seems best without. Should be multiple of 64
+            self.blocks = 128      # 128 or 256 seem best. Should be multiple of 32
+            self.threads_per_block = 2 # depends on global memorty usage. 256 seems best without. Should be multiple of 64
             # # self.dt 0.01, self.T 10, no viz, self.log_interval 0, no controller, self.blocks 256, threads 256, self.gpu = True --> 250M ticks/sec
             self.N = self.blocks * self.threads_per_block
             if self.N != N_drones:
@@ -59,12 +59,12 @@ class Drone_Sim(gym.Env):
 
         
         if action_buffer: # add last 25 inputs as observation
-            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(4*action_buffer_len+17,), dtype=np.float32)
+            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(4*action_buffer_len+20,), dtype=np.float32)
             self.action_history = NumpyDeque((self.N,4*action_buffer_len)) # 25 timesteps, 4 actions
 
         else:
-        # create gymnasium observation and action space
-            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(17,), dtype=np.float32)
+        # create gymnasium observation and action space 17 + 3 for position
+            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(20,), dtype=np.float32)
         self.action_space = gym.spaces.Box(low=0., high=1., shape=(4,), dtype=np.float32)
 
 
@@ -76,7 +76,7 @@ class Drone_Sim(gym.Env):
             self.r_maxs  = [0]
             self.r_mins  = [0]
         
-        self.reset()
+        
 
         # other settings (vizualition and logging)
         self.viz_interval = 0.05 # visualize every self.viz_interval simulation-seconds
@@ -104,7 +104,7 @@ class Drone_Sim(gym.Env):
         X, Y = np.meshgrid(x_vals, y_vals)
         vectors = np.column_stack((X.ravel(), Y.ravel(), -1.5*np.ones_like(X.ravel())))
         self.pSets = vectors[:N].astype(np.float32) # position setpoint
-        self.pSets = np.zeros_like(self.pSets)
+        # self.pSets = np.zeros_like(self.pSets)
         # import compute kernels
         global kerneller; global jitter
         if self.gpu:
@@ -138,6 +138,7 @@ class Drone_Sim(gym.Env):
         self.iters = int(self.T / self.dt)
         self.Nlog = int(self.iters / self.log_interval) if self.log_interval > 0 else 0
 
+        self.reset()
         self.us = np.random.random((N, 4)).astype(np.float32) # inputs (motor speeds)
 
         # create logs
@@ -220,10 +221,10 @@ class Drone_Sim(gym.Env):
         NOTE: currently not used'''	
         if self.action_buffer:
             self.xs_log = np.empty(
-            (self.N, self.Nlog, 17+len(self.action_history)), dtype=np.float32)
+            (self.N, self.Nlog, 20+len(self.action_history)), dtype=np.float32)
         else:
             self.xs_log = np.empty(
-                (self.N, self.Nlog, 17), dtype=np.float32)
+                (self.N, self.Nlog, 20), dtype=np.float32)
         self.xs_log[:] = np.nan
 
     def _simulate_step(self):
@@ -237,10 +238,11 @@ class Drone_Sim(gym.Env):
             self.kernel_step[self.blocks,self.threads_per_block](self.d_xs, self.d_us, self.d_itaus, self.d_omegaMaxs, self.d_G1s, self.d_G2s, self.dt, self.log_idx, self.d_xs_log)
         else:
             self.kernel_step(self.xs, self.us, self.itaus, self.omegaMaxs, self.G1s, self.G2s, self.dt, int(0), self.xs_log)
-        if self.action_buffer:
-            self.action_history.append(self.us)
-            self.xs = np.concatenate((self.xs[:,0:17], np.array(self.action_history)),axis=1)
-
+            self.xs = np.concatenate((self.xs, self.pSets),axis=1)
+            if self.action_buffer:
+                self.action_history.append(self.us)
+                self.xs = np.concatenate((self.xs[:,0:17], np.array(self.action_history)),axis=1)
+            
     def _compute_reward(self):
         '''Compute reward, reward function from learning to fly in 18sec paper
         TODO: optimize with cpuKernels and gpuKernels'''	
@@ -302,8 +304,9 @@ class Drone_Sim(gym.Env):
 
             # mask with done array
             self.xs[:,0:17][self.done,:] = xs_new[self.done,:]
+            self.xs = np.concatenate((self.xs[:,0:17],self.pSets),axis=1)
             if self.action_buffer:
-                self.xs = np.concatenate((self.xs[:,0:17],self.action_history),axis=1,dtype=np.float32)
+                self.xs = np.concatenate((self.xs[:,0:20],self.action_history),axis=1,dtype=np.float32)
             
     async def _step(self, enable_reset = True):
         '''
@@ -365,11 +368,11 @@ class Drone_Sim(gym.Env):
         # print("Running simulation for ", iters, " steps, with ", self.N, " drones")
 
         if self.action_buffer:
-            obs_arr = np.zeros((iters, self.N, 17+len(self.action_history)), dtype=np.float32)
-            obs_next_arr = np.zeros((iters, self.N, 17+len(self.action_history)), dtype=np.float32)
+            obs_arr = np.zeros((iters, self.N, 20+len(self.action_history)), dtype=np.float32)
+            obs_next_arr = np.zeros((iters, self.N, 20+len(self.action_history)), dtype=np.float32)
         else:
-            obs_arr = np.zeros((iters, self.N, 17), dtype=np.float32)
-            obs_next_arr = np.zeros((iters, self.N, 17), dtype=np.float32)
+            obs_arr = np.zeros((iters, self.N, 20), dtype=np.float32)
+            obs_next_arr = np.zeros((iters, self.N, 20), dtype=np.float32)
         act_arr = np.zeros((iters, self.N, 4), dtype=np.float32)
         done_arr = np.zeros((iters, self.N, ), dtype=bool)
         info_arr = np.zeros((iters, self.N, 1), dtype=bool)
@@ -380,8 +383,8 @@ class Drone_Sim(gym.Env):
         episode_rews = []
         episode_len_arr = np.zeros((self.N,),dtype=np.int32)
 
-        if not self.test:
-            self.reset()
+        # if not self.test:
+        self.reset()
         
         if self.gpu:
             self._move_to_cuda()
@@ -397,7 +400,10 @@ class Drone_Sim(gym.Env):
                 obs_arr[i] = self.xs
             self._simulate_step()
 
-
+            self.xs = np.concatenate((self.xs[:,0:17], self.pSets),axis=1)
+            if self.action_buffer:
+                self.action_history.reset()
+                self.xs = np.concatenate((self.xs,self.action_history),axis=1,dtype=np.float32)
             self._compute_reward()
 
 
@@ -411,29 +417,42 @@ class Drone_Sim(gym.Env):
             if self.gpu:
                 obs_next_arr[i] = self.d_xs.copy_to_host()
                 rew_arr[i] = self.d_r.copy_to_host()
+                done_host = self.d_done.copy_to_host()
+                done_arr[i] = done_host
+
+                
+                episode_len_arr += 1 - done_host # adds an increment for every step
+                if np.any(done_host):
+                    episode_lens.extend(episode_len_arr[done_host].tolist())
+                    episode_rews.extend(rew_arr[i][done_host].tolist())
+                    episode_len_arr[done_host] = 0
+                    ei += np.sum(done_host)
+
             else:
                 obs_next_arr[i] = self.xs
                 rew_arr[i] = self.r
-            
-            done_arr[i] = self.done
-            episode_len_arr += 1 - self.done # adds an increment for every step
-            if np.any(self.done):
-                episode_lens.extend(episode_len_arr[self.done].tolist())
-                episode_rews.extend(rew_arr[i][self.done].tolist())
-                episode_len_arr[self.done] = 0
-                ei += np.sum(self.done)
+                done_arr[i] = self.done
+
+                episode_len_arr += 1 - self.done # adds an increment for every step
+                if np.any(self.done):
+                    episode_lens.extend(episode_len_arr[self.done].tolist())
+                    episode_rews.extend(rew_arr[i][self.done].tolist())
+                    episode_len_arr[self.done] = 0
+                    ei += np.sum(self.done)
 
             with torch.no_grad():
                 # self.us = to_numpy(policy(Batch(obs=self.xs, info={})).act)
                 if tianshou_policy:
                     if self.gpu:
+                        raise UserWarning('Position setpoints not passed on GPU yet.')
                         if self.action_buffer:
                             self.us = to_numpy(policy.map_action(policy(Batch({'obs':np.concatenate((self.d_xs[:,0:17],self.action_history.array),axis=1,dtype=np.float32), 'info':{}})).act))
                         else:
                             self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.xs, 'info':{}})).act))
                     else:
+                        # self.xs = np.concatenate((self.xs[:,0:17],self.pSets),axis=1)
                         if self.action_buffer:
-                            self.us = to_numpy(policy.map_action(policy(Batch({'obs':np.concatenate((self.xs[:,0:17],self.action_history.array),axis=1,dtype=np.float32), 'info':{}})).act))
+                            self.us = to_numpy(policy.map_action(policy(Batch({'obs':np.concatenate((self.xs[:,0:20],self.action_history.array),axis=1,dtype=np.float32), 'info':{}})).act))
                         else:
                             self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.xs, 'info':{}})).act))
                 else:
@@ -488,6 +507,7 @@ class Drone_Sim(gym.Env):
             self.spiking_model.reset_hidden()
             print('Reward: \taverage: ',np.mean(self.r),\
                     '\tmax: ',np.max(self.r), '\tmin: ', np.min(self.r))
+        self.xs = np.concatenate((self.xs, self.pSets),axis=1)
         if self.action_buffer:
             self.action_history.reset()
             self.xs = np.concatenate((self.xs,self.action_history),axis=1,dtype=np.float32)
@@ -542,7 +562,7 @@ class Drone_Sim(gym.Env):
                 # self.us = to_numpy(policy(Batch(obs=self.xs, info={})).act)
                 if tianshou_policy:
                     if self.action_buffer:
-                        self.us = to_numpy(policy.map_action(policy(Batch({'obs':np.concatenate((self.xs[:,0:17],self.action_history.array),axis=1,dtype=np.float32), 'info':{}})).act))
+                        self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.xs, 'info':{}})).act))
                     else:
                         self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.xs, 'info':{}})).act))
                 else:

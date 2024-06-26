@@ -1,5 +1,5 @@
 # custom code
-from custom_collector import ParallelCollector, FastPyDroneSimCollector
+from custom_collector import FastPyDroneSimCollector
 from gym_sim import Drone_Sim
 
 # tianshou code
@@ -104,7 +104,7 @@ args = {
       'epoch': 1e2,
       'step_per_epoch': 1e4,
       'step_per_collect': 1e3, # 5 s
-      'test_num': 10,
+      'test_num': 128,
       'update_per_step': 2,
       'batch_size': 256,
       'wandb_project': 'FastPyDroneGym',
@@ -113,16 +113,17 @@ args = {
       'algo_name': 'sac',
       'task': 'stabilize',
       'seed': int(3),
-      'logdir':'/',
-      'recurrent':True,
+      'logdir':'',
+      'recurrent':False,
+      'logger': 'wandb',
       }
 
 # define number of drones to be simulated
 if device == torch.device('cpu'):
     N_envs = 100
 else:
-    blocks = 128
-    threads = 64
+    blocks = 32
+    threads = 8
     N_envs = blocks*threads
 
 if args['recurrent']:
@@ -156,29 +157,21 @@ train_collector = FastPyDroneSimCollector(policy=policy, env=env, buffer=buffer)
 train_collector.reset()
 test_collector = FastPyDroneSimCollector(policy=policy,env=test_env)
 # define a number of start timesteps to fill buffer (now one sec of data *100 drones )
-train_collector.collect(n_step=1e2)
+train_collector.collect(n_step=N_envs*10)
 
 # log
 import datetime
 now = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
 # args['algo_name = "sac"
-log_name = os.path.join(args['task'], "sac", str(args['seed']), now)
-log_path = os.path.join(args['logdir'], log_name)
+current_path = os.path.dirname(os.path.abspath(__file__))
+log_path = os.path.join(current_path,args['logdir'], args['task'], "sac")
+from tianshou.utils import WandbLogger
+from torch.utils.tensorboard import SummaryWriter
 
-# logger
-# logger = WandbLogger()
-# logger_factory = LoggerFactoryDefault()
-# if args['logger'] == "wandb":
-#     logger_factory.logger_type = "wandb"
-#     logger_factory.wandb_project = 'test'
-# else:
-#     logger_factory.logger_type = "tensorboard"
-# logger = logger_factory.create_logger(
-#     log_dir=log_path,
-#     experiment_name=log_name,
-#     run_id=args['resume_id'],
-#     config_dict=args,
-# )
+logger = WandbLogger()
+writer = SummaryWriter(log_path)
+writer.add_text("args", str(args))
+logger.load(writer)
 
 def save_best_fn(policy: BasePolicy, log_path='') -> None:
     torch.save(policy.state_dict(), os.path.join(log_path, "policy.pth"))
@@ -198,7 +191,7 @@ result = OffpolicyTrainer(
     episode_per_test=args['test_num'],
     batch_size=args['batch_size'],
     save_best_fn=save_best_fn,
-    # logger=logger,
+    logger=logger,
     update_per_step=args['update_per_step'],
     test_in_train=False,
     buffer=buffer,).run()
