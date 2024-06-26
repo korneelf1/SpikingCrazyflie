@@ -22,7 +22,7 @@ from helpers import NumpyDeque
 GRAVITY = 9.80665
 # print('\nNOTE NOW REWARD IS MODIFIED TO JUST MAKE STABILIZING CONTROLLER (DISREGARDING ANY POSITIONS)\n')
 class Drone_Sim(gym.Env):
-    def __init__(self, gpu=False, drone='CrazyFlie', action_buffer=True,action_buffer_len=32, dt=0.01, T=2, N_drones=1, spiking_model=None, test=False):
+    def __init__(self, gpu=False, drone='CrazyFlie', action_buffer=True,action_buffer_len=32, dt=0.01, T=2, N_drones=1, spiking_model=None, test=False, device='cpu'):
         super(Drone_Sim, self).__init__()
         '''
         Vectorized quadrotor simulation with websocket pose output
@@ -39,6 +39,7 @@ class Drone_Sim(gym.Env):
 
         ### sim config ###
         self.gpu = gpu              # run on the self.gpu using cuda
+        self.device = device        # cpu or cuda, used if env is ran on CPU, but model on GPU 
         # length / number of parallel sims
         self.action_buffer = action_buffer
         self.dt = dt                # step time is self.dt seconds (forward Euler)
@@ -294,17 +295,30 @@ class Drone_Sim(gym.Env):
             raise NotImplementedError("This function is not implemented yet, see dones!")
             self.reset_subenvs(self.done, seed,self.xs)
         else:
-            if self.action_buffer:
-                self.action_history.reset(self.done)
-            # create new states
-            xs_new = np.random.random((self.N, 17)).astype(np.float32) - 0.5
-            xs_new[:, 6:10] /= np.linalg.norm(xs_new[:, 6:10], axis=1)[:, np.newaxis]
+            if self.gpu:
+                if self.action_buffer:
+                    self.action_history.reset(self.d_done)
+                # create new states
+                xs_new = np.random.random((self.N, 17)).astype(np.float32) - 0.5
+                xs_new[:, 6:10] /= np.linalg.norm(xs_new[:, 6:10], axis=1)[:, np.newaxis]
 
-            # mask with done array
-            self.xs[:,0:17][self.done,:] = xs_new[self.done,:]
-            # self.xs = np.concatenate((self.xs[:,0:17],self.pSets),axis=1) # pos should still be in xs!
-            if self.action_buffer:
-                self.xs = np.concatenate((self.xs[:,0:20],self.action_history),axis=1,dtype=np.float32)
+                # mask with done array
+                self.d_xs[:,0:17][self.d_done,:] = xs_new[self.d_done,:]
+                # self.xs = np.concatenate((self.xs[:,0:17],self.pSets),axis=1) # pos should still be in xs!
+                if self.action_buffer:
+                    self.d_xs = np.concatenate((self.d_xs[:,0:20],self.action_history),axis=1,dtype=np.float32)
+            else:
+                if self.action_buffer:
+                    self.action_history.reset(self.done)
+                # create new states
+                xs_new = np.random.random((self.N, 17)).astype(np.float32) - 0.5
+                xs_new[:, 6:10] /= np.linalg.norm(xs_new[:, 6:10], axis=1)[:, np.newaxis]
+
+                # mask with done array
+                self.xs[:,0:17][self.done,:] = xs_new[self.done,:]
+                # self.xs = np.concatenate((self.xs[:,0:17],self.pSets),axis=1) # pos should still be in xs!
+                if self.action_buffer:
+                    self.xs = np.concatenate((self.xs[:,0:20],self.action_history),axis=1,dtype=np.float32)
             
     async def _step(self, enable_reset = True):
         '''
@@ -389,28 +403,27 @@ class Drone_Sim(gym.Env):
 
         ts = time()
         ei = 0
-        # for i in range(iters):
-        for i in tqdm(range(iters), desc="Running simulation"):
-            if self.gpu:
-                self._move_to_cuda()
+        for i in range(iters):
+        # for i in tqdm(range(iters), desc="Running simulation"):
+
             self.global_step_counter += int(self.N)
             if self.gpu:
                 obs_arr[i] = self.d_xs.copy_to_host()
             else:
                 obs_arr[i] = self.xs
+
             self._simulate_step()
+            
 
-            
-            
             self._compute_reward()
-
+            
 
             if self.test:
                 self.r_means.append(np.mean(self.r))
                 self.r_maxs.append(np.max(self.r))
                 self.r_mins.append(np.min(self.r))
-            self._check_done()
 
+            self._check_done()
 
             if self.gpu:
                 obs_next_arr[i] = self.d_xs.copy_to_host()
@@ -449,12 +462,13 @@ class Drone_Sim(gym.Env):
                         else:
                             self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.d_xs, 'info':{}})).act))
                     else:
+                        xs_torch = torch.from_numpy(self.xs).to(self.device)
                         # self.xs = np.concatenate((self.xs[:,0:17],self.pSets),axis=1)
                         if self.action_buffer:
-                            self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.xs, 'info':{}})).act))
+                            self.us = to_numpy(policy.map_action(policy(Batch({'obs':xs_torch, 'info':{}})).act))
                             self.action_history.append(self.us)
                         else:
-                            self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.xs, 'info':{}})).act))
+                            self.us = to_numpy(policy.map_action(policy(Batch({'obs':xs_torch, 'info':{}})).act))
                 else:
                     if self.gpu:
                         raise UserWarning('GPU support not yet implemented for non tianshou policies.')
@@ -463,9 +477,12 @@ class Drone_Sim(gym.Env):
                     else:
                         self.us = to_numpy(policy(self.xs))
                 if self.action_buffer:
-                    self.xs = np.concatenate((self.xs[:,0:20],self.action_history),axis=1,dtype=np.float32)
+                    if self.gpu:
+                        self.d_xs = np.concatenate((self.d_xs[:,0:20],self.action_history.array),axis=1,dtype=np.float32)
+                    else:
+                        self.xs = np.concatenate((self.xs[:,0:20],self.action_history),axis=1,dtype=np.float32)
                 act_arr[i] = self.us
-
+            
             if nr_episodes and ei >= nr_episodes:
                 self.episode_counter += ei
                 # trim the arrays
@@ -485,6 +502,9 @@ class Drone_Sim(gym.Env):
             cuda.synchronize()
         # done_arr[i] = np.ones((self.N, 1), dtype=bool)
         ei+= self.N - np.sum(done_arr[i])
+
+
+
         return obs_arr, act_arr, rew_arr, done_arr, obs_next_arr, info_arr, {'episode_lens': episode_lens, 'episode_rews': episode_rews, 'episode_ctr': ei, 'time': time()-ts}
     
     def reset(self,seed=None, dones = None):
@@ -624,8 +644,8 @@ global jitter; global kerneller
 # sudo modprobe nvidia_uvm
 # in terminal 
 
-torch.cuda.init()
-gpu = torch.cuda.is_available()
+# torch.cuda.init()
+# gpu = torch.cuda.is_available()
 gpu = False
 print(gpu)
 # debug mode

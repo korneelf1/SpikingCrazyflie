@@ -14,10 +14,13 @@ from tianshou.utils import WandbLogger
 
 import torch
 import os
+# set wandb in debug mode
+import wandb
+wandb.init(mode='disabled')
 
-# torch.cuda.set_device(0)
-# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-device = torch.device('cpu')
+torch.cuda.set_device(0)
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# device = torch.device('cpu')
 if device == torch.device('cuda'):
     gpu = True
 else:   
@@ -101,12 +104,12 @@ def create_recurrent_policy():
 
 # define training args
 args = {
-      'epoch': 1e2,
-      'step_per_epoch': 1e4,
-      'step_per_collect': 1e3, # 5 s
-      'test_num': 128,
+      'epoch': .5e2,
+      'step_per_epoch': 5e4,
+      'step_per_collect': 5e3, # 2.5 s
+      'test_num': 50,
       'update_per_step': 2,
-      'batch_size': 256,
+      'batch_size': 256*4,
       'wandb_project': 'FastPyDroneGym',
       'resume_id':1,
       'logger':'wandb',
@@ -119,13 +122,13 @@ args = {
       }
 
 # define number of drones to be simulated
-if device == torch.device('cpu'):
+if not gpu:
     N_envs = 100
 else:
     blocks = 32
     threads = 8
     N_envs = blocks*threads
-
+N_envs = 200
 if args['recurrent']:
     # define action buffer True to encapsulate action history in observation space
     env = Drone_Sim(N_drones=N_envs, action_buffer=False,test=False, gpu=gpu)
@@ -140,8 +143,8 @@ if args['recurrent']:
     buffer=PrioritizedVectorReplayBuffer(total_size=200000,buffer_num=N_envs, stack_num=64, alpha=0.4, beta=0.6)
 else:
     # define action buffer True to encapsulate action history in observation space
-    env = Drone_Sim(N_drones=N_envs, action_buffer=True,test=False, gpu=gpu)
-    test_env = Drone_Sim(N_drones=1, action_buffer=True, test=True, gpu=gpu)
+    env = Drone_Sim(N_drones=N_envs, action_buffer=True,test=False, gpu=False, device=device)
+    test_env = Drone_Sim(N_drones=10, action_buffer=True, test=True, gpu=False, device=device)
 
     observation_space = env.observation_space.shape or env.observation_space.n
     action_space = env.action_space.shape or env.action_space.n
@@ -157,7 +160,7 @@ train_collector = FastPyDroneSimCollector(policy=policy, env=env, buffer=buffer)
 train_collector.reset()
 test_collector = FastPyDroneSimCollector(policy=policy,env=test_env)
 # define a number of start timesteps to fill buffer (now one sec of data *100 drones )
-train_collector.collect(n_step=N_envs*10)
+train_collector.collect(n_step=N_envs*100)
 
 # log
 import datetime
@@ -179,6 +182,7 @@ def save_best_fn(policy: BasePolicy, log_path='') -> None:
 print('Observation space: ', observation_space)
 print('Action space: ', action_space)
 
+
 print("Start training")
 # trainer
 result = OffpolicyTrainer(
@@ -195,6 +199,7 @@ result = OffpolicyTrainer(
     update_per_step=args['update_per_step'],
     test_in_train=False,
     buffer=buffer,).run()
+    
 
 # print with nice formatting
 import pprint

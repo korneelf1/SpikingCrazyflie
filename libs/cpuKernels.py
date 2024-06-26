@@ -64,7 +64,7 @@ def reward_function(x, pset, motor_commands, global_step_counter,r): # now compu
         Cv = min(Cv*CvC, Cvlim)
         Ca = min(Ca*CaC, Calim)
 
-    # r[0] = max(-1e5,-Cp*np.sum((pos-pset)**2) \
+    # r[0] = max(-1e3,-Cp*np.sum((pos-pset)**2) \
     #         - Cv*np.sum((vel)**2) \
     #             - Ca*np.sum((motor_commands-Cab)**2) \
     #                 - Cw*np.sum((qd)**2) \
