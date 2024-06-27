@@ -105,7 +105,7 @@ class Drone_Sim(gym.Env):
         X, Y = np.meshgrid(x_vals, y_vals)
         vectors = np.column_stack((X.ravel(), Y.ravel(), -1.5*np.ones_like(X.ravel())))
         self.pSets = vectors[:N].astype(np.float32) # position setpoint
-        # self.pSets = np.zeros_like(self.pSets)
+        self.pSets = np.zeros_like(self.pSets)
         # import compute kernels
         global kerneller; global jitter
         if self.gpu:
@@ -240,8 +240,7 @@ class Drone_Sim(gym.Env):
         else:
             self.kernel_step(self.xs, self.us, self.itaus, self.omegaMaxs, self.G1s, self.G2s, self.dt, int(0), self.xs_log)
             # self.xs = np.concatenate((self.xs, self.pSets),axis=1)
-            
-            
+                        
     def _compute_reward(self):
         '''Compute reward, reward function from learning to fly in 18sec paper
         TODO: optimize with cpuKernels and gpuKernels'''	
@@ -395,8 +394,8 @@ class Drone_Sim(gym.Env):
         episode_rews = []
         episode_len_arr = np.zeros((self.N,),dtype=np.int32)
 
-        # if not self.test:
-        self.reset()
+        if not self.test:
+            self.reset()
         
         if self.gpu:
             self._move_to_cuda()
@@ -462,12 +461,16 @@ class Drone_Sim(gym.Env):
                         else:
                             self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.d_xs, 'info':{}})).act))
                     else:
-                        xs_torch = torch.from_numpy(self.xs).to(self.device)
+                        
                         # self.xs = np.concatenate((self.xs[:,0:17],self.pSets),axis=1)
                         if self.action_buffer:
+                            self.xs = np.concatenate((self.xs[:,0:20],self.action_history.array),axis=1,dtype=np.float32)
+                            xs_torch = torch.from_numpy(self.xs).to(self.device)
                             self.us = to_numpy(policy.map_action(policy(Batch({'obs':xs_torch, 'info':{}})).act))
                             self.action_history.append(self.us)
+                            self.xs = np.concatenate((self.xs[:,0:20],self.action_history.array),axis=1,dtype=np.float32)
                         else:
+                            xs_torch = torch.from_numpy(self.xs).to(self.device)
                             self.us = to_numpy(policy.map_action(policy(Batch({'obs':xs_torch, 'info':{}})).act))
                 else:
                     if self.gpu:
@@ -479,8 +482,8 @@ class Drone_Sim(gym.Env):
                 if self.action_buffer:
                     if self.gpu:
                         self.d_xs = np.concatenate((self.d_xs[:,0:20],self.action_history.array),axis=1,dtype=np.float32)
-                    else:
-                        self.xs = np.concatenate((self.xs[:,0:20],self.action_history),axis=1,dtype=np.float32)
+                    # else:
+                    #     self.xs = np.concatenate((self.xs[:,0:20],self.action_history),axis=1,dtype=np.float32)
                 act_arr[i] = self.us
             
             if nr_episodes and ei >= nr_episodes:

@@ -18,7 +18,7 @@ import os
 import wandb
 wandb.init(mode='disabled')
 
-torch.cuda.set_device(0)
+# torch.cuda.set_device(0)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # device = torch.device('cpu')
 if device == torch.device('cuda'):
@@ -104,9 +104,9 @@ def create_recurrent_policy():
 
 # define training args
 args = {
-      'epoch': .5e2,
-      'step_per_epoch': 5e4,
-      'step_per_collect': 5e3, # 2.5 s
+      'epoch': 1e2,
+      'step_per_epoch': 1e4,
+      'step_per_collect': 1e3, # 2.5 s
       'test_num': 50,
       'update_per_step': 2,
       'batch_size': 256*4,
@@ -128,11 +128,11 @@ else:
     blocks = 32
     threads = 8
     N_envs = blocks*threads
-N_envs = 200
+N_envs = 100
 if args['recurrent']:
     # define action buffer True to encapsulate action history in observation space
-    env = Drone_Sim(N_drones=N_envs, action_buffer=False,test=False, gpu=gpu)
-    test_env = Drone_Sim(N_drones=1, action_buffer=False, test=True, gpu=gpu)
+    env = Drone_Sim(N_drones=N_envs, action_buffer=False,test=False, gpu=False, device=device)
+    test_env = Drone_Sim(N_drones=1, action_buffer=False, test=True, gpu=False, device=device)
 
     observation_space = env.observation_space.shape or env.observation_space.n
     action_space = env.action_space.shape or env.action_space.n
@@ -151,7 +151,8 @@ else:
 
     policy = create_policy()
     # create buffer (stack_num defines the number of sequenctial samples)
-    buffer=PrioritizedVectorReplayBuffer(total_size=200000,buffer_num=N_envs, stack_num=1, alpha=0.4, beta=0.6)
+    # buffer=PrioritizedVectorReplayBuffer(total_size=200000,buffer_num=N_envs, stack_num=1, alpha=0.4, beta=0.6)
+    buffer=VectorReplayBuffer(total_size=200000,buffer_num=N_envs, stack_num=1)
 if not device == torch.device('cpu'):
     policy = policy.cuda()
 
