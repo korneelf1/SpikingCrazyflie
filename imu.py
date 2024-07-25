@@ -77,6 +77,7 @@ class IMU:
     def simulate(self, state):
         '''
         state: [x, y, z, vx, vy, vz, qw, qx, qy, qz, wx, wy, wz]
+        returns: [ax, ay, az, wx, wy, wz]
         '''
         # update acceleration
         vel = state[3:6]

@@ -18,11 +18,12 @@ import gymnasium as gym
 import torch
 from tianshou.data import to_numpy, Batch
 from helpers import NumpyDeque
+from imu import IMU
 
 GRAVITY = 9.80665
 # print('\nNOTE NOW REWARD IS MODIFIED TO JUST MAKE STABILIZING CONTROLLER (DISREGARDING ANY POSITIONS)\n')
 class Drone_Sim(gym.Env):
-    def __init__(self, gpu=False, drone='CrazyFlie', action_buffer=True,action_buffer_len=32, dt=0.01, T=2, N_drones=1, spiking_model=None, test=False, device='cpu'):
+    def __init__(self, gpu=False, drone='CrazyFlie', imu=False, action_buffer=True,action_buffer_len=32, dt=0.01, T=2, N_drones=1, spiking_model=None, test=False, device='cpu'):
         super(Drone_Sim, self).__init__()
         '''
         Vectorized quadrotor simulation with websocket pose output
@@ -58,14 +59,21 @@ class Drone_Sim(gym.Env):
         self.spiking_model = spiking_model
         # initial states: 0:3 pos, 3:6 vel, 6:10 quaternion, 10:13 body rates Omega, 13:17 motor speeds omega
 
+        obs_space = 20
+        if imu:
+            self.imu = IMU(dt = self.dt)
+            # obs_space = 6
+        else:
+            self.imu = None
+            # obs_space = 20
         
         if action_buffer: # add last 25 inputs as observation
-            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(4*action_buffer_len+20,), dtype=np.float32)
+            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(4*action_buffer_len+obs_space,), dtype=np.float32)
             self.action_history = NumpyDeque((self.N,4*action_buffer_len)) # 25 timesteps, 4 actions
 
         else:
         # create gymnasium observation and action space 17 + 3 for position
-            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(20,), dtype=np.float32)
+            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(obs_space,), dtype=np.float32)
         self.action_space = gym.spaces.Box(low=0., high=1., shape=(4,), dtype=np.float32)
 
 
@@ -451,40 +459,76 @@ class Drone_Sim(gym.Env):
                     ei += np.sum(self.done)
 
             with torch.no_grad():
-                # self.us = to_numpy(policy(Batch(obs=self.xs, info={})).act)
-                if tianshou_policy:
-                    if self.gpu:
-                        # raise UserWarning('Position setpoints not passed on GPU yet.')
-                        if self.action_buffer:
-                            self.us = to_numpy(policy.map_action(policy(Batch({'obs':np.concatenate((self.d_xs[:,0:20],self.action_history.array),axis=1,dtype=np.float32), 'info':{}})).act))
-                            self.action_history.append(self.us)
+                if self.imu is not None:
+                    imu_out = self.imu.simulate(self.xs)
+                    if tianshou_policy:
+                        if self.gpu:
+                            # raise UserWarning('Position setpoints not passed on GPU yet.')
+                            if self.action_buffer:
+                                self.us = to_numpy(policy.map_action(policy(Batch({'obs':np.concatenate((imu_out,self.action_history.array),axis=1,dtype=np.float32), 'info':{}})).act))
+                                self.action_history.append(self.us)
+                            else:
+                                self.us = to_numpy(policy.map_action(policy(Batch({'obs':imu_out, 'info':{}})).act))
                         else:
-                            self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.d_xs, 'info':{}})).act))
+                            
+                            # self.xs = np.concatenate((self.xs[:,0:17],self.pSets),axis=1)
+                            if self.action_buffer:
+                                self.xs = np.concatenate((self.xs[:,0:20],self.action_history.array),axis=1,dtype=np.float32)
+                                xs_torch = torch.from_numpy(imu_out).to(self.device)
+                                self.us = to_numpy(policy.map_action(policy(Batch({'obs':xs_torch, 'info':{}})).act))
+                                self.action_history.append(self.us)
+                                self.xs = np.concatenate((self.xs[:,0:20],self.action_history.array),axis=1,dtype=np.float32)
+                            else:
+                                xs_torch = torch.from_numpy(imu_out).to(self.device)
+                                self.us = to_numpy(policy.map_action(policy(Batch({'obs':xs_torch, 'info':{}})).act))
                     else:
-                        
-                        # self.xs = np.concatenate((self.xs[:,0:17],self.pSets),axis=1)
+                        if self.gpu:
+                            raise UserWarning('GPU support not yet implemented for non tianshou policies.')
                         if self.action_buffer:
-                            self.xs = np.concatenate((self.xs[:,0:20],self.action_history.array),axis=1,dtype=np.float32)
-                            xs_torch = torch.from_numpy(self.xs).to(self.device)
-                            self.us = to_numpy(policy.map_action(policy(Batch({'obs':xs_torch, 'info':{}})).act))
-                            self.action_history.append(self.us)
-                            self.xs = np.concatenate((self.xs[:,0:20],self.action_history.array),axis=1,dtype=np.float32)
+                            self.us = to_numpy(policy(np.concatenate((imu_out,self.action_history.array),axis=1,dtype=np.float32)))
                         else:
-                            xs_torch = torch.from_numpy(self.xs).to(self.device)
-                            self.us = to_numpy(policy.map_action(policy(Batch({'obs':xs_torch, 'info':{}})).act))
-                else:
-                    if self.gpu:
-                        raise UserWarning('GPU support not yet implemented for non tianshou policies.')
+                            self.us = to_numpy(policy(imu_out))
                     if self.action_buffer:
-                        self.us = to_numpy(policy(np.concatenate((self.xs[:,0:20],self.action_history.array),axis=1,dtype=np.float32)))
+                        if self.gpu:
+                            self.d_xs = np.concatenate((self.d_xs[:,0:20],self.action_history.array),axis=1,dtype=np.float32)
+                        # else:
+                        #     self.xs = np.concatenate((self.xs[:,0:20],self.action_history),axis=1,dtype=np.float32)
+                    act_arr[i] = self.us
+                # self.us = to_numpy(policy(Batch(obs=self.xs, info={})).act)
+                else:
+                    if tianshou_policy:
+                        if self.gpu:
+                            # raise UserWarning('Position setpoints not passed on GPU yet.')
+                            if self.action_buffer:
+                                self.us = to_numpy(policy.map_action(policy(Batch({'obs':np.concatenate((self.d_xs[:,0:20],self.action_history.array),axis=1,dtype=np.float32), 'info':{}})).act))
+                                self.action_history.append(self.us)
+                            else:
+                                self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.d_xs, 'info':{}})).act))
+                        else:
+                            
+                            # self.xs = np.concatenate((self.xs[:,0:17],self.pSets),axis=1)
+                            if self.action_buffer:
+                                self.xs = np.concatenate((self.xs[:,0:20],self.action_history.array),axis=1,dtype=np.float32)
+                                xs_torch = torch.from_numpy(self.xs).to(self.device)
+                                self.us = to_numpy(policy.map_action(policy(Batch({'obs':xs_torch, 'info':{}})).act))
+                                self.action_history.append(self.us)
+                                self.xs = np.concatenate((self.xs[:,0:20],self.action_history.array),axis=1,dtype=np.float32)
+                            else:
+                                xs_torch = torch.from_numpy(self.xs).to(self.device)
+                                self.us = to_numpy(policy.map_action(policy(Batch({'obs':xs_torch, 'info':{}})).act))
                     else:
-                        self.us = to_numpy(policy(self.xs))
-                if self.action_buffer:
-                    if self.gpu:
-                        self.d_xs = np.concatenate((self.d_xs[:,0:20],self.action_history.array),axis=1,dtype=np.float32)
-                    # else:
-                    #     self.xs = np.concatenate((self.xs[:,0:20],self.action_history),axis=1,dtype=np.float32)
-                act_arr[i] = self.us
+                        if self.gpu:
+                            raise UserWarning('GPU support not yet implemented for non tianshou policies.')
+                        if self.action_buffer:
+                            self.us = to_numpy(policy(np.concatenate((self.xs[:,0:20],self.action_history.array),axis=1,dtype=np.float32)))
+                        else:
+                            self.us = to_numpy(policy(self.xs))
+                    if self.action_buffer:
+                        if self.gpu:
+                            self.d_xs = np.concatenate((self.d_xs[:,0:20],self.action_history.array),axis=1,dtype=np.float32)
+                        # else:
+                        #     self.xs = np.concatenate((self.xs[:,0:20],self.action_history),axis=1,dtype=np.float32)
+                    act_arr[i] = self.us
             
             if nr_episodes and ei >= nr_episodes:
                 self.episode_counter += ei
@@ -524,7 +568,7 @@ class Drone_Sim(gym.Env):
         self.t = 0
         self.episode_counter = 0
         if self.test:
-            # print('Rewards \tmean: ', np.mean(self.r_means),'\tmax: ', np.max(self.r_maxs),'\tmin: ', np.min(self.r_mins))
+            print('Rewards \tmean: ', np.mean(self.r_means),'\tmax: ', np.max(self.r_maxs),'\tmin: ', np.min(self.r_mins))
             self.r_means = [0]
             self.r_maxs = [0]
             self.r_mins = [0]
@@ -538,6 +582,9 @@ class Drone_Sim(gym.Env):
             self.action_history.reset()
             self.xs = np.concatenate((self.xs,self.action_history),axis=1,dtype=np.float32)
             # return x0,{}
+
+        if self.imu is not None:
+            self.imu.reset()
         # YOU CAN RESET YOUR MODEL IN THE ENVIRONMENT RESET FUNCTION!!!!!!!
         return self.xs,{} # state, info
                 
@@ -548,6 +595,9 @@ class Drone_Sim(gym.Env):
         # done = self._check_done()
         asyncio.run(self._step(enable_reset=enable_reset))
 
+        if self.imu is not None:
+            imu_out = self.imu.simulate(self.xs)
+            return imu_out, self.r, self.done, self.done, {}
         return self.xs,self.r, self.done,self.done, {}
    
     def step_rollout(self, policy, n_step = None, n_episode=None, numba_policy=False, tianshou_policy=False, random=False):
