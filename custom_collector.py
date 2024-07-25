@@ -27,7 +27,7 @@ class StackPreprocessor:
         self.stack_num = stack_num
         self.data_key = data_key
 
-def add_rolout(buffer: ReplayBuffer, rollout: Batch) -> None:
+def add_rolout(buffer: ReplayBuffer, rollout: Batch, device: torch.device) -> None:
         """Add a rollout into replay buffer.
 
         :param Batch rollout: the input rollout. "obs", "act", "rew",
@@ -37,14 +37,16 @@ def add_rolout(buffer: ReplayBuffer, rollout: Batch) -> None:
                    ).issubset(rollout.keys())
 
         for i in range(len(rollout.obs)):
-            buffer.add(Batch(
+            batch = Batch(
                 obs=rollout.obs[i],
                 act=rollout.act[i],
                 rew=rollout.rew[i],
                 terminated=rollout.terminated[i],
                 truncated=rollout.truncated[i],
-                obs_next=rollout.obs_next[i],
-            ))
+                obs_next=rollout.obs_next[i],)
+            # ).to_torch_(device=device)
+            # batch = Batch.to_torch(batch, dtype=torch.float32,device=device)
+            buffer.add(batch=batch)
 
 class ParallelCollector(Collector):
     """Parallel Collector enables the policy to interact with envs that inherintly simulate multiple objects at the same time with \
@@ -502,6 +504,7 @@ class FastPyDroneSimCollector(Collector):
         env: BaseVectorEnv,
         buffer: ReplayBuffer | None = None,
         exploration_noise: bool = False,
+        device: torch.device = torch.device("cpu"),
     ) -> None:
         super().__init__(
             policy,
@@ -509,6 +512,7 @@ class FastPyDroneSimCollector(Collector):
             buffer,
             exploration_noise,
         )
+        self.device = device
         # E denotes the number of parallel environments: self.env_num
         # At init, E=R but during collection R <= E
         # Keep in sync with reset!
@@ -593,7 +597,7 @@ class FastPyDroneSimCollector(Collector):
         # envs. The last observation/ hidden state of the ones not included in
         # the current iteration has to be retained.
         obs, act, rew, dones, obs_next, info, stats = self.env.step_rollout(n_step = n_step, n_episode=n_episode, policy=self.policy, random=random, tianshou_policy=True)
-        add_rolout(self.buffer, Batch(obs=obs, act=act, rew=rew, terminated=dones, truncated=dones, obs_next=obs_next, info=info))
+        add_rolout(self.buffer, Batch(obs=obs, act=act, rew=rew, terminated=dones, truncated=dones, obs_next=obs_next, info=info), device=self.device)
 
         episode_lens = stats["episode_lens"]
         episode_returns = stats["episode_rews"]

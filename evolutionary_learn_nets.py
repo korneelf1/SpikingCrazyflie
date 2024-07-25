@@ -3,12 +3,17 @@ from evotorch.logging import StdOutLogger
 from evotorch.neuroevolution import GymNE
 from gym_sim import Drone_Sim
 
-
+simulator = Drone_Sim
+env_config = {
+    "N_drones": 1,
+    "gpu": False,
+    }
 # Specialized Problem class for RL
 problem = GymNE(
-    env_name="Humanoid-v4",
+    env=simulator,
     # Linear policy
     network="Linear(obs_length, act_length)",
+    env_config=env_config,
     observation_normalization=True,
     decrease_rewards_by=5.0,
     # Use all available CPU cores
