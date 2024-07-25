@@ -1,5 +1,5 @@
 from evotorch.algorithms import PGPE
-from evotorch.logging import StdOutLogger
+from evotorch.logging import StdOutLogger, WandbLogger
 from evotorch.neuroevolution import GymNE
 from gym_sim import Drone_Sim
 
@@ -30,7 +30,8 @@ searcher = PGPE(
     num_interactions=150000,
     popsize_max=3200,
 )
-logger = StdOutLogger(searcher)
+# logger = StdOutLogger(searcher)
+logger = WandbLogger(searcher, project="evotorch drone sim")
 searcher.run(500)
 
 population_center = searcher.status["center"]
