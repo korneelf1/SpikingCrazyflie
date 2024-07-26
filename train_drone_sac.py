@@ -19,7 +19,7 @@ import torch
 import os
 # set wandb in debug mode
 import wandb
-wandb.init(mode='disabled')
+# wandb.init(mode='disabled')
 
 # torch.cuda.set_device(0)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

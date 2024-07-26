@@ -18,7 +18,7 @@ from tianshou.data import (
     CollectStats,
     SequenceSummaryStats
 )
-from tianshou.data.collector import Collector, _nullable_slice
+from tianshou.data.collector import Collector
 from tianshou.data.types import RolloutBatchProtocol
 from overrides import override
 
