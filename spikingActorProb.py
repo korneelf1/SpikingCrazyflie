@@ -66,23 +66,23 @@ class SMLP:
         thresh_in = torch.rand(hidden_sizes[0])
         self.lif_in   = snn.Leaky(beta=betas_in, learn_beta=True, 
                                   threshold=thresh_in, learn_threshold=True, 
-                                  spike_grad=spike_grad1)
+                                  spike_grad=spike_grad1).to(self.device)
         self.hidden_layers = []
         for i in range(len(hidden_sizes) - 1):
-            self.hidden_layers.append(nn.Linear(hidden_sizes[i], hidden_sizes[i + 1]))
+            self.hidden_layers.append(nn.Linear(hidden_sizes[i], hidden_sizes[i + 1], device=self.device))
 
             betas = torch.rand(hidden_sizes[i + 1])
             thresh = torch.rand(hidden_sizes[i + 1])
             self.hidden_layers.append(snn.Leaky(beta=betas, learn_beta=True,
                                                 threshold=thresh, learn_threshold=True,
-                                                spike_grad=spike_grad1))
+                                                spike_grad=spike_grad1).to(self.device))
             
-        self.layer_out = nn.Linear(hidden_sizes[-1], output_dim)
+        self.layer_out = nn.Linear(hidden_sizes[-1], output_dim, device=self.device)
         betas_out = torch.rand(output_dim)
         thresh_out = torch.rand(output_dim)
         self.lif_out = snn.Leaky(beta=betas_out, learn_beta=True,
                                     threshold=thresh_out, learn_threshold=True,
-                                    spike_grad=spike_grad1)
+                                    spike_grad=spike_grad1).to(self.device)
         
         self.reset()
 
@@ -93,24 +93,28 @@ class SMLP:
         self.cur_in = self.lif_in.init_leaky()
         self.cur_lst = []
         for i in range(int(len(self.hidden_layers)/2)):
-            self.cur_lst[i] = self.hidden_layers[2*i+1].init_leaky()
+            self.cur_lst.append(self.hidden_layers[2*i+1].init_leaky())
         self.cur_out = self.lif_out.init_leaky()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         '''
         Forward pass through the network
         '''
-        x = self.lif_in(x, self.cur_in)
-        self.cur_in = x
+        x = self.layer_in(x)
+        x, self.cur_in = self.lif_in(x, self.cur_in)
+        # self.cur_in = x
         for i in range(int(len(self.hidden_layers)/2)):
             x = self.hidden_layers[2*i](x)
-            x = self.hidden_layers[2*i+1](x, self.cur_lst[i])
+            x, self.cur_lst[i] = self.hidden_layers[2*i+1](x, self.cur_lst[i])
             self.cur_lst[i] = x
         x = self.layer_out(x)
-        x = self.lif_out(x, self.cur_out)
-        self.cur_out = x
+        x, self.cur_out = self.lif_out(x, self.cur_out)
+        # self.cur_out = x
         return x
 
+    def __call__(self, *args: Any) -> Any:
+        return self.forward(*args)
+    
 class SpikingNet(NetBase[Any]):
     """A spiking network for DRL usage.
 
@@ -183,12 +187,13 @@ class SpikingNet(NetBase[Any]):
 
         input_dim = int(np.prod(state_shape))
         action_dim = int(np.prod(action_shape)) * num_atoms
+
         if concat:
             input_dim += action_dim
         self.use_dueling = dueling_param is not None
         output_dim = action_dim if not self.use_dueling and not concat else 0
         
-        
+        self.output_dim = output_dim
         self.model = SMLP(
             input_dim,
             output_dim,
@@ -231,8 +236,6 @@ class SpikingNet(NetBase[Any]):
 
         self.model.reset()
 
-
-
     def forward(
         self,
         obs: np.ndarray | torch.Tensor,
@@ -247,19 +250,21 @@ class SpikingNet(NetBase[Any]):
         """
         assert len(obs.shape) == 2 # (batch size, obs size) AKA not a sequence
         self.model.reset()
-
+        if isinstance(obs, np.ndarray):
+            obs = torch.tensor(obs, device=self.device, dtype=torch.float32)
         logits = torch.zeros(obs.shape[0], self.output_dim, device=self.device)
 
         for _ in range(self.repeat):
             logits += self.model(obs)
-        logits = torch.sum(logits, dim=1)
+        # logits = torch.sum(logits, dim=1)
 
 
         if self.softmax:
             logits = torch.softmax(logits, dim=-1)
         return logits, state
 
-
+    def reset(self):
+        self.model.reset()
 class Actor(BaseActor):
     """Simple actor network that directly outputs actions for continuous action space.
     Used primarily in DDPG and its variants. For probabilistic policies, see :class:`~ActorProb`.

@@ -19,7 +19,7 @@ import torch
 import os
 # set wandb in debug mode
 import wandb
-# wandb.init(mode='disabled')
+wandb.init(mode='disabled')
 
 # torch.cuda.set_device(0)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -67,8 +67,8 @@ def create_policy():
 
 def create_spiking_policy():
     # create the networks behind actors and critics
-    net_a = SpikingNet(state_shape=observation_space,
-                hidden_sizes=[64,64], device=device)
+    net_a = SpikingNet(state_shape=observation_space, action_shape=action_space,
+                hidden_sizes=[64,64], device=device, repeat=6)
     net_c1 = Net(state_shape=observation_space,action_shape=action_space,
                     hidden_sizes=[64,64],
                     concat=True,device=device)
@@ -79,7 +79,7 @@ def create_spiking_policy():
     # create actors and critics
     actor = ActorProb(
         net_a,
-        action_space,
+        action_shape=action_space,
         unbounded=True,
         conditioned_sigma=True,
         device=device
@@ -98,7 +98,7 @@ def create_spiking_policy():
                         critic2=critic2, critic2_optim=critic2_optim,\
                         action_space=env.action_space,\
                         observation_space=env.observation_space, \
-                        action_scaling=True) # make sure actions are scaled properly
+                        action_scaling=True,device=device) # make sure actions are scaled properly
     return policy, net_a
 
 def create_recurrent_policy():
@@ -156,7 +156,7 @@ args = {
       'task': 'stabilize',
       'seed': int(3),
       'logdir':'',
-      'spiking':False,
+      'spiking':True,
       'recurrent':False,
       'logger': 'wandb',
       }
