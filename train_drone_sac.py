@@ -19,7 +19,7 @@ import torch
 import os
 # set wandb in debug mode
 import wandb
-wandb.init(mode='disabled')
+# wandb.init(mode='disabled')
 
 # torch.cuda.set_device(0)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -98,7 +98,7 @@ def create_spiking_policy():
                         critic2=critic2, critic2_optim=critic2_optim,\
                         action_space=env.action_space,\
                         observation_space=env.observation_space, \
-                        action_scaling=True,device=device) # make sure actions are scaled properly
+                        action_scaling=True).cuda() # make sure actions are scaled properly
     return policy, net_a
 
 def create_recurrent_policy():
@@ -138,17 +138,17 @@ def create_recurrent_policy():
                         critic2=critic2, critic2_optim=critic2_optim,\
                         action_space=env.action_space,\
                         observation_space=env.observation_space, \
-                        action_scaling=True) # make sure actions are scaled properly
+                        action_scaling=True).cuda() # make sure actions are scaled properly
     return policy
 
 # define training args
 args = {
       'epoch': 1e2,
-      'step_per_epoch': 1e4,
+      'step_per_epoch': 5e3,
       'step_per_collect': 5e3, # 2.5 s
       'test_num': 50,
       'update_per_step': 10,
-      'batch_size': 10000,
+      'batch_size': 256,
       'wandb_project': 'FastPyDroneGym',
       'resume_id':1,
       'logger':'wandb',
@@ -168,7 +168,7 @@ else:
     blocks = 32
     threads = 8
     N_envs = blocks*threads
-N_envs = 100
+# N_envs = 100
 if args['recurrent']:
     # define action buffer True to encapsulate action history in observation space
     env = Drone_Sim(N_drones=N_envs, action_buffer=False,test=False, gpu=False, device=device)

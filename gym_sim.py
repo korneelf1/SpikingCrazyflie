@@ -18,6 +18,7 @@ import gymnasium as gym
 import torch
 from tianshou.data import to_numpy, Batch
 from helpers import NumpyDeque
+import wandb
 
 GRAVITY = 9.80665
 # print('\nNOTE NOW REWARD IS MODIFIED TO JUST MAKE STABILIZING CONTROLLER (DISREGARDING ANY POSITIONS)\n')
@@ -523,6 +524,8 @@ class Drone_Sim(gym.Env):
         self.xs = x0.copy() # states
         self.t = 0
         self.episode_counter = 0
+        if wandb.run is not None:
+            wandb.log({'length of interaction':self.t})
         if self.test:
             # print('Rewards \tmean: ', np.mean(self.r_means),'\tmax: ', np.max(self.r_maxs),'\tmin: ', np.min(self.r_mins))
             self.r_means = [0]
@@ -547,7 +550,7 @@ class Drone_Sim(gym.Env):
         # self.done =np.zeros((self.N,1),dtype=bool)
         # done = self._check_done()
         asyncio.run(self._step(enable_reset=enable_reset))
-
+        self.t += 1
         return self.xs,self.r, self.done,self.done, {}
    
     def step_rollout(self, policy, n_step = None, n_episode=None, numba_policy=False, tianshou_policy=False, random=False):

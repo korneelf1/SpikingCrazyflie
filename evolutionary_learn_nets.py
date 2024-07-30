@@ -1,8 +1,9 @@
-from evotorch.algorithms import PGPE
+from evotorch.algorithms import PGPE, CEM
 from evotorch.logging import StdOutLogger, WandbLogger
 from evotorch.neuroevolution import GymNE
 from gym_sim import Drone_Sim
 from spikingActorProb import SpikingNet
+import wandb
 
 simulator = Drone_Sim()
 env_config = {
@@ -28,7 +29,7 @@ problem = GymNE(
 
 searcher = PGPE(
     problem,
-    popsize=200,
+    popsize=500,
     center_learning_rate=0.01125,
     stdev_learning_rate=0.1,
     optimizer_config={"max_speed": 0.015},
@@ -36,9 +37,23 @@ searcher = PGPE(
     num_interactions=150000,
     popsize_max=3200,
 )
+
+# searcher = CEM(
+#     problem,
+#     popsize=500,
+#     stdev_init=.5,
+#     parenthood_ratio=.5,
+    
+# )
+
+config = {'Algorithm':'PGPE',
+        'Spiking':True,
+        'popsize':500,
+        }
+# wandb.init(project="evotorch drone sim",config=config)
 # logger = StdOutLogger(searcher)
-logger = WandbLogger(searcher, project="evotorch drone sim")
-searcher.run(500)
+logger = WandbLogger(searcher, project="evotorch drone sim", config=config)
+searcher.run(200)
 
 population_center = searcher.status["center"]
 policy = problem.to_policy(population_center)
