@@ -3,21 +3,28 @@ from evotorch.logging import StdOutLogger, WandbLogger
 from evotorch.neuroevolution import GymNE
 from gym_sim import Drone_Sim
 from spikingActorProb import SpikingNet
+import torch
+import wandb
 
+wandb.init(mode='disabled')
 simulator = Drone_Sim()
 env_config = {
     "N_drones": 1,
     "gpu": False,
     }
+actor = SpikingNet(state_shape=simulator.observation_space.shape, 
+                       action_shape=simulator.action_space.shape,
+                       device="cpu",
+                       hidden_sizes=[64, 64])
+# torch.save(actor.state_dict(), "spiking_actor.pth")
+
+# actor.load_state_dict(torch.load("spiking_actor.pth"))
 # Specialized Problem class for RL
 problem = GymNE(
     env=Drone_Sim,
     # Linear policy
     # network="Linear(obs_length, act_length)",
-    network=SpikingNet(state_shape=simulator.observation_space.shape, 
-                       action_shape=simulator.action_space.shape,
-                       device="cpu",
-                       hidden_sizes=[64, 64]),
+    network=actor,
     # network_args=
     env_config=env_config,
     observation_normalization=True,
@@ -38,8 +45,11 @@ searcher = PGPE(
 )
 # logger = StdOutLogger(searcher)
 logger = WandbLogger(searcher, project="evotorch drone sim")
-searcher.run(500)
+searcher.run(1)
+# torch.save(actor.state_dict(), "spiking_actor.pth")
+
 
 population_center = searcher.status["center"]
 policy = problem.to_policy(population_center)
+torch.save(policy.state_dict(), "spiking_actor.pth")
 problem.visualize(policy)

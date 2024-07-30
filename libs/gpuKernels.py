@@ -121,8 +121,8 @@ def reward_function(x, pset, motor_commands, global_step_counter,r): # now compu
     for i in range(3):
         w_term += (qd[i])**2
     w_term = -Cw*w_term
-
-    r[i1] = max(-1e5,pos_term+vel_term+q_term+motor_term+w_term+Crs)
+    # no pos term
+    r[i1] = max(-1e5,vel_term+q_term+motor_term+w_term+Crs)
     
     # sum over axis 1, along position and NOT allong nr of drones
     # r[0] = max(-1e5,-Cp*np.sum((pos-pset)**2) \
