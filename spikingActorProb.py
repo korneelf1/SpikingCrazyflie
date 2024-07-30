@@ -30,7 +30,7 @@ T = TypeVar("T")
 
 TRecurrentState = TypeVar("TRecurrentState", bound=Any)
 
-class SMLP:
+class SMLP(nn.Module):
     """
     A simple spiking multi-layer perceptron (MLP) network.
 
@@ -51,6 +51,7 @@ class SMLP:
                  activation: ModuleType | Sequence[ModuleType] | None = snn.Leaky,
                  device: str | int | torch.device = "cpu",
                  ) -> None:
+        super().__init__()
         self.device = device
         self.input_dim = input_dim
         self.output_dim = output_dim

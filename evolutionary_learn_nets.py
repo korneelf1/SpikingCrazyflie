@@ -2,17 +2,23 @@ from evotorch.algorithms import PGPE
 from evotorch.logging import StdOutLogger, WandbLogger
 from evotorch.neuroevolution import GymNE
 from gym_sim import Drone_Sim
+from spikingActorProb import SpikingNet
 
-simulator = Drone_Sim
+simulator = Drone_Sim()
 env_config = {
     "N_drones": 1,
     "gpu": False,
     }
 # Specialized Problem class for RL
 problem = GymNE(
-    env=simulator,
+    env=Drone_Sim,
     # Linear policy
-    network="Linear(obs_length, act_length)",
+    # network="Linear(obs_length, act_length)",
+    network=SpikingNet(state_shape=simulator.observation_space.shape, 
+                       action_shape=simulator.action_space.shape,
+                       device="cpu",
+                       hidden_sizes=[64, 64]),
+    # network_args=
     env_config=env_config,
     observation_normalization=True,
     decrease_rewards_by=5.0,
