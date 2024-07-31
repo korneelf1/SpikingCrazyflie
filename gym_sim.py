@@ -407,8 +407,8 @@ class Drone_Sim(gym.Env):
 
         ts = time()
         ei = 0
-        for i in range(iters):
-        # for i in tqdm(range(iters), desc="Running simulation"):
+        # for i in range(iters):
+        for i in tqdm(range(iters), desc="Running simulation"):
 
             # self.global_step_counter += int(self.N)
             self.global_step_counter += int(1)
