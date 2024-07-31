@@ -59,10 +59,10 @@ class Drone_Sim(gym.Env):
         # initial states: 0:3 pos, 3:6 vel, 6:10 quaternion, 10:13 body rates Omega, 13:17 motor speeds omega
 
         self.stabilization = False
-        self.n_states = 17
+        self.n_states = 20
         if task == 'stabilization':
             self.stabilization = True
-            self.n_states = 20
+            self.n_states = 17
         if action_buffer: # add last 25 inputs as observation
             self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(4*action_buffer_len+self.n_states,), dtype=np.float32)
             self.action_history = NumpyDeque((self.N,4*action_buffer_len)) # 25 timesteps, 4 actions
