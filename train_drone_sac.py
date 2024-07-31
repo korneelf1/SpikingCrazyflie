@@ -23,12 +23,13 @@ wandb.init(mode='disabled')
 
 # torch.cuda.set_device(0)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-# device = torch.device('cpu')
+device = torch.device('cpu')
 if device == torch.device('cuda'):
     gpu = True
 else:   
     gpu = False
 print('Device in use:', device)
+
 def create_policy():
     # create the networks behind actors and critics
     net_a = Net(state_shape=observation_space,
@@ -156,7 +157,7 @@ args = {
       'task': 'stabilize',
       'seed': int(3),
       'logdir':'',
-      'spiking':True,
+      'spiking':False,
       'recurrent':False,
       'logger': 'wandb',
       }

@@ -15,7 +15,7 @@ import torch
 import os
 from torch.distributions import Distribution, Independent, Normal
 
-torch.set_anomaly_enabled(True) # check for detecting anomalies
+# torch.set_anomaly_enabled(True) # check for detecting anomalies
 
 def dist(loc_scale) -> Distribution:
         loc, scale = loc_scale[0], loc_scale[1]
