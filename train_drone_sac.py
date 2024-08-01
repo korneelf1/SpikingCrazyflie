@@ -63,7 +63,7 @@ def create_policy():
                         critic2=critic2, critic2_optim=critic2_optim,\
                         action_space=env.action_space,\
                         observation_space=env.observation_space, \
-                        action_scaling=True, device=device) # make sure actions are scaled properly
+                        action_scaling=True) # make sure actions are scaled properly
     return policy
 
 def create_spiking_policy():
@@ -99,7 +99,7 @@ def create_spiking_policy():
                         critic2=critic2, critic2_optim=critic2_optim,\
                         action_space=env.action_space,\
                         observation_space=env.observation_space, \
-                        action_scaling=True,device=device) # make sure actions are scaled properly
+                        action_scaling=True) # make sure actions are scaled properly
     return policy, net_a
 
 def create_recurrent_policy():
@@ -149,7 +149,7 @@ args = {
       'step_per_collect': 5e3, # 2.5 s
       'test_num': 50,
       'update_per_step': 10,
-      'batch_size': 10000,
+      'batch_size': 128,
       'wandb_project': 'FastPyDroneGym',
       'resume_id':1,
       'logger':'wandb',
