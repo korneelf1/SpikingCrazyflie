@@ -14,11 +14,15 @@ from tianshou.utils import WandbLogger
 # spiking specific code
 from spiking_gym_wrapper import SpikingEnv
 from spikingActorProb import SpikingNet
+from masked_actors import MaskedNet
 
 import torch
+import numpy as np
 import os
+
 # set wandb in debug mode
 import wandb
+
 wandb.init(mode='disabled')
 
 # torch.cuda.set_device(0)
@@ -32,8 +36,19 @@ print('Device in use:', device)
 
 def create_policy():
     # create the networks behind actors and critics
-    net_a = Net(state_shape=observation_space,
-                hidden_sizes=[64,64], device=device)
+    if args['masked']:
+        mask = np.ones((observation_space))
+        # set velocities, angular velocities, and orientation to 0
+        mask[3:6] = 0
+        mask[10:13] = 0
+        net_a = net_a = MaskedNet(state_shape=observation_space,
+                    mask=mask, action_shape=action_space,
+                    hidden_sizes=[64,64], device=device)
+        
+    else:
+        net_a = Net(state_shape=observation_space,
+                    hidden_sizes=[64,64], device=device)
+        
     net_c1 = Net(state_shape=observation_space,action_shape=action_space,
                     hidden_sizes=[64,64],
                     concat=True,device=device)
@@ -76,7 +91,12 @@ def create_spiking_policy():
     net_c2 = Net(state_shape=observation_space,action_shape=action_space,
                     hidden_sizes=[64,64],
                     concat=True,device=device)
-
+    if args['masked']:
+        mask = np.ones((observation_space))
+        # set velocities, angular velocities, and orientation to 0
+        mask[3:6] = 0
+        mask[10:13] = 0
+        raise UserWarning('Masked SpikingNet not implemented')
     # create actors and critics
     actor = ActorProb(
         net_a,
@@ -127,7 +147,12 @@ def create_recurrent_policy():
         hidden_layer_size=64,
         device=device,
     )
-
+    if args['masked']:
+        mask = np.ones((observation_space))
+        # set velocities, angular velocities, and orientation to 0
+        mask[3:6] = 0
+        mask[10:13] = 0
+        raise UserWarning('Masked SpikingNet not implemented')
     # create the optimizers
     actor_optim = torch.optim.Adam(actor.parameters(), lr=1e-3)
     critic_optim = torch.optim.Adam(critic1.parameters(), lr=1e-3)
@@ -159,6 +184,7 @@ args = {
       'logdir':'',
       'spiking':False,
       'recurrent':False,
+      'masked':True,
       'logger': 'wandb',
       }
 

@@ -38,17 +38,23 @@ def add_rolout(buffer: ReplayBuffer, rollout: Batch, device: torch.device) -> No
         print("Adding to buffer")
         start = time.time()
         for i in range(len(rollout.obs)):
-            batch = Batch(
+            # batch = Batch(
+            #     obs=rollout.obs[i],
+            #     act=rollout.act[i],
+            #     rew=rollout.rew[i],
+            #     terminated=rollout.terminated[i],
+            #     truncated=rollout.truncated[i],
+            #     obs_next=rollout.obs_next[i],)
+            # ).to_torch_(device=device)
+            # batch = Batch.to_torch(batch, dtype=torch.float32,device=device)
+            
+            buffer.add(batch=Batch(
                 obs=rollout.obs[i],
                 act=rollout.act[i],
                 rew=rollout.rew[i],
                 terminated=rollout.terminated[i],
                 truncated=rollout.truncated[i],
-                obs_next=rollout.obs_next[i],)
-            # ).to_torch_(device=device)
-            # batch = Batch.to_torch(batch, dtype=torch.float32,device=device)
-            
-            buffer.add(batch=batch)
+                obs_next=rollout.obs_next[i],))
         print("Added to buffer: ", time.time()-start)
 
 class ParallelCollector(Collector):
