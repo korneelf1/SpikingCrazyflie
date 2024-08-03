@@ -146,7 +146,7 @@ class Drone_Sim(gym.Env):
         # create logs
         self._create_logs()
 
-        self.r = np.empty(self.N, dtype=np.float32)
+        self.r = np.zeros(self.N, dtype=np.float32)
 
         # gym specific stuff
         self.episode_counter = 0
@@ -319,7 +319,9 @@ class Drone_Sim(gym.Env):
                 # self.xs = np.concatenate((self.xs[:,0:17],self.pSets),axis=1) # pos should still be in xs!
                 if self.action_buffer:
                     self.xs = np.concatenate((self.xs[:,0:20],self.action_history),axis=1,dtype=np.float32)
-            
+        
+        self.r[self.done] = 0
+
     async def _step(self, enable_reset = True):
         '''
         Perform a step:
@@ -336,7 +338,8 @@ class Drone_Sim(gym.Env):
         self._simulate_step()
         # self.kernel_step(self.xs, self.us, self.itaus, self.omegaMaxs, self.G1s, self.G2s, self.dt, int(0), self.xs_log)
         # self.reward_function(self.xs, self.pSets, self.us, self.global_step_counter,self.r)
-        self._compute_reward()
+        # self._compute_reward()
+        self.r += np.ones_like(self.r)
         
         self._check_done()
         # print(self.done)
@@ -415,8 +418,8 @@ class Drone_Sim(gym.Env):
             self._simulate_step()
             
 
-            self._compute_reward()
-            
+            # self._compute_reward()
+            self.r += np.ones_like(self.r)
 
             if self.test:
                 self.r_means.append(np.mean(self.r))
@@ -531,7 +534,7 @@ class Drone_Sim(gym.Env):
             self.r_means = [0]
             self.r_maxs = [0]
             self.r_mins = [0]
-        self.r = np.empty(self.N, dtype=np.float32)
+        self.r = np.zeros(self.N, dtype=np.float32)
         if self.spiking_model:
             self.spiking_model.reset_hidden()
             print('Reward: \taverage: ',np.mean(self.r),\
