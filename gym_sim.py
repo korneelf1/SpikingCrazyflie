@@ -22,7 +22,7 @@ from helpers import NumpyDeque
 GRAVITY = 9.80665
 # print('\nNOTE NOW REWARD IS MODIFIED TO JUST MAKE STABILIZING CONTROLLER (DISREGARDING ANY POSITIONS)\n')
 class Drone_Sim(gym.Env):
-    def __init__(self, gpu=False, drone='CrazyFlie', task='stabilization', action_buffer=True,action_buffer_len=32, dt=0.01, T=2, N_drones=1, spiking_model=None, test=False, device='cpu'):
+    def __init__(self, gpu=False, drone='CrazyFlie', task='stabilization', action_buffer=True,action_buffer_len=32, dt=0.01, T=2, N_drones=1, spiking_model=None, test=False, device='cpu', disturbances=False):
         super(Drone_Sim, self).__init__()
         '''
         Vectorized quadrotor simulation with websocket pose output
@@ -54,6 +54,8 @@ class Drone_Sim(gym.Env):
         else:
             self.N = N_drones # cpu
         N = self.N
+
+        self.is_async = False
 
         self.spiking_model = spiking_model
         # initial states: 0:3 pos, 3:6 vel, 6:10 quaternion, 10:13 body rates Omega, 13:17 motor speeds omega
@@ -128,7 +130,10 @@ class Drone_Sim(gym.Env):
             kerneller = lambda signature, map: nb.guvectorize(signature, map, target='parallel', nopython=True, fastmath=False)
             nb.set_num_threads(max(nb.config.NUMBA_DEFAULT_NUM_THREADS-4, 1))
 
-            from libs.cpuKernels import step as kernel_step
+            if disturbances:
+                from libs.cpuKernels import step_disturbance as kernel_step
+            else:
+                from libs.cpuKernels import step as kernel_step
             from libs.cpuKernels import reward_function, check_done
 
             self.kernel_step     = kernel_step
@@ -149,7 +154,7 @@ class Drone_Sim(gym.Env):
         # create logs
         self._create_logs()
 
-        self.r = np.empty(self.N, dtype=np.float32)
+        self.r = np.zeros(self.N, dtype=np.float32)
 
         # gym specific stuff
         self.episode_counter = 0
@@ -210,14 +215,15 @@ class Drone_Sim(gym.Env):
             self.omegaMaxs = np.empty((self.N, 4), dtype=np.float32) # max rpm (in rads)? if so, max 21702 rpm -> 21702/60*2pi rad/sec
             self.taus = np.empty((self.N, 4), dtype=np.float32) # RPM time constant? if so, 0.15sec or 0.015sec?
 
-            max_rads = 21702/60*2*3.1415
+            # max_rads = 21702/60*2*3.1415
+            max_rads = 21702
             for i in tqdm(range(self.N), desc="Building crafts"):
                 q = QuadRotor()
                 q.setInertia(self.m, self.I)
-                q.rotors.append(Rotor([-0.028, 0.028, 0], dir='cw', wmax = max_rads, tau=0.15, Izz= 3.16e-10,k=0.005964552)) # rotor 3
-                q.rotors.append(Rotor([0.028, 0.028, 0], dir='ccw', wmax = max_rads, tau=0.15, Izz= 3.16e-10,k=0.005964552)) # rotor 4
-                q.rotors.append(Rotor([-0.028, -0.028, 0], dir='ccw', wmax = max_rads, tau=0.15, Izz= 3.16e-10,k=0.005964552)) # rotor 2	
-                q.rotors.append(Rotor([0.028, -0.028, 0], dir='cw', wmax = max_rads, tau=0.15, Izz= 3.16e-10,k=0.005964552)) # rotor 1
+                q.rotors.append(Rotor([-0.028, 0.028, 0], dir='cw', wmax = max_rads, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 3
+                q.rotors.append(Rotor([0.028, 0.028, 0], dir='ccw', wmax = max_rads, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 4
+                q.rotors.append(Rotor([-0.028, -0.028, 0], dir='ccw', wmax = max_rads, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 2	
+                q.rotors.append(Rotor([0.028, -0.028, 0], dir='cw', wmax = max_rads, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 1
 
                 q.fillArrays(i, self.G1s, self.G2s, self.omegaMaxs, self.taus)
 
@@ -232,17 +238,21 @@ class Drone_Sim(gym.Env):
                 (self.N, self.Nlog, self.n_states), dtype=np.float32)
         self.xs_log[:] = np.nan
 
-    def _simulate_step(self):
+    def _simulate_step(self, disturbance=None):
         '''Simulates a single step using gpu or cpu kernels'''
         self.log_idx =0
         # make sure xs is float32
-        if np.min(self.us)<0.0 or np.max(self.us)>1.0:
-            raise RuntimeWarning('Action is not in action space!')
+        # if np.min(self.us)<0.0 or np.max(self.us)>1.0:
+        #     raise RuntimeWarning('Action is not in action space!')
         self.xs = self.xs.astype(np.float32)
         if self.gpu:
             self.kernel_step[self.blocks,self.threads_per_block](self.d_xs, self.d_us, self.d_itaus, self.d_omegaMaxs, self.d_G1s, self.d_G2s, self.dt, self.log_idx, self.d_xs_log)
         else:
-            self.kernel_step(self.xs, self.us, self.itaus, self.omegaMaxs, self.G1s, self.G2s, self.dt, int(0), self.xs_log)
+            if disturbance is not None:
+                disturbance = np.array(disturbance).astype(np.float32)
+                self.kernel_step(self.xs, self.us, self.itaus, self.omegaMaxs, self.G1s, self.G2s, self.dt, disturbance, int(0), self.xs_log)
+            else:
+                self.kernel_step(self.xs, self.us, self.itaus, self.omegaMaxs, self.G1s, self.G2s, self.dt, int(0), self.xs_log)
             # self.xs = np.concatenate((self.xs, self.pSets),axis=1)
                         
     def _compute_reward(self):
@@ -323,7 +333,7 @@ class Drone_Sim(gym.Env):
                 if self.action_buffer:
                     self.xs = np.concatenate((self.xs[:,0:self.n_states],self.action_history),axis=1,dtype=np.float32)
             
-    async def _step(self, enable_reset = True):
+    async def _step(self, enable_reset = True, disturbance=None):
         '''
         Perform a step:
         Simulate step
@@ -337,7 +347,7 @@ class Drone_Sim(gym.Env):
         if self.gpu:
             self._move_to_cuda()
 
-        self._simulate_step()
+        self._simulate_step(disturbance=disturbance)
         # self.kernel_step(self.xs, self.us, self.itaus, self.omegaMaxs, self.G1s, self.G2s, self.dt, int(0), self.xs_log)
         # self.reward_function(self.xs, self.pSets, self.us, self.global_step_counter,self.r)
         self._compute_reward()
@@ -534,7 +544,7 @@ class Drone_Sim(gym.Env):
             self.r_means = [0]
             self.r_maxs = [0]
             self.r_mins = [0]
-        self.r = np.empty(self.N, dtype=np.float32)
+        self.r = np.zeros(self.N, dtype=np.float32)
         if self.spiking_model:
             self.spiking_model.reset_hidden()
             print('Reward: \taverage: ',np.mean(self.r),\
@@ -548,14 +558,14 @@ class Drone_Sim(gym.Env):
             self.xs = np.concatenate((self.xs,self.action_history),axis=1,dtype=np.float32)
             # return x0,{}
         # YOU CAN RESET YOUR MODEL IN THE ENVIRONMENT RESET FUNCTION!!!!!!!
-        return self.xs,{} # state, info
+        return self.xs,np.array([{} for _ in range(self.N)]) # state, info
                 
-    def step(self, action, enable_reset=True):
+    def step(self, action, enable_reset=True, disturbance=None):
         '''Step function for gym'''
         self.us = action
         # self.done =np.zeros((self.N,1),dtype=bool)
         # done = self._check_done()
-        asyncio.run(self._step(enable_reset=enable_reset))
+        asyncio.run(self._step(enable_reset=enable_reset, disturbance=disturbance))
 
         return self.xs,self.r, self.done,self.done, {}
    
@@ -657,8 +667,8 @@ global jitter; global kerneller
 # in terminal 
 
 # torch.cuda.init()
-# gpu = torch.cuda.is_available()
-gpu = False
+gpu = torch.cuda.is_available()
+gpu=False
 print(gpu)
 # debug mode
 if gpu:
@@ -669,9 +679,17 @@ else:
     kerneller = lambda signature, map: nb.guvectorize(signature, map, target='parallel', nopython=True, fastmath=False)
 
 if __name__ == "__main__":
-    N_drones = 3
+    N_drones = 1
 
-    sim = Drone_Sim(gpu=gpu, dt=0.01, T=10, N_drones=N_drones, spiking_model=None, action_buffer=False, drone='default')
+    sim = Drone_Sim(gpu=False, 
+                    dt=0.01, 
+                    T=2, 
+                    N_drones=N_drones, 
+                    spiking_model=None, 
+                    action_buffer=False, 
+                    drone='CrazyFlie', 
+                    disturbances=True)
+    
     # from libs.cpuKernels import controller_rl
     # position controller gains (attitude/rate hardcoded for now, sorry)
     posPs = 2*np.ones((N_drones, 3), dtype=np.float32)
@@ -680,35 +698,41 @@ if __name__ == "__main__":
     
     print("Environment created!")
 
-    iters = int(1e3)
+    iters = int(10)
     sim.reset()
     # create actor
     t0 = time()
     t_steps = []
     import networks as n
-    policy = n.Actor_ANN(sim.observation_space.shape[0],4,1).to(device=torch.device('cuda:0'))
-    print("\nTest step_rollout")
-    _,_,_,_,_,_, info = sim.step_rollout(policy=policy, n_step=iters)
-    # t_steps.append(time()-t_step)
-    print(info) 
-        # sim._compute_reward()
-    print("1e3 steps took: ", time()-t0, " seconds")
-    print("Average step time: ",  (time()-t0)/iters)
 
     print("\nTest individual steps")
     sim.reset()
-    from libs.cpuKernels import controller
+    # from libs.cpuKernels import controller
     # position controller gains (attitude/rate hardcoded for now, sorry)
     G1pinvs = np.linalg.pinv(sim.G1s) / (sim.omegaMaxs*sim.omegaMaxs)[:, :, np.newaxis]
     t0 = time()
     obs = []
     
+    # from learning to fly....
+    import datastruct_dict as d
+    log_file_path = "/home/korneel/learning_to_fly/learning_to_fly/learning-to-fly/include/learning_to_fly/simulator/log.txt"
+    extracted_data = d.parse_log_file(log_file_path)
+    obs = extracted_data[0]
+    obs_next = extracted_data[1]
+    disturbances = extracted_data[2]
+    actions = extracted_data[3]
+    rewards = extracted_data[4]
+
+    
+
+    iters = 9
+
     for i in tqdm(range(iters), desc="Running simulation steps"):
+        sim.xs = obs[:,i].reshape(1, 17)
+        sim.us = actions[:,i].astype(np.float32)
         # sim.step(policy(sim.xs).detach().numpy().astype(np.float32), enable_reset=False)
-        sim.step(sim.us,enable_reset=True)
-        controller(sim.xs, sim.us,posPs, velPs, sim.pSets,G1pinvs)
-        obs.append(sim.xs.tolist())
-        # print(sim.r)
+        xs_next, reward, _,_,_ = sim.step(sim.us,enable_reset=True, disturbance=disturbances[:,i])
+        print(sim.r)
     obs = np.array(obs).reshape(-1, sim.N, 17)
     sim.mpl_render(obs)
     # t_steps.append(time()-t_step)
