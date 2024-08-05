@@ -87,14 +87,37 @@ def reward_function(x, pset, motor_commands, global_step_counter,r): # now compu
 # sim done function
 @kerneller(["void(f4[::1],b1[::1])"], "(states)->()")
 def check_done(xs,done):
-        '''Check if the episode is done'''
+        '''Check if the episode is done
+        From Learning to fly in seconds repo:
+        
+        namespace rl_tools::rl::environments::multirotor::parameters::termination{
+            template<typename T, typename TI, TI ACTION_DIM, typename REWARD_FUNCTION>
+            constexpr typename rl_tools::rl::environments::multirotor::ParametersBase<T, TI, 4, REWARD_FUNCTION>::MDP::Termination classic = {
+                    true,           // enable
+                    0.6,            // position
+                    10,         // linear velocity
+                    10 // angular velocity
+            };
+            template<typename T, typename TI, TI ACTION_DIM, typename REWARD_FUNCTION>
+            constexpr typename rl_tools::rl::environments::multirotor::ParametersBase<T, TI, 4, REWARD_FUNCTION>::MDP::Termination fast_learning = {
+                true,           // enable
+                0.6,            // position
+                1000,         // linear velocity
+                1000 // angular velocity
+            };
+        }'''
         # if any velocity in the abs(self.xs) array is greater than 10 m/s, then the episode is done
         # if any rotational velocity in the abs(self.xs) array is greater than 10 rad/s, then the episode is done
         done[0] = False
         if np.sum(np.isnan(xs))!=0:
             print("something is nan...?!")
             done[0] = True
-        if np.sum((np.abs(xs[3:6]) > 10)) +  np.sum((np.abs(xs[10:13]) > 20)) != 0: # if not zero at least one would be true
+        
+        pos_threshold = np.sum((np.abs(xs[0:3])>0.6))
+        velocity_threshold = np.sum((np.abs(xs[3:6]) > 1000))
+        angular_threshold  = np.sum((np.abs(xs[10:13]) > 1000))
+        if (pos_threshold +  velocity_threshold + angular_threshold)!= 0: # if not zero at least one would be true
+            # print(pos_threshold,velocity_threshold,angular_threshold)
             done[0] = True
 
 
@@ -151,7 +174,6 @@ def step(x, d, itau, wmax, G1, G2, dt, log_to_idx, x_log):
 
     for j in range(10,17): # Omega and omega
         x[j] += dt * xdot_local[j]
-    print(x)
     #%% save state
     if log_to_idx >= 0:
         for j in range(17):
