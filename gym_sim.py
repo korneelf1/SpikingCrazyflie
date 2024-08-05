@@ -35,6 +35,7 @@ class Drone_Sim(gym.Env):
             T (float): run for T seconds NOT USED
             N_drones (int): number of simulations to run in parallel
             spiking_model (object): spiking model, which will be reset at environment reset (spiking_model.reset_hidden())
+            test (bool): if True, reward is cumulative reward over environment steps
             '''
 
         ### sim config ###
@@ -258,11 +259,14 @@ class Drone_Sim(gym.Env):
     def _compute_reward(self):
         '''Compute reward, reward function from learning to fly in 18sec paper
         TODO: optimize with cpuKernels and gpuKernels'''	
+        if self.test:
+            r = self.r
         if self.gpu:
             self.reward_function[self.blocks,self.threads_per_block](self.d_xs, self.d_pSets, self.d_us, self.global_step_counter,self.d_r)
         else:
             self.reward_function(self.xs, self.pSets, self.us, self.global_step_counter,self.r)
-             
+        if self.test:
+            self.r += r    
     def _check_done(self, numba_opt = True):
         '''Check if the episode is done, sets done array to True for respective environments.'''
         if numba_opt:
