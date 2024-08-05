@@ -247,7 +247,7 @@ log_path = os.path.join(current_path,args['logdir'], args['task'], "sac")
 from tianshou.utils import WandbLogger
 from torch.utils.tensorboard import SummaryWriter
 
-logger = WandbLogger()
+logger = WandbLogger(config=args)
 writer = SummaryWriter(log_path)
 writer.add_text("args", str(args))
 logger.load(writer)
