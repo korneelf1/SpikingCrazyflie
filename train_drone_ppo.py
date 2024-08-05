@@ -10,6 +10,8 @@ from tianshou.data import VectorReplayBuffer
 from tianshou.trainer import OffpolicyTrainer, OnpolicyTrainer
 from tianshou.highlevel.logger import LoggerFactoryDefault
 from tianshou.utils import WandbLogger
+from tianshou.data.collector import Collector
+from tianshou.env import BaseVectorEnv
 
 import torch
 import os
@@ -26,6 +28,7 @@ def create_policy():
     # create the networks behind actors and critics
     net_a = Net(state_shape=observation_space,
                 hidden_sizes=[64,64], device='cpu')
+    print(net_a.model.model[0].weight)
     net_c1 = Net(state_shape=observation_space,action_shape=action_space,
                     hidden_sizes=[64,64],
                     concat=False,)
@@ -46,7 +49,9 @@ def create_policy():
 
 
     
-    policy = PPOPolicy(actor=actor, critic = critic1, optim=optim, action_space=env.action_space,action_scaling=True, dist_fn= dist)
+    policy = PPOPolicy(actor=actor, critic = critic1, 
+                       optim=optim, action_space=env.action_space,
+                       action_scaling=True, dist_fn= dist)
     return policy
 
 # define training args
@@ -74,6 +79,9 @@ N_envs = 1
 env = Drone_Sim(N_drones=N_envs, action_buffer=True,test=False)
 test_env = Drone_Sim(N_drones=1, action_buffer=True, test=True)
 
+import gymnasium as gym
+env = gym.make('MountainCarContinuous-v0')
+
 observation_space = env.observation_space.shape or env.observation_space.n
 action_space = env.action_space.shape or env.action_space.n
 
@@ -82,11 +90,13 @@ policy = create_policy()
 # create buffer (stack_num defines the number of sequenctial samples)
 buffer=VectorReplayBuffer(total_size=200000,buffer_num=N_envs, stack_num=1)
 # create the parallel train_collector, which is optimized to gather custom vectorized envs
-train_collector = FastPyDroneSimCollector(policy=policy, env=env, buffer=buffer)
+# train_collector = FastPyDroneSimCollector(policy=policy, env=env, buffer=buffer)
+train_collector = Collector(policy=policy, env=env, buffer=buffer)
+
 train_collector.reset()
-test_collector = FastPyDroneSimCollector(policy=policy,env=test_env)
+test_collector = Collector(policy=policy,env=test_env)
 # define a number of start timesteps to fill buffer (now one sec of data *100 drones )
-train_collector.collect(n_step=1e2)
+train_collector.collect(n_step=1e3,reset_before_collect=True)
 
 # log
 import datetime

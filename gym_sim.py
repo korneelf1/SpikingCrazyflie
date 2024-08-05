@@ -687,7 +687,7 @@ if __name__ == "__main__":
                     N_drones=N_drones, 
                     spiking_model=None, 
                     action_buffer=False, 
-                    drone='CrazyFlie', 
+                    drone='ogDrone', 
                     disturbances=True)
     
     # from libs.cpuKernels import controller_rl
@@ -726,13 +726,21 @@ if __name__ == "__main__":
     
 
     iters = 9
-
+    def rescale_actions(actions):
+        return ((actions+1)/2).astype(np.float32)
     for i in tqdm(range(iters), desc="Running simulation steps"):
         sim.xs = obs[:,i].reshape(1, 17)
-        sim.us = actions[:,i].astype(np.float32)
+        # rpms = [10908.4873, 10854.8584,10902.9434,10830.2275]
+        # sim.xs[:, 13:17] = np.array(rpms).reshape(1,4)
+        sim.us = rescale_actions(actions[:,i])
+        # sim.us = (np.array(rpms).reshape(1,4)/21702).astype(np.float32)
         # sim.step(policy(sim.xs).detach().numpy().astype(np.float32), enable_reset=False)
         xs_next, reward, _,_,_ = sim.step(sim.us,enable_reset=True, disturbance=disturbances[:,i])
+        
+        sim.xs = obs_next[:,i].reshape(1, 17).astype(np.float32)    
+        sim._compute_reward() 
         print(sim.r)
+
     obs = np.array(obs).reshape(-1, sim.N, 17)
     sim.mpl_render(obs)
     # t_steps.append(time()-t_step)

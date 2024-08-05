@@ -186,6 +186,7 @@ args = {
       'recurrent':False,
       'masked':True,
       'logger': 'wandb',
+      'drone': 'stock drone',
       }
 
 # define number of drones to be simulated
@@ -210,8 +211,8 @@ if args['recurrent']:
     buffer=PrioritizedVectorReplayBuffer(total_size=200000,buffer_num=N_envs, stack_num=64, alpha=0.4, beta=0.6)
 else:
     # define action buffer True to encapsulate action history in observation space
-    env = Drone_Sim(N_drones=N_envs, action_buffer=True,test=False, gpu=False, device=device)
-    test_env = Drone_Sim(N_drones=10, action_buffer=True, test=True, gpu=False, device=device)
+    env = Drone_Sim(N_drones=N_envs, action_buffer=True,test=False, gpu=False, device=device, drone=args['drone'])
+    test_env = Drone_Sim(N_drones=10, action_buffer=True, test=True, gpu=False, device=device,drone=args['drone'])
 
     observation_space = env.observation_space.shape or env.observation_space.n
     action_space = env.action_space.shape or env.action_space.n
