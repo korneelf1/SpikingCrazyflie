@@ -6,20 +6,40 @@ from spikingActorProb import SpikingNet
 import torch
 import wandb
 
-wandb.init(mode='disabled')
+
 simulator = Drone_Sim()
-env_config = {
-    "N_drones": 1,
-    "gpu": False,
-    }
-actor = SpikingNet(state_shape=simulator.observation_space.shape, 
-                       action_shape=simulator.action_space.shape,
-                       device="cpu",
-                       hidden_sizes=[64, 64])
+
+
 # torch.save(actor.state_dict(), "spiking_actor.pth")
 
 # actor.load_state_dict(torch.load("spiking_actor.pth"))
 # Specialized Problem class for RL
+wandb_config = {
+    "N_drones": 1,
+    "gpu": False,
+    "hidden_sizes": [64, 64],
+    "actor": "SpikingNet",
+    "popsize": 200,
+    "center_learning_rate": 0.01125,
+    "stdev_learning_rate": 0.1,
+    "max_speed": 0.015,
+    "radius_init": 0.27,
+    "num_interactions": 150000,
+    "popsize_max": 3200,
+    "drone": "stock drone",
+    "num_runs": 500,
+    "forward_per_sample": 1,
+}
+env_config = {
+    "N_drones": 1,
+    "gpu": False,
+    "drone": "stock drone",
+    }
+actor = SpikingNet(state_shape=simulator.observation_space.shape, 
+                       action_shape=simulator.action_space.shape,
+                       device="cpu",
+                       hidden_sizes=[64, 64], repeat=wandb_config["forward_per_sample"])
+
 problem = GymNE(
     env=Drone_Sim,
     # Linear policy
@@ -28,24 +48,24 @@ problem = GymNE(
     # network_args=
     env_config=env_config,
     observation_normalization=True,
-    decrease_rewards_by=5.0,
+    decrease_rewards_by=2.0,
     # Use all available CPU cores
     num_actors="max",
 )
 
 searcher = PGPE(
     problem,
-    popsize=200,
-    center_learning_rate=0.01125,
-    stdev_learning_rate=0.1,
-    optimizer_config={"max_speed": 0.015},
-    radius_init=0.27,
-    num_interactions=150000,
-    popsize_max=3200,
+    popsize=wandb_config["popsize"],
+    center_learning_rate=wandb_config["center_learning_rate"],
+    stdev_learning_rate=wandb_config["stdev_learning_rate"],
+    optimizer_config={"max_speed":wandb_config["max_speed"]},
+    radius_init=wandb_config["radius_init"],
+    num_interactions=wandb_config["num_interactions"],
+    popsize_max=wandb_config["popsize_max"],
 )
 # logger = StdOutLogger(searcher)
-logger = WandbLogger(searcher, project="evotorch drone sim")
-searcher.run(1)
+logger = WandbLogger(searcher, project="evotorch drone sim", config=wandb_config)
+searcher.run(wandb_config["num_runs"])
 # torch.save(actor.state_dict(), "spiking_actor.pth")
 
 
