@@ -61,18 +61,63 @@ class Drone_Sim(gym.Env):
         self.spiking_model = spiking_model
         # initial states: 0:3 pos, 3:6 vel, 6:10 quaternion, 10:13 body rates Omega, 13:17 motor speeds omega
 
+        # create the drones
+        if drone=='CrazyFlie':
+            self._create_drones(og_drones=False)
+        else:
+            self._create_drones(og_drones=True)
         self.stabilization = False
         self.n_states = 20
         if task == 'stabilization':
             self.stabilization = True
             self.n_states = 17
         if action_buffer: # add last 25 inputs as observation
+            # create gymnasium observation and action space 17 + 3 for position
+            low = np.array([-np.inf]*self.n_states)
+            high = np.array([np.inf]*self.n_states)
+
+            # position limits DEPENDS ON DONE CONDITIONS
+            low[0:3] = -0.6
+            high[0:3] = 0.6
+
+            # velocity and angular velocity limits DEPENDS ON DONE CONDITIONS
+            low[3:6] = -1000
+            high[3:6] = 1000  
+
+            low[10:13] = -1000
+            high[10:13] = 1000
+
+            # RPMs
+            low[13:17] = 0
+            high[13:17] = self.w_max
+
+            low[self.n_states:] = 0
+            high[self.n_states:] = 1
+
             self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(4*action_buffer_len+self.n_states,), dtype=np.float32)
             self.action_history = NumpyDeque((self.N,4*action_buffer_len)) # 25 timesteps, 4 actions
 
         else:
         # create gymnasium observation and action space 17 + 3 for position
-            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.n_states,), dtype=np.float32)
+            low = np.array([-np.inf]*self.n_states)
+            high = np.array([np.inf]*self.n_states)
+
+            # position limits DEPENDS ON DONE CONDITIONS
+            low[0:3] = -0.6
+            high[0:3] = 0.6
+
+            # velocity and angular velocity limits DEPENDS ON DONE CONDITIONS
+            low[3:6] = -1000
+            high[3:6] = 1000  
+
+            low[10:13] = -1000
+            high[10:13] = 1000
+
+            # RPMs
+            low[13:17] = 0
+            high[13:17] = self.wmax
+
+            self.observation_space = gym.spaces.Box(low=low, high=high, shape=(self.n_states,), dtype=np.float32)
         self.action_space = gym.spaces.Box(low=0., high=1., shape=(4,), dtype=np.float32)
 
 
@@ -91,12 +136,6 @@ class Drone_Sim(gym.Env):
         self.Nviz = 512 # max number of quadrotors to visualize
         self.log_interval = 1    # log state every x iterations. Too low may cause out_of_memory on the self.gpu. False == 0
 
-        
-        # create the drones
-        if drone=='CrazyFlie':
-            self._create_drones(og_drones=False)
-        else:
-            self._create_drones(og_drones=True)
 
         # precompute stuff
         self.itaus = 1. / self.taus
@@ -201,6 +240,7 @@ class Drone_Sim(gym.Env):
                 q.rotors.append(Rotor([0.1, 0.1, 0], dir='ccw'))
                 q.rotors.append(Rotor([-0.1, -0.1, 0], dir='ccw'))
                 q.rotors.append(Rotor([0.1, -0.1, 0], dir='cw'))
+                self.w_max = q.rotors[0].wmax
 
                 q.fillArrays(i, self.G1s, self.G2s, self.omegaMaxs, self.taus)
         else:
@@ -217,14 +257,14 @@ class Drone_Sim(gym.Env):
             self.taus = np.empty((self.N, 4), dtype=np.float32) # RPM time constant? if so, 0.15sec or 0.015sec?
 
             # max_rads = 21702/60*2*3.1415
-            max_rads = 21702
+            self.w_max = 21702
             for i in tqdm(range(self.N), desc="Building crafts"):
                 q = QuadRotor()
                 q.setInertia(self.m, self.I)
-                q.rotors.append(Rotor([-0.028, 0.028, 0], dir='cw', wmax = max_rads, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 3
-                q.rotors.append(Rotor([0.028, 0.028, 0], dir='ccw', wmax = max_rads, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 4
-                q.rotors.append(Rotor([-0.028, -0.028, 0], dir='ccw', wmax = max_rads, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 2	
-                q.rotors.append(Rotor([0.028, -0.028, 0], dir='cw', wmax = max_rads, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 1
+                q.rotors.append(Rotor([-0.028, 0.028, 0], dir='cw', wmax = self.w_max, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 3
+                q.rotors.append(Rotor([0.028, 0.028, 0], dir='ccw', wmax = self.w_max, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 4
+                q.rotors.append(Rotor([-0.028, -0.028, 0], dir='ccw', wmax = self.w_max, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 2	
+                q.rotors.append(Rotor([0.028, -0.028, 0], dir='cw', wmax = self.w_max, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 1
 
                 q.fillArrays(i, self.G1s, self.G2s, self.omegaMaxs, self.taus)
 
@@ -243,9 +283,10 @@ class Drone_Sim(gym.Env):
         '''Simulates a single step using gpu or cpu kernels'''
         self.log_idx =0
         # make sure xs is float32
-        # if np.min(self.us)<0.0 or np.max(self.us)>1.0:
-        #     raise RuntimeWarning('Action is not in action space!')
         self.xs = self.xs.astype(np.float32)
+        # self.us = ((self.us +1)/2).astype(np.float32)
+        if np.min(self.us)<0.0 or np.max(self.us)>1.0:
+            raise RuntimeWarning('Action is not in action space!')
         if self.gpu:
             self.kernel_step[self.blocks,self.threads_per_block](self.d_xs, self.d_us, self.d_itaus, self.d_omegaMaxs, self.d_G1s, self.d_G2s, self.dt, self.log_idx, self.d_xs_log)
         else:
@@ -565,7 +606,8 @@ class Drone_Sim(gym.Env):
         return self.xs,np.array([{} for _ in range(self.N)]) # state, info
                 
     def step(self, action, enable_reset=True, disturbance=None):
-        '''Step function for gym'''
+        '''Step function for gym
+        action (np.array): thrust setting in range [-1,1]'''
         self.us = action
         # self.done =np.zeros((self.N,1),dtype=bool)
         # done = self._check_done()

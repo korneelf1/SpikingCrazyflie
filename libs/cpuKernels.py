@@ -35,7 +35,7 @@ def reward_function(x, pset, motor_commands, global_step_counter,r): # now compu
     Cp = 2.5 # position weight
     Cv = .005 # velocity weight
     Cq = 2.5 # orientation weight
-    Ca = .005 # action weight
+    Ca = .0 # action weight og .334, but just learns to fly out of frame
     Cw = .0 # angular velocity weight 
     Crs = 2 # reward for survival
     Cab = 0.334 # action baseline
@@ -72,11 +72,14 @@ def reward_function(x, pset, motor_commands, global_step_counter,r): # now compu
     # print("pos penalty: ", -Cp*np.sum((pos)**2))
     # print("vel penalty: ", - Cv*np.sum((vel)**2))
     # print("action penalty: ", - Ca*np.sum((motor_commands-Cab)**2))
-    # print("orientation penalty: ", -Cq*(q[0]**2))
+    # print("orientation penalty: ", -Cq*(1-q[0]**2)) aims to keep upright!
     # print("angular velocity penalty: ", - Cw*np.sum((qd)**2))
     # print("reward for survival: ", Crs)
 
-    # no position penalty
+    # in theory pos error max sqrt( .6)*2.5 = 1.94
+    # vel error max sqrt(1000)*.005 = 0.158
+    # qd error max sqrt(1000)*.00 = 0.
+    # should roughly be between -2 and 2
     r[0] = - Cv*np.sum((vel)**2) \
             - Ca*np.sum((motor_commands-Cab)**2) \
                 -Cq*(1-q[0]**2)\

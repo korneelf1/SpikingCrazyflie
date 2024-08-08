@@ -59,22 +59,21 @@ def create_policy():
                         action_scaling=True) # make sure actions are scaled properly
     return policy
 
-policy_path = 'policy.pth'
-env = Drone_Sim(test=True)
+policy_path = 'policy_mac.pth'
+env = Drone_Sim(test=True,)
 observation_space = env.observation_space.shape or env.observation_space.n
 action_space = env.action_space.shape or env.action_space.n
 
 
 policy = create_policy()
 
-policy.load_state_dict(torch.load("policy.pth"))
+policy.load_state_dict(torch.load("policy_further.pth"))
 
 # actor = SACPolicy.actor
 
 state,_ = env.reset()
-print(state[:,0:17])
+
 obs_arr, act_arr, rew_arr, done_arr, obs_next_arr, info_arr, stats = env.step_rollout(policy,n_step=1e3, tianshou_policy=True)
-print(np.sum(done_arr))
 print(stats)
-print(env.xs[:,0:17])
+print(np.sum(done_arr))
 env.mpl_render(obs_arr)
