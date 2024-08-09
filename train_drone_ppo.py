@@ -63,7 +63,7 @@ args = {
       'test_num': 10,
       'repeat_per_collect': 10,
       'update_per_step': 2,
-      'batch_size': 128,
+      'batch_size': 128, # if one, minibatch.adv.std() is nan so causes errors
       'wandb_project': 'FastPyDroneGym',
       'resume_id':1,
       'logger':'wandb',
