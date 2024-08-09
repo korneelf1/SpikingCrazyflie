@@ -5,7 +5,8 @@ from gym_sim import Drone_Sim
 from spikingActorProb import SpikingNet
 import torch
 import wandb
-
+from tianshou.utils.net.common import Net
+from tianshou.utils.net.continuous import ActorProb
 
 simulator = Drone_Sim()
 
@@ -35,11 +36,21 @@ env_config = {
     "gpu": False,
     "drone": "stock drone",
     }
-actor = SpikingNet(state_shape=simulator.observation_space.shape, 
-                       action_shape=simulator.action_space.shape,
-                       device="cpu",
-                       hidden_sizes=[64, 64], repeat=wandb_config["forward_per_sample"])
+# actor = SpikingNet(state_shape=simulator.observation_space.shape, 
+#                        action_shape=simulator.action_space.shape,
+#                        device="cpu",
+#                        hidden_sizes=[64, 64], repeat=wandb_config["forward_per_sample"])
 
+net_a = Net(state_shape=simulator.observation_space.shape,
+                    hidden_sizes=[64,64])
+        
+# create actors and critics
+actor = ActorProb(
+        net_a,
+        simulator.action_space.shape,
+        unbounded=True,
+        conditioned_sigma=True,
+    )
 problem = GymNE(
     env=Drone_Sim,
     # Linear policy
