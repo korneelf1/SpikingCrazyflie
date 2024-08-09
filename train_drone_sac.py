@@ -11,6 +11,7 @@ from tianshou.trainer import OffpolicyTrainer
 from tianshou.highlevel.logger import LoggerFactoryDefault
 from tianshou.utils import WandbLogger
 from tianshou.data.collector import Collector
+from tianshou.env import SubprocVectorEnv, DummyVectorEnv
 
 # spiking specific code
 from spiking_gym_wrapper import SpikingEnv
@@ -235,7 +236,7 @@ else:
     blocks = 32
     threads = 8
     N_envs = blocks*threads
-N_envs = 100
+N_envs = 1
 
 if args['recurrent']:
     # define action buffer True to encapsulate action history in observation space
@@ -253,7 +254,7 @@ if args['recurrent']:
 else:
     # define action buffer True to encapsulate action history in observation space
     env = Drone_Sim(N_drones=N_envs, action_buffer=True,test=False, gpu=False, device=device, drone=args['drone'])
-    test_env = Drone_Sim(N_drones=10, action_buffer=True, test=True, gpu=False, device=device,drone=args['drone'])
+    test_env = Drone_Sim(N_drones=1, action_buffer=True, test=True, gpu=False, device=device,drone=args['drone'])
 
     observation_space = env.observation_space.shape or env.observation_space.n
     action_space = env.action_space.shape or env.action_space.n
@@ -278,10 +279,12 @@ print('\nI was working on figuring out how to get data on GPU before training, B
 # create the parallel train_collector, which is optimized to gather custom vectorized envs
 
 # train_collector = FastPyDroneSimCollector(policy=policy, env=env, buffer=buffer, device=device)
+env = DummyVectorEnv([lambda: env])
 train_collector = Collector(policy=policy, env=env, buffer=buffer, device=device)
 train_collector.reset()
 
 # test_collector = FastPyDroneSimCollector(policy=policy,env=test_env, device=device)
+test_env = DummyVectorEnv([lambda: test_env])
 test_collector = Collector(policy=policy,env=test_env, device=device)
 test_collector.reset()
 

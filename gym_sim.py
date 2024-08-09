@@ -603,7 +603,8 @@ class Drone_Sim(gym.Env):
             self.xs = np.concatenate((self.xs,self.action_history),axis=1,dtype=np.float32)
             # return x0,{}
         # YOU CAN RESET YOUR MODEL IN THE ENVIRONMENT RESET FUNCTION!!!!!!!
-        return self.xs,np.array([{} for _ in range(self.N)]) # state, info
+        # return self.xs,np.array([{} for _ in range(self.N)]) # state, info
+        return self.xs,{}  # state, info
                 
     def step(self, action, enable_reset=True, disturbance=None):
         '''Step function for gym
@@ -612,8 +613,10 @@ class Drone_Sim(gym.Env):
         # self.done =np.zeros((self.N,1),dtype=bool)
         # done = self._check_done()
         asyncio.run(self._step(enable_reset=enable_reset, disturbance=disturbance))
-
-        return self.xs,self.r, self.done,self.done, {}
+        if self.N == 1:
+            return self.xs[0],self.r[0], self.done[0],self.done[0], {}
+        else:
+            return self.xs,self.r, self.done,self.done, {}
    
     def step_rollout(self, policy, n_step = None, n_episode=None, numba_policy=False, tianshou_policy=False, random=False):
         '''Step function for collecting and entire rollout, which can be faster in this vectorized environment
