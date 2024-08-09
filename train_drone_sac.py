@@ -30,8 +30,8 @@ import wandb
 
 # define training args
 args = {
-      'epoch': 1e2,
-      'step_per_epoch': 1e4,
+      'epoch': 2e2,
+      'step_per_epoch': 2e4,
       'step_per_collect': 5e3, # 2.5 s
       'test_num': 50,
       'update_per_step': 2,
@@ -280,12 +280,12 @@ print('\nI was working on figuring out how to get data on GPU before training, B
 
 # train_collector = FastPyDroneSimCollector(policy=policy, env=env, buffer=buffer, device=device)
 env = DummyVectorEnv([lambda: env])
-train_collector = Collector(policy=policy, env=env, buffer=buffer, device=device)
+train_collector = Collector(policy=policy, env=env, buffer=buffer)
 train_collector.reset()
 
 # test_collector = FastPyDroneSimCollector(policy=policy,env=test_env, device=device)
 test_env = DummyVectorEnv([lambda: test_env])
-test_collector = Collector(policy=policy,env=test_env, device=device)
+test_collector = Collector(policy=policy,env=test_env)
 test_collector.reset()
 
 # define a number of start timesteps to fill buffer (now one sec of data *100 drones )
