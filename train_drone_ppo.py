@@ -12,6 +12,7 @@ from tianshou.highlevel.logger import LoggerFactoryDefault
 from tianshou.utils import WandbLogger
 from tianshou.data.collector import Collector
 from tianshou.env import BaseVectorEnv
+from tianshou.env import SubprocVectorEnv, DummyVectorEnv
 
 import torch
 import os
@@ -51,7 +52,7 @@ def create_policy():
     
     policy = PPOPolicy(actor=actor, critic = critic1, 
                        optim=optim, action_space=env.action_space,
-                       action_scaling=True, dist_fn= dist)
+                       action_scaling=True, dist_fn= dist,max_grad_norm=args['max_grad_norm'])
     return policy
 
 # define training args
@@ -62,7 +63,7 @@ args = {
       'test_num': 10,
       'repeat_per_collect': 10,
       'update_per_step': 2,
-      'batch_size': 1,
+      'batch_size': 128,
       'wandb_project': 'FastPyDroneGym',
       'resume_id':1,
       'logger':'wandb',
@@ -70,14 +71,15 @@ args = {
       'task': 'stabilize',
       'seed': int(4),
       'logdir':'/',
+      'max_grad_norm': 5,
       }
 
 # define number of drones to be simulated
 N_envs = 1
 
 # define action buffer True to encapsulate action history in observation space
-env = Drone_Sim(N_drones=N_envs, action_buffer=True,test=False)
-test_env = Drone_Sim(N_drones=1, action_buffer=True, test=True)
+env = Drone_Sim(N_drones=N_envs, action_buffer=True,test=False, drone='og')
+test_env = Drone_Sim(N_drones=1, action_buffer=True, test=True, drone='og')
 
 import gymnasium as gym
 env = gym.make('MountainCarContinuous-v0')
@@ -88,12 +90,14 @@ action_space = env.action_space.shape or env.action_space.n
 policy = create_policy()
 
 # create buffer (stack_num defines the number of sequenctial samples)
-buffer=VectorReplayBuffer(total_size=200000,buffer_num=N_envs, stack_num=1)
+buffer=VectorReplayBuffer(total_size=300000,buffer_num=N_envs, stack_num=1)
 # create the parallel train_collector, which is optimized to gather custom vectorized envs
 # train_collector = FastPyDroneSimCollector(policy=policy, env=env, buffer=buffer)
+env = DummyVectorEnv([lambda: env])
 train_collector = Collector(policy=policy, env=env, buffer=buffer)
 
 train_collector.reset()
+test_env = DummyVectorEnv([lambda: test_env])
 test_collector = Collector(policy=policy,env=test_env)
 # define a number of start timesteps to fill buffer (now one sec of data *100 drones )
 train_collector.collect(n_step=1e3,reset_before_collect=True)
