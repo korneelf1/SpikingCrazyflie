@@ -50,13 +50,14 @@ args = {
       'drone': 'stock drone',
       'buffer_size': 300000,
       'collector_type': 'Collector',
+      'reinit': True,
       }
 
 # wandb.init(mode='disabled')
 # init for the models only
 # wandb.init(mode='disabled')
 
-model_logger = wandb.init(reinit=True, config=args)
+
 # log
 import datetime
 now = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
@@ -66,11 +67,11 @@ log_path = os.path.join(current_path,args['logdir'], args['task'], "sac")
 from tianshou.utils import WandbLogger
 from torch.utils.tensorboard import SummaryWriter
 
-logger = WandbLogger(config=args)
+logger = WandbLogger(project="tianshou",config=args)
 writer = SummaryWriter(log_path)
 writer.add_text("args", str(args))
 logger.load(writer)
-
+# model_logger = wandb.init(project='Model Logging of RL Crazyflie', reinit=True, config=args)
 # torch.cuda.set_device(0)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # device = torch.device('cpu')
@@ -104,9 +105,9 @@ def create_policy():
                     hidden_sizes=[64,64],
                     concat=True,device=device)
     
-    model_logger.watch(net_a)
-    model_logger.watch(net_c1)
-    model_logger.watch(net_c2)
+    # model_logger.watch(net_a)
+    # model_logger.watch(net_c1)
+    # model_logger.watch(net_c2)
 
     # create actors and critics
     actor = ActorProb(

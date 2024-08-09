@@ -38,7 +38,7 @@ def create_policy():
     actor = ActorProb(
         net_a,
         action_space,
-        unbounded=True,
+        unbounded=False,
         conditioned_sigma=True,
     )
     critic1 = Critic(net_c1, device='cpu')
@@ -63,7 +63,7 @@ args = {
       'test_num': 10,
       'repeat_per_collect': 10,
       'update_per_step': 2,
-      'batch_size': 128, # if one, minibatch.adv.std() is nan so causes errors
+      'batch_size': 2, # if one, minibatch.adv.std() is nan so causes errors
       'wandb_project': 'FastPyDroneGym',
       'resume_id':1,
       'logger':'wandb',
@@ -81,8 +81,8 @@ N_envs = 1
 env = Drone_Sim(N_drones=N_envs, action_buffer=True,test=False, drone='og')
 test_env = Drone_Sim(N_drones=1, action_buffer=True, test=True, drone='og')
 
-import gymnasium as gym
-env = gym.make('MountainCarContinuous-v0')
+# import gymnasium as gym
+# env = gym.make('MountainCarContinuous-v0')
 
 observation_space = env.observation_space.shape or env.observation_space.n
 action_space = env.action_space.shape or env.action_space.n
@@ -146,3 +146,6 @@ result = OnpolicyTrainer(
 # print with nice formatting
 import pprint
 pprint.pprint(result)
+
+
+# WHY IS ACTION IN RANGE +-_-100,100? why not -1.1?
