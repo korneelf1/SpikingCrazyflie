@@ -32,13 +32,13 @@ def reward_function(x, pset, motor_commands, global_step_counter,r): # now compu
     '''NOTE: paper uses orientation error, but is unclear as they use a scalar'''
     # reward scheduling
     # intial parameters
-    Cp = 2.5 # position weight
-    Cv = .005 # velocity weight
-    Cq = 2.5 # orientation weight
+    Cp = 1 # position weight
+    Cv = .0 # velocity weight
+    Cq = 0 # orientation weight
     Ca = .0 # action weight og .334, but just learns to fly out of frame
     Cw = .0 # angular velocity weight 
-    Crs = 2 # reward for survival
-    Cab = 0.334 # action baseline
+    Crs = .2 # reward for survival
+    Cab = 0.0 # action baseline
 
     # curriculum parameters
     Nc = 1e5 # interval of application of curriculum

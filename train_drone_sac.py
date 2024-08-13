@@ -51,6 +51,7 @@ args = {
       'buffer_size': 300000,
       'collector_type': 'Collector',
       'reinit': True,
+      'reward_function': 'reward_squared_fast_learning',
       }
 
 # wandb.init(mode='disabled')
