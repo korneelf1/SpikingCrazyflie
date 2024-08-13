@@ -467,16 +467,9 @@ class Drone_Sim(gym.Env):
                 obs_arr[i] = self.xs
 
             self._simulate_step()
-            
 
             self._compute_reward()
             
-
-            if self.test:
-                self.r_means.append(np.mean(self.r))
-                self.r_maxs.append(np.max(self.r))
-                self.r_mins.append(np.min(self.r))
-
             self._check_done()
 
             if self.gpu:
@@ -581,11 +574,7 @@ class Drone_Sim(gym.Env):
         self.xs = x0.copy() # states
         self.t = 0
         self.episode_counter = 0
-        if self.test:
-            # print('Rewards \tmean: ', np.mean(self.r_means),'\tmax: ', np.max(self.r_maxs),'\tmin: ', np.min(self.r_mins))
-            self.r_means = [0]
-            self.r_maxs = [0]
-            self.r_mins = [0]
+        
         self.r = np.zeros(self.N, dtype=np.float32)
         if self.spiking_model:
             self.spiking_model.reset_hidden()
