@@ -48,7 +48,7 @@ args = {
       'masked':False,
       'logger': 'wandb',
       'drone': 'stock drone',
-      'buffer_size': 200000,
+      'buffer_size': 300000,
       'collector_type': 'Collector',
       'reinit': True,
       }

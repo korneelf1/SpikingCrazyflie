@@ -41,8 +41,10 @@ class Drone_Sim(gym.Env):
         ### sim config ###
         self.gpu = gpu              # run on the self.gpu using cuda
         self.device = device        # cpu or cuda, used if env is ran on CPU, but model on GPU 
+        self.normalize_obs = True   # normalize observations
+        self.action_buffer = action_buffer # add last action_buffer_len inputs as observation
+
         # length / number of parallel sims
-        self.action_buffer = action_buffer
         self.dt = dt                # step time is self.dt seconds (forward Euler)
         self.T = T                  # run for self.T seconds
         if self.gpu:                # number of simulations to run in parallel
@@ -56,6 +58,7 @@ class Drone_Sim(gym.Env):
             self.N = N_drones # cpu
         N = self.N
 
+        # compatibility with tianshou
         self.is_async = False
 
         self.spiking_model = spiking_model
@@ -66,6 +69,8 @@ class Drone_Sim(gym.Env):
             self._create_drones(og_drones=False)
         else:
             self._create_drones(og_drones=True)
+        
+        # create observation space and action space
         self.stabilization = False
         self.n_states = 20
         if task == 'stabilization':
@@ -89,7 +94,7 @@ class Drone_Sim(gym.Env):
 
             # RPMs
             low[13:17] = 0
-            high[13:17] = self.w_max
+            high[13:17] = self.wmax
 
             low[self.n_states:] = 0
             high[self.n_states:] = 1
@@ -120,38 +125,24 @@ class Drone_Sim(gym.Env):
             self.observation_space = gym.spaces.Box(low=low, high=high, shape=(self.n_states,), dtype=np.float32)
         self.action_space = gym.spaces.Box(low=0., high=1., shape=(4,), dtype=np.float32)
 
-
+        # create gymnasium dones
         self.done = np.zeros((self.N),dtype=bool) # for resetting all vectorized envs
         
         self.test = test
-        if self.test:
-            self.r_means = [0]
-            self.r_maxs  = [0]
-            self.r_mins  = [0]
-        
-        
-
-        # other settings (vizualition and logging)
-        self.viz_interval = 0.05 # visualize every self.viz_interval simulation-seconds
-        self.Nviz = 512 # max number of quadrotors to visualize
-        self.log_interval = 1    # log state every x iterations. Too low may cause out_of_memory on the self.gpu. False == 0
-
 
         # precompute stuff
         self.itaus = 1. / self.taus
 
-        # create controller (legacy) and position setpoints
-        # (FIXME: should be a weighted pseudoinverse!!)
-        self.G1pinvs = np.linalg.pinv(self.G1s) / (self.omegaMaxs*self.omegaMaxs)[:, :, np.newaxis]
 
         # position setpoints --> uniform on rectangular grid
-        grid_size = int(np.ceil(np.sqrt(N)))
-        x_vals = np.linspace(-7, 7, grid_size)
-        y_vals = np.linspace(-7, 7, grid_size)
-        X, Y = np.meshgrid(x_vals, y_vals)
-        vectors = np.column_stack((X.ravel(), Y.ravel(), -1.5*np.ones_like(X.ravel())))
-        self.pSets = vectors[:N].astype(np.float32) # position setpoint
+        # grid_size = int(np.ceil(np.sqrt(N)))
+        # x_vals = np.linspace(-7, 7, grid_size)
+        # y_vals = np.linspace(-7, 7, grid_size)
+        # X, Y = np.meshgrid(x_vals, y_vals)
+        # vectors = np.column_stack((X.ravel(), Y.ravel(), -1.5*np.ones_like(X.ravel())))
+        # self.pSets = vectors[:N].astype(np.float32) # position setpoint
         self.pSets = np.zeros_like(self.pSets)
+        
         # import compute kernels
         global kerneller; global jitter
         if self.gpu:
@@ -184,10 +175,13 @@ class Drone_Sim(gym.Env):
 
         # allocate sim data
         log=1
-        self.log_interval = log*5
+        self.log_interval = 1    # log state every x iterations. Too low may cause out_of_memory on the self.gpu. False == 0
         self.iters = int(self.T / self.dt)
         self.Nlog = int(self.iters / self.log_interval) if self.log_interval > 0 else 0
-
+        # other settings (vizualition and logging)
+        self.viz_interval = 0.05 # visualize every self.viz_interval simulation-seconds
+        self.Nviz = 512 # max number of quadrotors to visualize
+        
         self.reset()
         self.us = np.random.random((N, 4)).astype(np.float32) # inputs (motor speeds)
 
@@ -240,7 +234,7 @@ class Drone_Sim(gym.Env):
                 q.rotors.append(Rotor([0.1, 0.1, 0], dir='ccw'))
                 q.rotors.append(Rotor([-0.1, -0.1, 0], dir='ccw'))
                 q.rotors.append(Rotor([0.1, -0.1, 0], dir='cw'))
-                self.w_max = q.rotors[0].wmax
+                self.wmax = q.rotors[0].wmax
 
                 q.fillArrays(i, self.G1s, self.G2s, self.omegaMaxs, self.taus)
         else:
@@ -257,14 +251,14 @@ class Drone_Sim(gym.Env):
             self.taus = np.empty((self.N, 4), dtype=np.float32) # RPM time constant? if so, 0.15sec or 0.015sec?
 
             # max_rads = 21702/60*2*3.1415
-            self.w_max = 21702
+            self.wmax = 21702
             for i in tqdm(range(self.N), desc="Building crafts"):
                 q = QuadRotor()
                 q.setInertia(self.m, self.I)
-                q.rotors.append(Rotor([-0.028, 0.028, 0], dir='cw', wmax = self.w_max, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 3
-                q.rotors.append(Rotor([0.028, 0.028, 0], dir='ccw', wmax = self.w_max, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 4
-                q.rotors.append(Rotor([-0.028, -0.028, 0], dir='ccw', wmax = self.w_max, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 2	
-                q.rotors.append(Rotor([0.028, -0.028, 0], dir='cw', wmax = self.w_max, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 1
+                q.rotors.append(Rotor([-0.028, 0.028, 0], dir='cw', wmax = self.wmax, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 3
+                q.rotors.append(Rotor([0.028, 0.028, 0], dir='ccw', wmax = self.wmax, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 4
+                q.rotors.append(Rotor([-0.028, -0.028, 0], dir='ccw', wmax = self.wmax, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 2	
+                q.rotors.append(Rotor([0.028, -0.028, 0], dir='cw', wmax = self.wmax, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 1
 
                 q.fillArrays(i, self.G1s, self.G2s, self.omegaMaxs, self.taus)
 
@@ -308,6 +302,7 @@ class Drone_Sim(gym.Env):
             self.reward_function(self.xs, self.pSets, self.us, self.global_step_counter,self.r)
         if self.test:
             self.r += r    
+    
     def _check_done(self, numba_opt = True):
         '''Check if the episode is done, sets done array to True for respective environments.'''
         if numba_opt:
@@ -338,7 +333,6 @@ class Drone_Sim(gym.Env):
 
         # position setpoints
         self.d_pSets = cuda.to_device(self.pSets)
-        self.d_G1pinvs = cuda.to_device(self.G1pinvs)
 
         self.d_r = cuda.to_device(self.r)
         # self.d_global_step_counter = cuda.to_device(self.global_step_counter)
@@ -571,15 +565,18 @@ class Drone_Sim(gym.Env):
 
         return obs_arr, act_arr, rew_arr, done_arr, obs_next_arr, info_arr, {'episode_lens': episode_lens, 'episode_rews': episode_rews, 'episode_ctr': ei, 'time': time()-ts}
     
-    def reset(self,seed=None, dones = None):
+    def reset(self,seed=None, dones = None, initial_states = None):
         '''
         For the reset of specific envs, use the done array to reset the correct envs
         First multiply the relevant env states with zero-mask, then add the new states with inverse zero mask (zeros everywhere but the relevant states)
         '''
         super().reset(seed=seed)
-         # initial states: 0:3 pos, 3:6 vel, 6:10 quaternion, 10:13 body rates Omega, 13:17 motor speeds omega
-        x0 = np.random.random((self.N, 17)).astype(np.float32) - 0.5
-        x0[:, 6:10] /= np.linalg.norm(x0[:, 6:10], axis=1)[:, np.newaxis] # quaternion needs to be normalized
+        if initial_states is not None:
+            x0 = initial_states
+        else:
+            # initial states: 0:3 pos, 3:6 vel, 6:10 quaternion, 10:13 body rates Omega, 13:17 motor speeds omega
+            x0 = np.random.random((self.N, 17)).astype(np.float32) - 0.5
+            x0[:, 6:10] /= np.linalg.norm(x0[:, 6:10], axis=1)[:, np.newaxis] # quaternion needs to be normalized
 
         self.xs = x0.copy() # states
         self.t = 0
@@ -613,10 +610,14 @@ class Drone_Sim(gym.Env):
         # self.done =np.zeros((self.N,1),dtype=bool)
         # done = self._check_done()
         asyncio.run(self._step(enable_reset=enable_reset, disturbance=disturbance))
-        if self.N == 1:
-            return self.xs[0],self.r[0], self.done[0],self.done[0], {}
-        else:
-            return self.xs,self.r, self.done,self.done, {}
+        # if self.N == 1:
+        #     return self.xs[0],self.r[0], self.done[0],self.done[0], {}
+        # else:
+        if self.normalize_obs: 
+            obs = self.xs
+            obs[13:17] = obs[13:17] / self.wmax # normalize motor speeds  
+            return obs, self.r, self.done, self.done, {}
+        return self.xs, self.r, self.done, self.done, {}
    
     def step_rollout(self, policy, n_step = None, n_episode=None, numba_policy=False, tianshou_policy=False, random=False):
         '''Step function for collecting and entire rollout, which can be faster in this vectorized environment
