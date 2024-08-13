@@ -41,7 +41,7 @@ class Drone_Sim(gym.Env):
         ### sim config ###
         self.gpu = gpu              # run on the self.gpu using cuda
         self.device = device        # cpu or cuda, used if env is ran on CPU, but model on GPU 
-        self.normalize_obs = True   # normalize observations
+        self.normalize_obs = False   # normalize observations
         self.action_buffer = action_buffer # add last action_buffer_len inputs as observation
 
         # length / number of parallel sims

@@ -122,9 +122,9 @@ def create_policy():
     critic2 = Critic(net_c2, device=device)
 
     # create the optimizers
-    actor_optim = torch.optim.Adam(actor.parameters(), lr=1e-3)
-    critic_optim = torch.optim.Adam(critic1.parameters(), lr=1e-3)
-    critic2_optim = torch.optim.Adam(critic2.parameters(), lr=1e-3)
+    actor_optim = torch.optim.Adam(actor.parameters(), lr=1e-4)
+    critic_optim = torch.optim.Adam(critic1.parameters(), lr=1e-4)
+    critic2_optim = torch.optim.Adam(critic2.parameters(), lr=1e-4)
 
     # create the policy
     policy = SACPolicy(actor=actor, actor_optim=actor_optim, \
