@@ -133,7 +133,6 @@ class Drone_Sim(gym.Env):
         # precompute stuff
         self.itaus = 1. / self.taus
 
-
         # position setpoints --> uniform on rectangular grid
         grid_size = int(np.ceil(np.sqrt(N)))
         x_vals = np.linspace(-7, 7, grid_size)
@@ -289,7 +288,6 @@ class Drone_Sim(gym.Env):
                 self.kernel_step(self.xs, self.us, self.itaus, self.omegaMaxs, self.G1s, self.G2s, self.dt, disturbance, int(0), self.xs_log)
             else:
                 self.kernel_step(self.xs, self.us, self.itaus, self.omegaMaxs, self.G1s, self.G2s, self.dt, int(0), self.xs_log)
-            # self.xs = np.concatenate((self.xs, self.pSets),axis=1)
                         
     def _compute_reward(self):
         '''Compute reward, reward function from learning to fly in 18sec paper
@@ -599,15 +597,19 @@ class Drone_Sim(gym.Env):
         # self.done =np.zeros((self.N,1),dtype=bool)
         # done = self._check_done()
         asyncio.run(self._step(enable_reset=enable_reset, disturbance=disturbance))
-        # if self.N == 1:
-        #     return self.xs[0],self.r[0], self.done[0],self.done[0], {}
-        # else:
-        if self.normalize_obs: 
-            obs = self.xs
-            obs[13:17] = obs[13:17] / self.wmax # normalize motor speeds  
-            return obs, self.r, self.done, self.done, {}
-        return self.xs, self.r, self.done, self.done, {}
-   
+        if self.N == 1:
+            if self.normalize_obs: 
+                obs = self.xs[0]
+                obs[13:17] = obs[13:17] / self.wmax # normalize motor speeds  
+                return obs,self.r[0], self.done[0],self.done[0], {}
+            return self.xs[0],self.r[0], self.done[0],self.done[0], {}
+        else:
+            if self.normalize_obs: 
+                obs = self.xs
+                obs[13:17] = obs[13:17] / self.wmax # normalize motor speeds  
+                return obs, self.r, self.done, self.done, {}
+            return self.xs, self.r, self.done, self.done, {}
+    
     def step_rollout(self, policy, n_step = None, n_episode=None, numba_policy=False, tianshou_policy=False, random=False):
         '''Step function for collecting and entire rollout, which can be faster in this vectorized environment
         policy: is tianshou policy that uses:
