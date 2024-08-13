@@ -602,7 +602,7 @@ class Drone_Sim(gym.Env):
                 obs = self.xs[0]
                 obs[13:17] = obs[13:17] / self.wmax # normalize motor speeds  
                 return obs,self.r[0], self.done[0],self.done[0], {}
-            return self.xs[0],self.r[0], self.done[0],self.done[0], {}
+            return self.xs,self.r[0], self.done[0],self.done[0], {}
         else:
             if self.normalize_obs: 
                 obs = self.xs

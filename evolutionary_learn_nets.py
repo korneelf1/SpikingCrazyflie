@@ -124,7 +124,7 @@ class PolicyWrapper(nn.Module):
         # You can check out the original SAC paper (arXiv 1801.01290): Eq 21.
         # in appendix C to get some understanding of this equation.
         squashed_action = torch.tanh(act_B)
-        log_prob = log_prob - torch.log((1 - squashed_action.pow(2)) + self.policy.__eps).sum(
+        log_prob = log_prob - torch.log((1 - squashed_action.pow(2)) + 1e-10).sum(
             -1,
             keepdim=True,
         )
