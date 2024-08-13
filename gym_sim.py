@@ -135,12 +135,12 @@ class Drone_Sim(gym.Env):
 
 
         # position setpoints --> uniform on rectangular grid
-        # grid_size = int(np.ceil(np.sqrt(N)))
-        # x_vals = np.linspace(-7, 7, grid_size)
-        # y_vals = np.linspace(-7, 7, grid_size)
-        # X, Y = np.meshgrid(x_vals, y_vals)
-        # vectors = np.column_stack((X.ravel(), Y.ravel(), -1.5*np.ones_like(X.ravel())))
-        # self.pSets = vectors[:N].astype(np.float32) # position setpoint
+        grid_size = int(np.ceil(np.sqrt(N)))
+        x_vals = np.linspace(-7, 7, grid_size)
+        y_vals = np.linspace(-7, 7, grid_size)
+        X, Y = np.meshgrid(x_vals, y_vals)
+        vectors = np.column_stack((X.ravel(), Y.ravel(), -1.5*np.ones_like(X.ravel())))
+        self.pSets = vectors[:N].astype(np.float32) # position setpoint
         self.pSets = np.zeros_like(self.pSets)
         
         # import compute kernels
