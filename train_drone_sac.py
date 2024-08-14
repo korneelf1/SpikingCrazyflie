@@ -126,10 +126,13 @@ def create_policy():
     critic_optim = torch.optim.Adam(critic1.parameters(), lr=1e-4)
     critic2_optim = torch.optim.Adam(critic2.parameters(), lr=1e-4)
 
+    # create one learning rate scheduler for the 3 optimizers
+    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR([actor_optim, critic_optim, critic2_optim], milestones=[1e5, 2e5], gamma=0.98)
+
     # create the policy
     policy = SACPolicy(actor=actor, actor_optim=actor_optim, \
                         critic=critic1, critic_optim=critic_optim,\
-                        critic2=critic2, critic2_optim=critic2_optim,\
+                        critic2=critic2, critic2_optim=critic2_optim,lr_scheduler=lr_scheduler,\
                         action_space=env.action_space,\
                         observation_space=env.observation_space, \
                         action_scaling=True, action_bound_method=None) # make sure actions are scaled properly
