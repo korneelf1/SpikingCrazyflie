@@ -127,9 +127,9 @@ def create_policy():
     critic2_optim = torch.optim.Adam(critic2.parameters(), lr=1e-4)
 
     # create one learning rate scheduler for the 3 optimizers
-    lr_scheduler_a = torch.optim.lr_scheduler.StepLR(actor_optim, gamma=0.98)
-    lr_scheduler_c1 = torch.optim.lr_scheduler.StepLR(critic_optim, gamma=0.98)
-    lr_scheduler_c2 = torch.optim.lr_scheduler.StepLR(critic2_optim, gamma=0.98)
+    lr_scheduler_a = torch.optim.lr_scheduler.StepLR(actor_optim, step_size=1000, gamma=0.5)
+    lr_scheduler_c1 = torch.optim.lr_scheduler.StepLR(critic_optim,step_size=1e3, gamma=0.5)
+    lr_scheduler_c2 = torch.optim.lr_scheduler.StepLR(critic2_optim,step_size=1e3, gamma=0.5)
 
     lr_scheduler = MultipleLRSchedulers(lr_scheduler_a,lr_scheduler_c1,lr_scheduler_c2)
 
