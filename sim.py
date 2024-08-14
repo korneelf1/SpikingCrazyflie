@@ -33,19 +33,18 @@ gpu = True              # run on the GPU using cuda
 viz = True              # stream pose to a websocket connection
 log = True              # log states from GPU back to the CPU (setting False has no speedup on CPU)
 position_control = True # use a simple position/attitude NDI controller
-deep_control = False    # use a deep reinforcement learning controller
 realtime = False         # wait every timestep to try and be real time
 
 # length / number of parallel sims
 dt = 0.01 # step time is dt seconds (forward Euler)
-T = 100  # run for T seconds
+T = 10  # run for T seconds
 if gpu: # number of simulations to run in parallel
     blocks = 128 # 128 or 256 seem best. Should be multiple of 32
     threads_per_block = 64 # depends on global memorty usage. 256 seems best without. Should be multiple of 64
     # dt 0.01, T 10, no viz, log_interval 0, no controller, blocks 256, threads 256, gpu = True --> 250M ticks/sec
     N = blocks * threads_per_block
 else:
-    N = 1 # cpu
+    N = 100 # cpu
 
 # initial states: 0:3 pos, 3:6 vel, 6:10 quaternion, 10:13 body rates Omega, 13:17 motor speeds omega
 x0 = np.random.random((N, 17)).astype(np.float32) - 0.5
@@ -87,16 +86,11 @@ x_vals = np.linspace(-7, 7, grid_size)
 y_vals = np.linspace(-7, 7, grid_size)
 X, Y = np.meshgrid(x_vals, y_vals)
 vectors = np.column_stack((X.ravel(), Y.ravel(), -1.5*np.ones_like(X.ravel())))
-pSets = vectors[:N].astype(np.float32) # position setpoint
+pSets = vectors[:N].astype(np.float32)
 
 # position controller gains (attitude/rate hardcoded for now, sorry)
 posPs = 2*np.ones((N, 3), dtype=np.float32)
 velPs = 2*np.ones((N, 3), dtype=np.float32)
-
-# # for the NN based controllers
-# import networks as n
-# actor = n.Actor_ANN(17, 4, 1) # 17 state dims, 4 action dims, 1 max action
-# critic = n.Critic_ANN(17, 4) # 17 state dims, 4 action dims
 
 
 #%% import compute kernels
@@ -109,7 +103,7 @@ else:
     jitter = lambda signature: nb.jit(signature, nopython=True, fastmath=False)
     kerneller = lambda signature, map: nb.guvectorize(signature, map, target='parallel', nopython=True, fastmath=False)
     nb.set_num_threads(max(nb.config.NUMBA_DEFAULT_NUM_THREADS-4, 1))
-    from libs.cpuKernels import step, controller, controller_rl, reward_function
+    from libs.cpuKernels import step, controller
 
 
 #%% allocate sim data
@@ -117,8 +111,8 @@ log_interval = log*5
 iters = int(T / dt)
 Nlog = int(iters / log_interval) if log_interval > 0 else 0
 
-xs = x0.copy() # states
-us = np.random.random((N, 4)).astype(np.float32) # inputs (motor speeds)
+xs = x0.copy()
+us = np.random.random((N, 4)).astype(np.float32)
 
 xs_log = np.empty(
     (N, Nlog, 17), dtype=np.float32)
@@ -133,11 +127,9 @@ else:
 
 #%% loop
 ep = 0
-r = np.empty(N, dtype=np.float32)
 async def main():
     async with wsI as ws:
         tsAll = time()
-        r_tot = 0
 
         if gpu:
             d_us = cuda.to_device(us)
@@ -169,20 +161,13 @@ async def main():
                 step[blocks,threads_per_block](d_xs, d_us, d_itaus, d_omegaMaxs, d_G1s, d_G2s, dt, log_idx, d_xs_log)
             else:
                 step(xs, us, itaus, omegaMaxs, G1s, G2s, dt, log_idx, xs_log)
-                reward_function(xs,pSets,us,0,r)
-                r_tot += np.sum(r)
-                # print(r)
 
             if position_control:
                 if gpu:
                     controller[blocks,threads_per_block](d_xs, d_us, d_posPs, d_velPs, d_pSets, d_G1pinvs)
                 else:
                     controller(xs, us, posPs, velPs, pSets, G1pinvs)
-            if deep_control:
-                if gpu:
-                    raise NotImplementedError
-                else:
-                    controller_rl(xs, us, posPs, velPs, pSets, G1pinvs)
+
             if viz  and  ws.ws is not None  and  not i % int(viz_interval/dt):
                 # visualize every 0.1 seconds
                 if gpu:
@@ -210,27 +195,9 @@ async def main():
 
         runtimeOverhead = time() - tsAll
 
-    return runtime, runtimeOverhead, r_tot
+    return runtime, runtimeOverhead
 
-def optimal_sim_time():
-    import numpy as np
-    T_lst = np.linspace(1,20,20)
-    runtime_log = []
-    runtimeOverhead_log = []
-    for T in T_lst:
-        runtime, runtimeOverhead = asyncio.run(main())
-        runtime_log.append(runtime)
-        runtimeOverhead_log.append(runtimeOverhead)
+runtime, runtimeOverhead = asyncio.run(main())
 
-    import matplotlib.pyplot as plt
-    plt.plot(T_lst, runtime_log, label="runtime")
-    plt.plot(T_lst, runtimeOverhead_log, label="runtimeOverhead")
-    plt.legend()
-    plt.title("Runtime vs simulated T")
-    plt.show()
-
-runtime, runtimeOverhead, r_tot = asyncio.run(main())
-
-print("Total reward of the run: ", r_tot)
 print(f"Achieved {N*iters / runtime / 1e6:.2f}M ticks per second (sim only) across {runtime:.5f} seconds.")
 print(f"Retrieved {Nlog*N / runtimeOverhead / 1e6:.2f}M datapoints per (sim plus overhead) second across {runtimeOverhead:.5f} seconds.")

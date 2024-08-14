@@ -792,6 +792,7 @@ class Drone_Sim(gym.Env):
         # Show the plot
         plt.show()
 
+# required for sim.py to run
 global jitter; global kerneller
 
 # debug mode
