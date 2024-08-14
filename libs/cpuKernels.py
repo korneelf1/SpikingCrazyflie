@@ -19,7 +19,6 @@
 
 from gym_sim import kerneller, GRAVITY
 from libs.jitMath import motorDot, forcesAndMoments, quatRotate, quatDot, sgemv
-import networks as n
 import numba as nb
 from numba import cuda
 from math import sqrt, acos, hypot
@@ -124,7 +123,8 @@ def check_done(xs, done, t):
         pos_threshold = np.sum((np.abs(xs[0:3])>0.6))
         velocity_threshold = np.sum((np.abs(xs[3:6]) > 1000))
         angular_threshold  = np.sum((np.abs(xs[10:13]) > 1000))
-        if (pos_threshold +  velocity_threshold + angular_threshold)!= 0 or t[0]>500: # if not zero at least one would be true
+        time_threshold = t[0]>500
+        if (pos_threshold +  velocity_threshold + angular_threshold + time_threshold)!= 0: # if not zero at least one would be true
             # print(pos_threshold,velocity_threshold,angular_threshold)
             done[0] = True
             t[0] = 0
