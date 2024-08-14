@@ -22,7 +22,19 @@ from helpers import NumpyDeque
 GRAVITY = 9.80665
 # print('\nNOTE NOW REWARD IS MODIFIED TO JUST MAKE STABILIZING CONTROLLER (DISREGARDING ANY POSITIONS)\n')
 class Drone_Sim(gym.Env):
-    def __init__(self, gpu=False, drone='CrazyFlie', task='stabilization', action_buffer=True,action_buffer_len=32, dt=0.01, T=5, N_drones=1, spiking_model=None, test=False, device='cpu', disturbances=False):
+    def __init__(self,
+                 gpu=False,
+                 drone='CrazyFlie',
+                 task='stabilization',
+                 action_buffer=True,
+                 action_buffer_len=32,
+                 dt=0.01,
+                 T=5,
+                 N_drones=1,
+                 spiking_model=None,
+                 test=False,
+                 device='cpu',
+                 disturbances=False):
         super(Drone_Sim, self).__init__()
         '''
         Vectorized quadrotor simulation with websocket pose output
@@ -632,7 +644,7 @@ class Drone_Sim(gym.Env):
                 obs = self.xs[0]
                 obs[13:17] = obs[13:17] / self.wmax # normalize motor speeds  
                 return obs,self.r[0], self.done[0],self.done[0], {}
-            return self.xs[0],self.r[0], self.done[0],self.done[0], {}
+            return self.xs,self.r[0], self.done[0],self.done[0], {}
         else:
             if self.normalize_obs: 
                 obs = self.xs
