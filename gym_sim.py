@@ -556,6 +556,21 @@ class Drone_Sim(gym.Env):
 
         return obs_arr, act_arr, rew_arr, done_arr, obs_next_arr, info_arr, {'episode_lens': episode_lens, 'episode_rews': episode_rews, 'episode_ctr': ei, 'time': time()-ts}
     
+    def generate_quaternion(self):
+        # Generate a random angle alpha between 0 and 90 degrees
+        alpha = np.random.uniform(0, np.pi/2, (self.N,))
+        
+        # Generate a random unit vector for the axis of rotation
+        axis = np.random.randn((self.N,3))
+        axis /= np.linalg.norm(axis)
+        
+        # Convert to quaternion representation
+        q = np.zeros((self.N,4))
+        q[0] = np.cos(alpha/2)  # Real part
+        q[1:] = np.sin(alpha/2) * axis  # Imaginary part
+        
+        return q  
+    
     def reset(self,seed=None, dones = None, initial_states = None):
         '''
         For the reset of specific envs, use the done array to reset the correct envs
@@ -566,9 +581,21 @@ class Drone_Sim(gym.Env):
             x0 = initial_states
         else:
             # initial states: 0:3 pos, 3:6 vel, 6:10 quaternion, 10:13 body rates Omega, 13:17 motor speeds omega
-            x0 = np.random.random((self.N, 17)).astype(np.float32) - 0.5
-            x0[:, 6:10] /= np.linalg.norm(x0[:, 6:10], axis=1)[:, np.newaxis] # quaternion needs to be normalized
+            p = np.random.uniform(-0.2,0.2,(self.N, 3)).astype(np.float32)
+            v = np.random.uniform(-1.,1.,(self.N, 3)).astype(np.float32)
+            w = np.random.uniform(-1.,1.,(self.N, 3)).astype(np.float32)
+            rpm = (np.ones((self.N, 4))*self.wmax/2).astype(np.float32)
+            q = self.generate_quaternion().astype(np.float32)
 
+            # Concatenate the arrays in the specified order: p, v, q, w, rpm
+            x0 = np.concatenate([
+                p.reshape(self.N, -1),    # p: shape (N, 3)
+                v.reshape(self.N, -1),    # v: shape (N, 3)
+                q.reshape(self.N, -1),    # q: shape (N, 4) assuming quaternions
+                w.reshape(self.N, -1),    # w: shape (N, 3)
+                rpm.reshape(self.N, -1)   # rpm: shape (N, 4)
+            ], axis=1) 
+            
         self.xs = x0.copy() # states
         self.t = 0
         self.episode_counter = 0

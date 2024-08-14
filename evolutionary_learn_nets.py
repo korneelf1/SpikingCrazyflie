@@ -139,7 +139,7 @@ problem = GymNE(
     # network_args=
     env_config=env_config,
     observation_normalization=True,
-    decrease_rewards_by=2.0,
+    decrease_rewards_by=.0,
     # Use all available CPU cores
     num_actors="max",
 )
@@ -163,4 +163,4 @@ searcher.run(wandb_config["num_runs"])
 population_center = searcher.status["center"]
 policy = problem.to_policy(population_center)
 torch.save(policy.state_dict(), "ann_actor.pth")
-problem.visualize(policy)
+# problem.visualize(policy)
