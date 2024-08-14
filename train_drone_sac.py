@@ -9,7 +9,7 @@ from tianshou.utils.net.common import Net
 from tianshou.data import VectorReplayBuffer,HERVectorReplayBuffer,PrioritizedVectorReplayBuffer
 from tianshou.trainer import OffpolicyTrainer
 from tianshou.highlevel.logger import LoggerFactoryDefault
-from tianshou.utils import WandbLogger
+from tianshou.utils import WandbLogger, MultipleLRSchedulers
 from tianshou.data.collector import Collector
 from tianshou.env import SubprocVectorEnv, DummyVectorEnv
 
@@ -127,7 +127,12 @@ def create_policy():
     critic2_optim = torch.optim.Adam(critic2.parameters(), lr=1e-4)
 
     # create one learning rate scheduler for the 3 optimizers
-    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR([actor_optim, critic_optim, critic2_optim], milestones=[1e5, 2e5], gamma=0.98)
+    lr_scheduler_a = torch.optim.lr_scheduler.StepLR(actor_optim, gamma=0.98)
+    lr_scheduler_c1 = torch.optim.lr_scheduler.StepLR(critic_optim, gamma=0.98)
+    lr_scheduler_c2 = torch.optim.lr_scheduler.StepLR(critic2_optim, gamma=0.98)
+
+    lr_scheduler = MultipleLRSchedulers(lr_scheduler_a,lr_scheduler_c1,lr_scheduler_c2)
+
 
     # create the policy
     policy = SACPolicy(actor=actor, actor_optim=actor_optim, \
