@@ -1,13 +1,9 @@
 """
-    Vectorized quadrotor simulation using gymnasium API
-
-    
-    maybe it would be better to provide step function which takes a model and performs a complete rollout where model is optimized
+Vectorized quadrotor simulation using gymnasium API
 """
 
 import numpy as np
 import numba as nb
-from collections import deque
 from tqdm import tqdm
 import asyncio
 from time import time
@@ -18,37 +14,41 @@ import gymnasium as gym
 import torch
 from tianshou.data import to_numpy, Batch
 from helpers import NumpyDeque
+from numpy.typing import NDArray
 
 GRAVITY = 9.80665
-# print('\nNOTE NOW REWARD IS MODIFIED TO JUST MAKE STABILIZING CONTROLLER (DISREGARDING ANY POSITIONS)\n')
+
 class Drone_Sim(gym.Env):
+    ''' Vectorized quadrotor simulation using gymnasium API
+    NOTE: CURRENTLY JITTER AND KERNELLER ARE GLOBAL VARIABLES!
+    
+    Args:
+        gpu (bool): run on the gpu using cuda
+        drone (str): 'CrazyFlie' or 'Default'
+        dt (float): step time is dt seconds (forward Euler)
+        T (float): run for T seconds NOT USED
+        N_drones (int): number of simulations to run in parallel
+        test (bool): if True, reward is cumulative reward over environment steps
+        device (str): 'cpu' or 'cuda', used if env is ran on CPU, but model on GPU
+        disturbances (bool): if True, adds disturbances to the simulation
+        action_buffer (bool): if True, adds last action_buffer_len inputs as observation
+        action_buffer_len (int): number of last actions to add to observation
+    '''
+
     def __init__(self,
-                 gpu=False,
-                 drone='CrazyFlie',
-                 task='stabilization',
-                 action_buffer=True,
-                 action_buffer_len=32,
-                 dt=0.01,
-                 T=5,
-                 N_drones=1,
-                 spiking_model=None,
-                 test=False,
-                 device='cpu',
-                 disturbances=False):
+                 gpu: bool = False,
+                 drone: str = 'CrazyFlie',
+                 task: str = 'stabilization',
+                 action_buffer: str = True,
+                 action_buffer_len: int = 32,
+                 dt: float = 0.01,
+                 T: int = 5,
+                 N_drones: int = 1,
+                 test: bool = False,
+                 device: str = 'cpu',
+                 disturbances: bool = False
+                 ) -> None:
         super(Drone_Sim, self).__init__()
-        '''
-        Vectorized quadrotor simulation with websocket pose output
-        NOTE: CURRENTLY JITTER AND KERNELLER ARE GLOBAL VARIABLES!
-        
-        Args:
-            gpu (bool): run on the gpu using cuda
-            drone (str): 'CrazyFlie' or 'Default'
-            dt (float): step time is dt seconds (forward Euler)
-            T (float): run for T seconds NOT USED
-            N_drones (int): number of simulations to run in parallel
-            spiking_model (object): spiking model, which will be reset at environment reset (spiking_model.reset_hidden())
-            test (bool): if True, reward is cumulative reward over environment steps
-            '''
 
         ### sim config ###
         self.gpu = gpu              # run on the self.gpu using cuda
@@ -58,8 +58,11 @@ class Drone_Sim(gym.Env):
 
         # length / number of parallel sims
         self.dt = dt                # step time is self.dt seconds (forward Euler)
-        self.T = T                  # run for self.T seconds
+        self.T = 5                  # run for self.T seconds
+        if T != 5:
+            print("T is set to ", T, " but will be overwritten by 5 - hardcoded in check_done")
         if self.gpu:                # number of simulations to run in parallel
+            raise UserWarning("GPU is not tested!")
             self.blocks = 128      # 128 or 256 seem best. Should be multiple of 32
             self.threads_per_block = 64 # depends on global memorty usage. 256 seems best without. Should be multiple of 64
             # # self.dt 0.01, self.T 10, no viz, self.log_interval 0, no controller, self.blocks 256, threads 256, self.gpu = True --> 250M ticks/sec
@@ -73,13 +76,13 @@ class Drone_Sim(gym.Env):
         # compatibility with tianshou
         self.is_async = False
 
-        self.spiking_model = spiking_model
-        # initial states: 0:3 pos, 3:6 vel, 6:10 quaternion, 10:13 body rates Omega, 13:17 motor speeds omega
 
-        # create the drones
+        ### drone config ###
         if drone=='CrazyFlie':
+            print("Creating CrazyFlie drones")
             self._create_drones(og_drones=False)
         else:
+            print("Creating OG drones")
             self._create_drones(og_drones=True)
         
         # create observation space and action space
@@ -88,7 +91,7 @@ class Drone_Sim(gym.Env):
         if task == 'stabilization':
             self.stabilization = True
             self.n_states = 17
-        if action_buffer: # add last 25 inputs as observation
+        if action_buffer: # add last action_buffer_len inputs as observation
             # create gymnasium observation and action space 17 + 3 for position
             low = np.array([-np.inf]*self.n_states)
             high = np.array([np.inf]*self.n_states)
@@ -137,26 +140,29 @@ class Drone_Sim(gym.Env):
             self.observation_space = gym.spaces.Box(low=low, high=high, shape=(self.n_states,), dtype=np.float32)
         self.action_space = gym.spaces.Box(low=0., high=1., shape=(4,), dtype=np.float32)
 
-        # create gymnasium dones
-        self.done = np.zeros((self.N),dtype=bool) # for resetting all vectorized envs
-        
+        print("Observation space: ", self.observation_space)
+        print("Action space: ", self.action_space)
+
+
+        # if test, rewards are cumulative
         self.test = test
 
         # precompute stuff
         self.itaus = 1. / self.taus
 
-        # position setpoints --> uniform on rectangular grid
+        # position setpoints --> uniform on rectangular grid --> now just zeros
         grid_size = int(np.ceil(np.sqrt(N)))
         x_vals = np.linspace(-7, 7, grid_size)
         y_vals = np.linspace(-7, 7, grid_size)
         X, Y = np.meshgrid(x_vals, y_vals)
         vectors = np.column_stack((X.ravel(), Y.ravel(), -1.5*np.ones_like(X.ravel())))
         self.pSets = vectors[:N].astype(np.float32) # position setpoint
-        self.pSets = np.zeros_like(self.pSets)
+        self.pSets = np.zeros_like(self.pSets) 
         
         # import compute kernels
         global kerneller; global jitter
         if self.gpu:
+            raise UserWarning("GPU is not tested!")
             jitter = lambda signature: nb.cuda.jit(signature, fastmath=False, device=True, inline=False)
             kerneller = lambda signature: nb.cuda.jit(signature, fastmath=False, device=False)
 
@@ -184,46 +190,47 @@ class Drone_Sim(gym.Env):
             # self.reset_subenvs   = reset_subenvs
             # self.termination = termination
 
-        # allocate sim data
-        log=1
+        # allocate logging and vizualization data
         self.log_interval = 1    # log state every x iterations. Too low may cause out_of_memory on the self.gpu. False == 0
         self.iters = int(self.T / self.dt)
         self.Nlog = int(self.iters / self.log_interval) if self.log_interval > 0 else 0
         # other settings (vizualition and logging)
         self.viz_interval = 0.05 # visualize every self.viz_interval simulation-seconds
-        self.Nviz = 512 # max number of quadrotors to visualize
         
+
+        ### prepare for simulation ###
         self.reset()
-        self.us = np.random.random((N, 4)).astype(np.float32) # inputs (motor speeds)
+        self.us = (np.ones((N, 4))*self.wmax/2).astype(np.float32) # inputs (motor speeds)
+        self.done = np.zeros((self.N),dtype=bool) # for resetting all vectorized envs
+        self.r = np.zeros(self.N, dtype=np.float32)
 
         # create logs
         self._create_logs()
 
-        self.r = np.zeros(self.N, dtype=np.float32)
-
         # gym specific stuff
-        self.episode_counter = 0
         self.global_step_counter = 0 # used for reward curriculum
         self.iters = int(self.T / self.dt)
 
     @property
-    def n(self):
+    def n(self) -> int:
         '''
         Number of drones that are simulated.'''
         return self.N
     
     @property
-    def num_envs(self):
+    def num_envs(self) -> int:
         '''
         Number of drones that are simulated.'''
         return self.N
     
-    def __len__(self):
+    def __len__(self) -> int:
         '''
         Number of drones that are simulated.'''
         return self.N
     
-    def _create_drones(self, og_drones=True):
+    def _create_drones(self, 
+                       og_drones: bool = True
+                       ) -> None:
         '''Creates drones, crazyflies
         parameters retrieved from:
         https://github.com/arplaboratory/learning_to_fly_media/blob/ae72456e879137b840b9dfde366253886c3ec131/parameters.pdf
@@ -273,7 +280,8 @@ class Drone_Sim(gym.Env):
 
                 q.fillArrays(i, self.G1s, self.G2s, self.omegaMaxs, self.taus)
 
-    def _create_logs(self,):
+    def _create_logs(self
+                     ) -> None:
         '''Creates logs
         NOTE: currently not used'''	
         if self.action_buffer:
@@ -284,14 +292,18 @@ class Drone_Sim(gym.Env):
                 (self.N, self.Nlog, self.n_states), dtype=np.float32)
         self.xs_log[:] = np.nan
 
-    def _simulate_step(self, disturbance=None):
+    def _simulate_step(self, 
+                       disturbance: NDArray[np.float32] | None = None
+                       ) -> None:
         '''Simulates a single step using gpu or cpu kernels'''
         self.log_idx =0
         # make sure xs is float32
         self.xs = self.xs.astype(np.float32)
-        # self.us = ((self.us +1)/2).astype(np.float32)
+
         if np.min(self.us)<0.0 or np.max(self.us)>1.0:
             raise RuntimeWarning('Action is not in action space!')
+        
+        # call kernel
         if self.gpu:
             self.kernel_step[self.blocks,self.threads_per_block](self.d_xs, self.d_us, self.d_itaus, self.d_omegaMaxs, self.d_G1s, self.d_G2s, self.dt, self.log_idx, self.d_xs_log)
         else:
@@ -301,9 +313,10 @@ class Drone_Sim(gym.Env):
             else:
                 self.kernel_step(self.xs, self.us, self.itaus, self.omegaMaxs, self.G1s, self.G2s, self.dt, int(0), self.xs_log)
                         
-    def _compute_reward(self):
+    def _compute_reward(self
+                        ) -> None:
         '''Compute reward, reward function from learning to fly in 18sec paper
-        TODO: optimize with cpuKernels and gpuKernels'''	
+        if test, then cumulative reward is computed'''	
         if self.test:
             r = self.r
         if self.gpu:
@@ -313,25 +326,21 @@ class Drone_Sim(gym.Env):
         if self.test:
             self.r += r    
     
-    def _check_done(self, numba_opt = True):
-        '''Check if the episode is done, sets done array to True for respective environments.'''
-        if numba_opt:
-            if self.gpu:
-                self.check_done[self.blocks,self.threads_per_block](self.d_xs, self.d_done)
-            else:
-                self.check_done(self.xs, self.done)
-            # self.done = np.expand_dims(self.done, axis=1)
+    def _check_done(self
+                    ) -> None:
+        '''Check if the episode is done, sets done array to True for respective environments.
+        Conditions:
+        - position is out of bounds
+        - velocity is out of bounds
+        - angular velocity is out of bounds
+        - episode length exceeds 500 steps'''
+        if self.gpu:
+            self.check_done[self.blocks,self.threads_per_block](self.d_xs, self.d_done)
         else:
-            # if any velocity in the abs(self.xs) array is greater than 10 m/s, then the episode is done
-            # if any rotational velocity in the abs(self.xs) array is greater than 10 rad/s, then the episode is done
-            if self.gpu:
-                self.done = np.logical_or(np.any(np.abs(self.d_xs[:,3:6]) > 10, axis=1), \
-                                    np.any(np.abs(self.d_xs[:,10:13]) > 20, axis=1))
-            else:
-                self.done = np.logical_or(np.any(np.abs(self.xs[:,3:6]) > 10, axis=1), \
-                                        np.any(np.abs(self.xs[:,10:13]) > 20, axis=1))
+            self.check_done(self.xs, self.done, self.t)
 
-    def _move_to_cuda(self):
+    def _move_to_cuda(self
+                      ) -> None:
         '''Move data to cuda'''
         self.d_us = cuda.to_device(self.us)
         self.d_xs = cuda.to_device(self.xs)
@@ -350,7 +359,10 @@ class Drone_Sim(gym.Env):
 
         cuda.synchronize()
 
-    def _reset_subenvs(self, numba_opt = True, seed = None):
+    def _reset_subenvs(self, 
+                       numba_opt: bool = True, 
+                       seed: int | None = None
+                       ) -> None:
         '''Reset subenvs, uses the done array
         NOTE: First call _check_done()'''
         if numba_opt:
@@ -382,42 +394,47 @@ class Drone_Sim(gym.Env):
                 if self.action_buffer:
                     self.xs = np.concatenate((self.xs[:,0:self.n_states],self.action_history),axis=1,dtype=np.float32)
             
-    async def _step(self, enable_reset = True, disturbance=None):
+    async def _step(self, 
+                    enable_reset: bool = False, 
+                    disturbance: NDArray[np.float32] | None =None
+                    ) -> None:
         '''
-        Perform a step:
-        Simulate step
-        Compute reward
-        Check if any env is done
-        Reset respective envs'''
-        # self.episode_counter += 1
-        # self.global_step_counter += self.N 
-        self.global_step_counter += 1 # for easier experimenting
+        Performs a single step of the simulation
+        Args:
+            enable_reset: if True, resets the envs, only recommended for fully vectorized envs
+            disturbance: if not None, adds disturbance to the simulation, forces and moments
+        '''
+        self.global_step_counter += self.N # this step runs for N drones
         
+        # move data to cuda
         if self.gpu:
             self._move_to_cuda()
 
+        # perform step of dynamics on the gpu or cpu
         self._simulate_step(disturbance=disturbance)
-        # self.kernel_step(self.xs, self.us, self.itaus, self.omegaMaxs, self.G1s, self.G2s, self.dt, int(0), self.xs_log)
-        # self.reward_function(self.xs, self.pSets, self.us, self.global_step_counter,self.r)
+
+        # compute reward
         self._compute_reward()
         
+        # check if any env is done
         self._check_done()
-        # print(self.done)
-
-        # self.termination(self.xs, self.done)
+  
         # make sure all threads complete before stopping the count
         if self.gpu:
             cuda.synchronize()
-
-        if self.gpu and (self.log_interval > 0):
-            self.xs_log[:] = self.d_xs_log.copy_to_host()
         
+        # if enable_reset, reset the envs, only recommended for fully vectorized envs
         if enable_reset:
             self._reset_subenvs(numba_opt=False)
 
-    async def _step_rollout(self, policy, nr_steps=None,nr_episodes=None,tianshou_policy=False):
+    async def _step_rollout(self, 
+                            policy: torch.nn.Module, 
+                            nr_steps: int | None = None,
+                            nr_episodes: int | None = None,
+                            tianshou_policy: bool = False
+                            ) -> None:
         '''
-        Collects a series of rollouts, 
+        Collects a series of rollouts, exploits the vectorized environment
         policy: is tianshou policy that uses act method for interaction
         nr_steps: number of steps to collect
         nr_episodes: number of episodes to collect
@@ -425,14 +442,13 @@ class Drone_Sim(gym.Env):
 
         Stores info in arrays.
 
-        To perform a step
+        To perform a step:
+        Add noise to action
         Simulate step
         Compute reward
         Check if any env is done
         Reset respective envs
         '''
-        # if True:
-        #     raise NotImplementedError("This function is not implemented yet, see dones!")
         if nr_steps:
             iters = int(nr_steps)
         elif nr_episodes:
@@ -440,8 +456,8 @@ class Drone_Sim(gym.Env):
 
         else:
             raise ValueError("Either nr_steps or nr_episodes should be provided!")
-        # print("Running simulation for ", iters, " steps, with ", self.N, " drones")
 
+        # allocate arrays
         if self.action_buffer:
             obs_arr = np.zeros((iters, self.N, self.n_states+len(self.action_history)), dtype=np.float32)
             obs_next_arr = np.zeros((iters, self.N, self.n_states+len(self.action_history)), dtype=np.float32)
@@ -458,28 +474,38 @@ class Drone_Sim(gym.Env):
         episode_rews = []
         episode_len_arr = np.zeros((self.N,),dtype=np.int32)
 
+        # reset the envs
         if not self.test:
             self.reset()
         
+        # move data to GPU
         if self.gpu:
             self._move_to_cuda()
 
         ts = time()
         ei = 0
         # for i in range(iters):
+        # run the simulation for a predefined number of steps
         for i in tqdm(range(iters), desc="Running simulation"):
+            self.global_step_counter += int(self.N)
 
-            # self.global_step_counter += int(self.N)
-            self.global_step_counter += int(1)
+            # add data to the arrays
             if self.gpu:
                 obs_arr[i] = self.d_xs.copy_to_host()
             else:
                 obs_arr[i] = self.xs
 
+            # add noise to action
+            raise NotImplementedError("Add noise to action is not implemented yet!")
+            # self.us = self.us + np.random.normal(0, 0.1, size=self.us.shape)
+
+            # perform step of dynamics on the gpu or cpu
             self._simulate_step()
 
+            # compute reward
             self._compute_reward()
             
+            # check if any environment is done
             self._check_done()
 
             if self.gpu:
@@ -545,7 +571,6 @@ class Drone_Sim(gym.Env):
                 act_arr[i] = self.us
             
             if nr_episodes and ei >= nr_episodes:
-                self.episode_counter += ei
                 # trim the arrays
                 obs_arr = obs_arr[:i+1]
                 act_arr = act_arr[:i+1]
@@ -568,7 +593,10 @@ class Drone_Sim(gym.Env):
 
         return obs_arr, act_arr, rew_arr, done_arr, obs_next_arr, info_arr, {'episode_lens': episode_lens, 'episode_rews': episode_rews, 'episode_ctr': ei, 'time': time()-ts}
     
-    def generate_quaternion(self):
+    def generate_quaternion(self
+                            ) -> NDArray[np.float32]:
+        ''' Generate random quaternions for the initial states of the drones
+        '''
         # Generate a random angle alpha between 0 and 90 degrees
         alpha = np.random.uniform(0, np.pi/2, (self.N,))
         
@@ -583,10 +611,16 @@ class Drone_Sim(gym.Env):
         
         return q  
     
-    def reset(self,seed=None, dones = None, initial_states = None):
+    def reset(self,
+              seed: int | None = None, 
+              initial_states: NDArray[np.float32] | None = None
+              ) -> tuple[NDArray[np.float32], dict]:
         '''
-        For the reset of specific envs, use the done array to reset the correct envs
-        First multiply the relevant env states with zero-mask, then add the new states with inverse zero mask (zeros everywhere but the relevant states)
+        For the reset of ALL envs, for resetting only the done environments, use _reset_subenvs
+
+        Args:
+            seed: seed for the random number generator
+            initial_states: if not None, the initial states of the drones
         '''
         super().reset(seed=seed)
         if initial_states is not None:
@@ -609,35 +643,41 @@ class Drone_Sim(gym.Env):
             ], axis=1) 
             
         self.xs = x0.copy() # states
-        self.t = 0
-        self.episode_counter = 0
+
+        # reset timers 
+        self.t = np.zeros(self.N, dtype=np.float32)
         
+        # reset reward
         self.r = np.zeros(self.N, dtype=np.float32)
-        if self.spiking_model:
-            self.spiking_model.reset_hidden()
-            print('Reward: \taverage: ',np.mean(self.r),\
-                    '\tmax: ',np.max(self.r), '\tmin: ', np.min(self.r))
             
+        # if position control tasks, add position setpoints to observation
         if not self.stabilization:    
             self.xs = np.concatenate((self.xs[:,0:17], self.pSets),axis=1)
 
+        # reset action history and add to observation
         if self.action_buffer:
             self.action_history.reset()
             self.xs = np.concatenate((self.xs,self.action_history),axis=1,dtype=np.float32)
-            # return x0,{}
+
         # YOU CAN RESET YOUR MODEL IN THE ENVIRONMENT RESET FUNCTION!!!!!!!
-        # return self.xs,np.array([{} for _ in range(self.N)]) # state, info
         return self.xs,{}  # state, info
                 
-    def step(self, action, enable_reset=True, disturbance=None):
+    def step(self, 
+             action: NDArray[np.float32], 
+             enable_reset: bool = True, 
+             disturbance: NDArray[np.float32] | None = None
+             ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[bool], NDArray[bool], dict]:
         '''Step function for gym
-        action (np.array): thrust setting in range [-1,1]'''
+        NOTE currently, no noise is added to the action
+        Args:
+            action (np.array): thrust setting in range [0,1]
+            enable_reset (bool): if True, resets the envs, only recommended for fully vectorized envs
+            disturbance: if not None, adds disturbance to the simulation, forces and moments'''
+
         self.us = action
-        # self.done =np.zeros((self.N,1),dtype=bool)
-        # done = self._check_done()
+
+        # run accelerated _step function
         asyncio.run(self._step(enable_reset=enable_reset, disturbance=disturbance))
-        if self.t >= self.T/self.dt:
-            self.done = np.ones((self.N,),dtype=bool)
 
         if self.N == 1:
             if self.normalize_obs: 
@@ -652,7 +692,14 @@ class Drone_Sim(gym.Env):
                 return obs, self.r, self.done, self.done, {}
             return self.xs, self.r, self.done, self.done, {}
     
-    def step_rollout(self, policy, n_step = None, n_episode=None, numba_policy=False, tianshou_policy=False, random=False):
+    def step_rollout(self, 
+                     policy: torch.nn.Module, 
+                     n_step: int | None = None,
+                     n_episode: int | None = None,
+                     tianshou_policy: bool = False, 
+                     numba_policy: bool = False, 
+                     random: bool = False
+                     )  -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[bool], NDArray[bool], dict]:
         '''Step function for collecting and entire rollout, which can be faster in this vectorized environment
         policy: is tianshou policy that uses:
          action = policy.act(observation) method for interaction
@@ -662,6 +709,7 @@ class Drone_Sim(gym.Env):
         return asyncio.run(self._step_rollout(policy,nr_steps=n_step,nr_episodes=n_episode,tianshou_policy=tianshou_policy))
     
     def render(self, mode='human', policy=None, n_step=1e3, tianshou_policy=False):
+        '''Render function for gym: visualizes the simulation in a matplotlib animation window, not very flashy but reasonably useful for debugging'''
         # other settings
         viz_interval = 0.05 # visualize every viz_interval simulation-seconds
         Nviz = 512 # max number of quadrotors to visualize
@@ -708,6 +756,7 @@ class Drone_Sim(gym.Env):
                 ws.sendData(self.xs[::int(np.ceil(self.N/Nviz))].astype(np.float64))
 
     def mpl_render(self, observations):
+        '''Render function for gym: visualizes the simulation in a matplotlib animation window, not very flashy but reasonably useful for debugging'''
         import matplotlib.pyplot as plt
         from mpl_toolkits.mplot3d import Axes3D
         from matplotlib.animation import FuncAnimation
@@ -743,27 +792,28 @@ class Drone_Sim(gym.Env):
         # Show the plot
         plt.show()
 
-global jitter; global kerneller
-# NOTE if linux went into suspend mode, might not be able to communicate with GPU, run:
-# sudo rmmod nvidia_uvm
-# sudo modprobe nvidia_uvm
-# in terminal 
 
-# torch.cuda.init()
-gpu = torch.cuda.is_available()
-gpu=False
-print(gpu)
-# debug mode
-if gpu:
-    jitter = lambda signature: nb.cuda.jit(signature, fastmath=False, device=True, inline=False)
-    kerneller = lambda signature: nb.cuda.jit(signature, fastmath=False, device=False)
-else:
-    jitter = lambda signature: nb.jit(signature, nopython=True, fastmath=False)
-    kerneller = lambda signature, map: nb.guvectorize(signature, map, target='parallel', nopython=True, fastmath=False)
 
 if __name__ == "__main__":
+    # NOTE if linux went into suspend mode, might not be able to communicate with GPU, run:
+    # sudo rmmod nvidia_uvm
+    # sudo modprobe nvidia_uvm
+    # in terminal 
+    
+    global jitter; global kerneller
+
+    # debug mode
+    gpu = False
+    if gpu:
+        jitter = lambda signature: nb.cuda.jit(signature, fastmath=False, device=True, inline=False)
+        kerneller = lambda signature: nb.cuda.jit(signature, fastmath=False, device=False)
+    else:
+        jitter = lambda signature: nb.jit(signature, nopython=True, fastmath=False)
+        kerneller = lambda signature, map: nb.guvectorize(signature, map, target='parallel', nopython=True, fastmath=False)
+
     N_drones = 1
 
+    # create dummy env
     sim = Drone_Sim(gpu=False, 
                     dt=0.01, 
                     T=2, 
@@ -773,30 +823,27 @@ if __name__ == "__main__":
                     drone='ogDrone', 
                     disturbances=True)
     
-    # from libs.cpuKernels import controller_rl
     # position controller gains (attitude/rate hardcoded for now, sorry)
+    # needed for the controller built by Till
     posPs = 2*np.ones((N_drones, 3), dtype=np.float32)
     velPs = 2*np.ones((N_drones, 3), dtype=np.float32)
 
     
     print("Environment created!")
 
-    iters = int(10)
     sim.reset()
-    # create actor
+
     t0 = time()
     t_steps = []
-    import networks as n
 
-    print("\nTest individual steps")
     sim.reset()
     # from libs.cpuKernels import controller
-    # position controller gains (attitude/rate hardcoded for now, sorry)
     G1pinvs = np.linalg.pinv(sim.G1s) / (sim.omegaMaxs*sim.omegaMaxs)[:, :, np.newaxis]
     t0 = time()
     obs = []
     
-    # from learning to fly....
+    # from learning to fly.... APPERENTLY NOT SAME DYNAMICS SO IGNORE
+    '''
     import datastruct_dict as d
     log_file_path = "/home/korneel/learning_to_fly/learning_to_fly/learning-to-fly/include/learning_to_fly/simulator/log.txt"
     extracted_data = d.parse_log_file(log_file_path)
@@ -805,7 +852,7 @@ if __name__ == "__main__":
     disturbances = extracted_data[2]
     actions = extracted_data[3]
     rewards = extracted_data[4]
-
+    
     
 
     iters = 9
@@ -823,20 +870,11 @@ if __name__ == "__main__":
         sim.xs = obs_next[:,i].reshape(1, 17).astype(np.float32)    
         sim._compute_reward() 
         print(sim.r)
-
+    '''
     obs = np.array(obs).reshape(-1, sim.N, 17)
     sim.mpl_render(obs)
-    # t_steps.append(time()-t_step)
-      
-        # sim._compute_reward()
-    print("1e3 steps took: ", time()-t0, " seconds")
-    print("Average step time: ",  (time()-t0)/iters)
-    # print("Total step time: ", np.sum(t_steps))
-    print("Done")
-        
+
 '''
-Issue:
-if parallel envs, how to organize dones? now it was running indefinetly, but values become infinity.
-I should have a done array, which is updated in the step function, and then the done array is checked in the step function
-Then, either reset correct envs and policies OR just silence appropriate envs till global reset is done...
+Issue log:
+handle reset in numba as well, greatly simplifies matters and makes it more efficient
 '''

@@ -88,9 +88,11 @@ def reward_function(x, pset, motor_commands, global_step_counter,r): # now compu
                         -Cp*np.sum((pos)**2) \
 
 # sim done function
-@kerneller(["void(f4[::1],b1[::1])"], "(states)->()")
-def check_done(xs,done):
+@kerneller(["void(f4[::1],b1[::1], f4[:])"], "(states)->(),()")
+def check_done(xs, done, t):
         '''Check if the episode is done
+        Will reset time to zero if done
+
         From Learning to fly in seconds repo:
         
         namespace rl_tools::rl::environments::multirotor::parameters::termination{
@@ -112,17 +114,20 @@ def check_done(xs,done):
         # if any velocity in the abs(self.xs) array is greater than 10 m/s, then the episode is done
         # if any rotational velocity in the abs(self.xs) array is greater than 10 rad/s, then the episode is done
         done[0] = False
+        t[0] += 1
+        
         if np.sum(np.isnan(xs))!=0:
             print("something is nan...?!")
             done[0] = True
+            t[0] = 0
         
         pos_threshold = np.sum((np.abs(xs[0:3])>0.6))
         velocity_threshold = np.sum((np.abs(xs[3:6]) > 1000))
         angular_threshold  = np.sum((np.abs(xs[10:13]) > 1000))
-        if (pos_threshold +  velocity_threshold + angular_threshold)!= 0: # if not zero at least one would be true
+        if (pos_threshold +  velocity_threshold + angular_threshold)!= 0 or t[0]>500: # if not zero at least one would be true
             # print(pos_threshold,velocity_threshold,angular_threshold)
             done[0] = True
-
+            t[0] = 0
 
 # sim stepper
 @kerneller(["void(f4[::1], f4[::1], f4[::1], f4[::1], f4[:, ::1], f4[:, ::1], f4, i4, f4[:, ::1])"], "(states),(n),(n),(n),(four,n),(one,n),(),(),(iters,states)")
@@ -182,7 +187,7 @@ def step(x, d, itau, wmax, G1, G2, dt, log_to_idx, x_log):
         for j in range(17):
             x_log[log_to_idx, j] = x[j]
 
-
+# sim stepper with disturbance injected
 @kerneller(["void(f4[::1], f4[::1], f4[::1], f4[::1], f4[:, ::1], f4[:, ::1], f4, f4[::1], i4, f4[:, ::1])"], 
            "(states),(n),(n),(n),(four,n),(one,n),(),(six),(),(iters,states)")
 def step_disturbance(x, d, itau, wmax, G1, G2, dt, disturbance, log_to_idx, x_log):
@@ -202,21 +207,15 @@ def step_disturbance(x, d, itau, wmax, G1, G2, dt, disturbance, log_to_idx, x_lo
 
     #%% motor forces
     # motor model
-    print(omega)
-    print(d)
     motorDot(omega, d, itau, wmax, omegaDot)
-    print(omegaDot)
+
     # forces and moments
     fm = np.empty(6, dtype=nb.float32)
     forcesAndMoments( omega, omegaDot, G1, G2, fm, work[:4])
     
-    print(fm)
-    # print('rpms: ',omega)
-    # print('motor commands: ',d)
-    # print('d rpms: ',omegaDot)
     for j in range(3):
-        velDot[j] = fm[j] # still needs to be rotated, see next section
-        OmegaDot[j] = fm[j+3] 
+        velDot[j] = fm[j] + disturbance[j] # still needs to be rotated, see next section
+        OmegaDot[j] = fm[j+3]  + disturbance[j+3]
 
     #%% kinematics
     quatRotate(q, velDot, work[:3])
@@ -246,7 +245,7 @@ def step_disturbance(x, d, itau, wmax, G1, G2, dt, disturbance, log_to_idx, x_lo
             x_log[log_to_idx, j] = x[j]
 
 
-# position controller
+# example position controller
 @kerneller(["void(f4[::1], f4[::1], f4[::1], f4[::1], f4[::1], f4[:, ::1])"],  "(states),(n),(three),(three),(three),(n,four)")
 def controller(x, d, posPs, velPs, pSets, G1pinv):
     '''
@@ -339,19 +338,3 @@ def controller(x, d, posPs, velPs, pSets, G1pinv):
     for j in range(4):
         d[j] = 0. if d[j] < 0. else 1. if d[j] > 1. else d[j]
 
-# create actor
-single_actor = n.Actor_ANN(20,4,1)
-def controller_rl(x, d, pSets, G1pinv):
-    '''
-    x: state vector
-    d: output vector which returns the motor commands
-    posPs: position controller gains NOT USED
-    velPs: velocity controller gains NOT USED
-    pSets: position setpoints
-    G1pinv: pseudoinverse of G1 matrix NOT USED'''
-    # stack the state and the position setpoint
-    x = np.hstack((x, pSets))
-
-
-    d = single_actor.forward(x).detach().numpy()
-    return d
