@@ -1,9 +1,27 @@
 import unittest
 from gym_sim import *
 from libs.cpuKernels import controller, step
-sim_N1 = Drone_Sim(drone='og', N_drones=1)
+import torch
+sim_N1 = Drone_Sim(drone='og', N_drones=1,)
 
-sim_N3 = Drone_Sim(drone='og', N_drones=3)     
+sim_N3 = Drone_Sim(drone='og', N_drones=3)  
+
+class simpleNet(torch.nn.Module):
+    def __init__(self, ins, outs):
+        super(simpleNet, self).__init__()
+        self.fc1 = torch.nn.Linear(ins, 64)
+        self.fc2 = torch.nn.Linear(64, 64)
+        self.fc3 = torch.nn.Linear(64, outs)
+
+    def forward(self, x):
+        x = torch.tensor(x).float()
+        x = torch.nn.functional.relu(self.fc1(x))
+        x = torch.nn.functional.relu(self.fc2(x))
+        x = self.fc3(x)
+        # scale to 0 - 1 using sigmoid
+        x = torch.nn.functional.sigmoid(x)
+        return np.array(x.detach().numpy()).astype(np.float32)
+    
 class TestGymSim(unittest.TestCase):
     def test_check_done(self):
         '''
@@ -123,14 +141,90 @@ class TestGymSim(unittest.TestCase):
         # for both sim with 1 drone and 3 drones
         x1, info1 = sim_N1.reset()
         x3, info3 = sim_N3.reset()
+        
+        # for resetting
+        x1_init = x1.copy()
 
-        us1 = np.random.random((1, 4)).astype(np.float32)
-        us3 = np.random.random((3, 4)).astype(np.float32)
+        x3_init = np.tile(x1_init.copy(), (3, 1))
 
-        # for i in range(100):
-        #     x1, info1 = sim_N1.step(us1)
-        #     x3, info3 = sim_N3.step(us3)
-        pass
+        controller_nn = simpleNet(np.prod(sim_N1.observation_space.shape), 4)
+        n_iters= 100
+
+        x_single_lst = []
+        r_single_lst = []
+        done_single_lst = []
+        actions_single_lst = []
+        x_single = x1.copy()
+        done = False
+        for i in range(n_iters):
+            
+        
+            x_single_lst.append(x_single)
+            action = controller_nn(x_single)
+            actions_single_lst.append(action)
+            x_single, reward, done,_,_ = sim_N1.step(action)
+            
+            r_single_lst.append(reward)
+            done_single_lst.append(done)
+
+            if done:
+                x_single,_ = sim_N1.reset(initial_states=x1_init)
+
+            
+        print("single steps done")
+        x,a,r,d,_,_,_ = sim_N1.step_rollout(controller_nn, n_step=n_iters, initial_states=x1_init[:,:17])
+        print("rollout done")
+        d = d.squeeze(1)
+        x = x.squeeze(1)
+        r = r.squeeze(1)
+        a = a.squeeze(1)
+
+        d_single = np.array(done_single_lst).reshape(d.shape)
+        x_single = np.array(x_single_lst).reshape(x.shape)
+        r_single = np.array(r_single_lst).reshape(r.shape)
+        a_single = np.array(actions_single_lst).reshape(a.shape)
+
+        # print('Actions:')
+        # print(np.all(np.isclose(a_single, a)))
+        # print(np.unique(np.where(np.isclose(a_single, a) == False)[0]))
+
+        # print('Rewards:')
+        # print(np.all(np.isclose(r_single, r)))
+        # print(np.unique(np.where(np.isclose(r_single, r) == False)[0]))
+
+        # print('Dones:')
+        # print(np.all(np.isclose(d_single, d)))
+        # print(np.unique(np.where(np.isclose(d_single, d) == False)[0]))
+
+        # print('States:')
+        # print(np.all(np.isclose(x_single, x)))
+        # print(np.unique(np.where(np.isclose(x_single, x) == False)[0]))
+
+        
+        assert np.all(np.isclose(d_single, d))
+        assert np.all(np.isclose(x_single, x))
+        assert np.all(np.isclose(r_single, r))
+        assert np.all(np.isclose(a_single, a))
+
+        sim_N3.reset(initial_states = x3_init)
+        x,a,r,d,_,_,_ = sim_N3.step_rollout(controller_nn, n_step=n_iters, initial_states=x3_init[:,:17])
+
+        # stack the d_single, x_single, r_single, a_single
+        d_triple = np.tile(d_single, (3, 1)).swapaxes(0,1)
+        x_triple = np.tile(x_single, (3, 1,1))
+        r_triple = np.tile(r_single, (3, 1)).swapaxes(0,1)
+        a_triple = np.tile(a_single, (3, 1,1))
+
+        # d = d.squeeze(1)
+        # x = x.squeeze(1)
+        # r = r.squeeze(1)
+        # a = a.squeeze(1)
+
+        assert np.all(np.isclose(d_triple, d))
+        assert np.all(np.isclose(x_triple.swapaxes(0,1), x))
+        assert np.all(np.isclose(r_triple, r))
+        assert np.all(np.isclose(a_triple.swapaxes(0,1), a))
+
 
     def test_step_equivalence(self):
         # Test if step of original sim and wrapped with gym are equivalent

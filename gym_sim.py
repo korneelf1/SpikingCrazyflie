@@ -361,10 +361,15 @@ class Drone_Sim(gym.Env):
 
     def _reset_subenvs(self, 
                        numba_opt: bool = True, 
-                       seed: int | None = None
+                       seed: int | None = None,
+                       initial_states: NDArray[np.float32] | None = None
                        ) -> None:
         '''Reset subenvs, uses the done array
-        NOTE: First call _check_done()'''
+        NOTE: First call _check_done()
+        Args:
+            numba_opt: if True, uses numba optimized version
+            seed: seed for random number generator
+            initial_states: initial states for the drones, for testing purposes'''
         if numba_opt:
             raise NotImplementedError("This function is not implemented yet, see dones!")
             self.reset_subenvs(self.done, seed,self.xs)
@@ -387,6 +392,9 @@ class Drone_Sim(gym.Env):
                 # create new states
                 xs_new = np.random.random((self.N, 17)).astype(np.float32) - 0.5
                 xs_new[:, 6:10] /= np.linalg.norm(xs_new[:, 6:10], axis=1)[:, np.newaxis]
+
+                if initial_states is not None:
+                    xs_new = initial_states
 
                 # mask with done array
                 self.xs[:,0:17][self.done,:] = xs_new[self.done,:]
@@ -425,14 +433,16 @@ class Drone_Sim(gym.Env):
         
         # if enable_reset, reset the envs, only recommended for fully vectorized envs
         if enable_reset:
-            self._reset_subenvs(numba_opt=False)
+            if np.any(self.done):
+                self._reset_subenvs(numba_opt=False)
 
     async def _step_rollout(self, 
                             policy: torch.nn.Module, 
                             nr_steps: int | None = None,
                             nr_episodes: int | None = None,
-                            tianshou_policy: bool = False
-                            ) -> None:
+                            tianshou_policy: bool = False,
+                            initial_states: NDArray[np.float32] | None = None
+                            ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], NDArray[bool], NDArray,NDArray[np.float32],dict]:
         '''
         Collects a series of rollouts, exploits the vectorized environment
         policy: is tianshou policy that uses act method for interaction
@@ -476,7 +486,7 @@ class Drone_Sim(gym.Env):
 
         # reset the envs
         if not self.test:
-            self.reset()
+            self.reset(initial_states=initial_states)
         
         # move data to GPU
         if self.gpu:
@@ -489,51 +499,14 @@ class Drone_Sim(gym.Env):
         for i in tqdm(range(iters), desc="Running simulation"):
             self.global_step_counter += int(self.N)
 
+
             # add data to the arrays
             if self.gpu:
                 obs_arr[i] = self.d_xs.copy_to_host()
             else:
                 obs_arr[i] = self.xs
 
-            # add noise to action
-            raise NotImplementedError("Add noise to action is not implemented yet!")
-            # self.us = self.us + np.random.normal(0, 0.1, size=self.us.shape)
-
-            # perform step of dynamics on the gpu or cpu
-            self._simulate_step()
-
-            # compute reward
-            self._compute_reward()
-            
-            # check if any environment is done
-            self._check_done()
-
-            if self.gpu:
-                obs_next_arr[i] = self.d_xs.copy_to_host()
-                rew_arr[i] = self.d_r.copy_to_host()
-                done_host = self.d_done.copy_to_host()
-                done_arr[i] = done_host
-
-                
-                episode_len_arr += 1 - done_host # adds an increment for every step
-                if np.any(done_host):
-                    episode_lens.extend(episode_len_arr[done_host].tolist())
-                    episode_rews.extend(rew_arr[i][done_host].tolist())
-                    episode_len_arr[done_host] = 0
-                    ei += np.sum(done_host)
-
-            else:
-                obs_next_arr[i] = self.xs
-                rew_arr[i] = self.r
-                done_arr[i] = self.done
-
-                episode_len_arr += 1 - self.done # adds an increment for every step
-                if np.any(self.done):
-                    episode_lens.extend(episode_len_arr[self.done].tolist())
-                    episode_rews.extend(rew_arr[i][self.done].tolist())
-                    episode_len_arr[self.done] = 0
-                    ei += np.sum(self.done)
-
+            # sample action from policy
             with torch.no_grad():
                 # self.us = to_numpy(policy(Batch(obs=self.xs, info={})).act)
                 if tianshou_policy:
@@ -567,9 +540,53 @@ class Drone_Sim(gym.Env):
                     if self.gpu:
                         self.d_xs = np.concatenate((self.d_xs[:,0:self.n_states],self.action_history.array),axis=1,dtype=np.float32)
                     # else:
-                    #     self.xs = np.concatenate((self.xs[:,0:20],self.action_history),axis=1,dtype=np.float32)
+                    #     self.xs = np.concatenate((self.xs[:,0:self.n_states],self.action_history),axis=1,dtype=np.float32)
                 act_arr[i] = self.us
+    
+            # perform step of dynamics on the gpu or cpu
+            self._simulate_step()
+
+            # compute reward
+            self._compute_reward()
             
+            # check if any environment is done
+            self._check_done()
+
+            # check if any env is done, do this before step, so returned array when done still returns the last state
+            if np.any(self.done):
+                # reset the subenvs
+                self._reset_subenvs(numba_opt=False, initial_states=initial_states)
+                ei+= self.N - np.sum(done_arr[i])
+
+
+            # add data to the arrays and fix statistics   
+            if self.gpu:
+                obs_next_arr[i] = self.d_xs.copy_to_host()
+                rew_arr[i] = self.d_r.copy_to_host()
+                done_host = self.d_done.copy_to_host()
+                done_arr[i] = done_host
+
+                
+                episode_len_arr += 1 - done_host # adds an increment for every step
+                if np.any(done_host):
+                    episode_lens.extend(episode_len_arr[done_host].tolist())
+                    episode_rews.extend(rew_arr[i][done_host].tolist())
+                    episode_len_arr[done_host] = 0
+                    ei += np.sum(done_host)
+
+            else:
+                obs_next_arr[i] = self.xs
+                rew_arr[i] = self.r
+                done_arr[i] = self.done
+
+                episode_len_arr += 1 - self.done # adds an increment for every step
+                if np.any(self.done):
+                    episode_lens.extend(episode_len_arr[self.done].tolist())
+                    episode_rews.extend(rew_arr[i][self.done].tolist())
+                    episode_len_arr[self.done] = 0
+                    ei += np.sum(self.done)
+
+        
             if nr_episodes and ei >= nr_episodes:
                 # trim the arrays
                 obs_arr = obs_arr[:i+1]
@@ -580,16 +597,14 @@ class Drone_Sim(gym.Env):
                 info_arr = info_arr[:i+1]
                 
                 break
-
-            self._reset_subenvs(numba_opt=False)
+            
 
         # make sure all threads complete before stopping the count
         if self.gpu:
             cuda.synchronize()
         # done_arr[i] = np.ones((self.N, 1), dtype=bool)
+        
         ei+= self.N - np.sum(done_arr[i])
-
-
 
         return obs_arr, act_arr, rew_arr, done_arr, obs_next_arr, info_arr, {'episode_lens': episode_lens, 'episode_rews': episode_rews, 'episode_ctr': ei, 'time': time()-ts}
     
@@ -657,14 +672,14 @@ class Drone_Sim(gym.Env):
         # reset action history and add to observation
         if self.action_buffer:
             self.action_history.reset()
-            self.xs = np.concatenate((self.xs,self.action_history),axis=1,dtype=np.float32)
+            self.xs = np.concatenate((self.xs[:,0:self.n_states],self.action_history),axis=1,dtype=np.float32)
 
         # YOU CAN RESET YOUR MODEL IN THE ENVIRONMENT RESET FUNCTION!!!!!!!
         return self.xs,{}  # state, info
                 
     def step(self, 
              action: NDArray[np.float32], 
-             enable_reset: bool = True, 
+             enable_reset: bool = False, 
              disturbance: NDArray[np.float32] | None = None
              ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[bool], NDArray[bool], dict]:
         '''Step function for gym
@@ -698,7 +713,8 @@ class Drone_Sim(gym.Env):
                      n_episode: int | None = None,
                      tianshou_policy: bool = False, 
                      numba_policy: bool = False, 
-                     random: bool = False
+                     random: bool = False,
+                     initial_states: NDArray[np.float32] | None = None,
                      )  -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[bool], NDArray[bool], dict]:
         '''Step function for collecting and entire rollout, which can be faster in this vectorized environment
         policy: is tianshou policy that uses:
@@ -706,7 +722,7 @@ class Drone_Sim(gym.Env):
         NOTE: you need random steps for exploration, in this case, the policy will be a stochastic SNN, so it is inherrent in the policy'''
         if numba_policy:
             print("gotta fix this!")
-        return asyncio.run(self._step_rollout(policy,nr_steps=n_step,nr_episodes=n_episode,tianshou_policy=tianshou_policy))
+        return asyncio.run(self._step_rollout(policy,nr_steps=n_step,nr_episodes=n_episode,tianshou_policy=tianshou_policy,initial_states=initial_states))
     
     def render(self, mode='human', policy=None, n_step=1e3, tianshou_policy=False):
         '''Render function for gym: visualizes the simulation in a matplotlib animation window, not very flashy but reasonably useful for debugging'''
