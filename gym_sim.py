@@ -266,7 +266,7 @@ class Drone_Sim(gym.Env):
             self.G1s = np.empty((self.N, 4, 4), dtype=np.float32)
             self.G2s = np.empty((self.N, 1, 4), dtype=np.float32)
             self.omegaMaxs = np.empty((self.N, 4), dtype=np.float32) # max rpm (in rads)? if so, max 21702 rpm -> 21702/60*2pi rad/sec
-            self.taus = np.empty((self.N, 4), dtype=np.float32) # RPM time constant? if so, 0.15sec or 0.015sec?
+            self.taus = np.empty((self.N, 4), dtype=np.float32) # RPM time constant? if so, 0.15sec so for thrust sqrt(0.15)?
 
             # max_rads = 21702/60*2*3.1415
             self.wmax = 21702
@@ -389,12 +389,26 @@ class Drone_Sim(gym.Env):
             else:
                 if self.action_buffer:
                     self.action_history.reset(self.done)
-                # create new states
-                xs_new = np.random.random((self.N, 17)).astype(np.float32) - 0.5
-                xs_new[:, 6:10] /= np.linalg.norm(xs_new[:, 6:10], axis=1)[:, np.newaxis]
-
                 if initial_states is not None:
                     xs_new = initial_states
+                else:
+                    # initial states: 0:3 pos, 3:6 vel, 6:10 quaternion, 10:13 body rates Omega, 13:17 motor speeds omega
+                    p = np.random.uniform(-0.2,0.2,(self.N, 3)).astype(np.float32)
+                    v = np.random.uniform(-1.,1.,(self.N, 3)).astype(np.float32)
+                    w = np.random.uniform(-1.,1.,(self.N, 3)).astype(np.float32)
+                    rpm = (np.ones((self.N, 4))*self.wmax/2).astype(np.float32)
+                    rpm = (np.ones((self.N, 4))/2).astype(np.float32) # try with normalized rpms
+                    q = self.generate_quaternion().astype(np.float32)
+
+                    # Concatenate the arrays in the specified order: p, v, q, w, rpm
+                    xs_new = np.concatenate([
+                        p.reshape(self.N, -1),    # p: shape (N, 3)
+                        v.reshape(self.N, -1),    # v: shape (N, 3)
+                        q.reshape(self.N, -1),    # q: shape (N, 4) assuming quaternions
+                        w.reshape(self.N, -1),    # w: shape (N, 3)
+                        rpm.reshape(self.N, -1)   # rpm: shape (N, 4)
+                    ], axis=1) 
+            
 
                 # mask with done array
                 self.xs[:,0:17][self.done,:] = xs_new[self.done,:]
@@ -646,6 +660,7 @@ class Drone_Sim(gym.Env):
             v = np.random.uniform(-1.,1.,(self.N, 3)).astype(np.float32)
             w = np.random.uniform(-1.,1.,(self.N, 3)).astype(np.float32)
             rpm = (np.ones((self.N, 4))*self.wmax/2).astype(np.float32)
+            rpm = (np.ones((self.N, 4))/2).astype(np.float32) # try with normalized rpms
             q = self.generate_quaternion().astype(np.float32)
 
             # Concatenate the arrays in the specified order: p, v, q, w, rpm

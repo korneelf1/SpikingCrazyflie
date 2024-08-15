@@ -136,7 +136,7 @@ def step(x, d, itau, wmax, G1, G2, dt, log_to_idx, x_log):
     #vel   = x[3:6]
     q     = x[6:10]
     Omega = x[10:13]
-    omega = x[13:17]
+    omega = x[13:17]*wmax # retreive real RPM from normalized
 
     xdot_local = np.empty(17, dtype=nb.float32)
     #posDot = xdot_local[0:3]
@@ -182,6 +182,8 @@ def step(x, d, itau, wmax, G1, G2, dt, log_to_idx, x_log):
 
     for j in range(10,17): # Omega and omega
         x[j] += dt * xdot_local[j]
+        if j>=13:
+            x[j] /= wmax # normalize again
     #%% save state
     if log_to_idx >= 0:
         for j in range(17):
