@@ -34,13 +34,14 @@ wandb_config = {
     "num_interactions": 150000,
     "popsize_max": 3200,
     "drone": "stock drone",
-    "num_runs": 500,
+    "num_runs": 200,
     "forward_per_sample": 1,
 }
 env_config = {
     "N_drones": 1,
     "gpu": False,
     "drone": "stock drone",
+    "test": True
     }
 device = 'cpu'
 def create_policy():
