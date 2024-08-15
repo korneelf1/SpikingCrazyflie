@@ -36,7 +36,7 @@ def reward_function(x, pset, motor_commands, global_step_counter,r): # now compu
     Cq = 0 # orientation weight
     Ca = .0 # action weight og .334, but just learns to fly out of frame
     Cw = .0 # angular velocity weight 
-    Crs = .2 # reward for survival
+    Crs = 1 # reward for survival
     Cab = 0.0 # action baseline
 
     # curriculum parameters
@@ -183,7 +183,7 @@ def step(x, d, itau, wmax, G1, G2, dt, log_to_idx, x_log):
     for j in range(10,17): # Omega and omega
         x[j] += dt * xdot_local[j]
         if j>=13:
-            x[j] /= wmax # normalize again
+            x[j] = x[j]/wmax[j-13] #  normalize again
     #%% save state
     if log_to_idx >= 0:
         for j in range(17):
