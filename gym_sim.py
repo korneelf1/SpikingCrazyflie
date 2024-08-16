@@ -743,9 +743,9 @@ class Drone_Sim(gym.Env):
         '''Render function for gym: visualizes the simulation in a matplotlib animation window, not very flashy but reasonably useful for debugging'''
         # other settings
         viz_interval = 0.05 # visualize every viz_interval simulation-seconds
-        Nviz = 512 # max number of quadrotors to visualize
-        log_interval = 1    # log state every x iterations. Too low may cause out_of_memory on the GPU. False == 0
-        viz = False
+        Nviz = 3 # max number of quadrotors to visualize
+
+        viz = True
         if mode=='human':
             viz = True
         if viz:
@@ -758,27 +758,26 @@ class Drone_Sim(gym.Env):
 
             for i in range(n_step):
             # self.global_step_counter += int(self.N)
-                self._simulate_step()
+                self.xs = self.step()[0]
 
             # print('action: ',self.us[1])
             # print('motor speeds: ',self.xs[1,13:17])
-                self._compute_reward()
             # print(self.done)
 
-            with torch.no_grad():
-                # self.us = to_numpy(policy(Batch(obs=self.xs, info={})).act)
-                if tianshou_policy:
-                    if self.action_buffer:
-                        self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.xs, 'info':{}})).act))
-                        self.action_history.append(self.us)
+                with torch.no_grad():
+                    # self.us = to_numpy(policy(Batch(obs=self.xs, info={})).act)
+                    if tianshou_policy:
+                        if self.action_buffer:
+                            self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.xs, 'info':{}})).act))
+                            self.action_history.append(self.us)
+                        else:
+                            self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.xs, 'info':{}})).act))
                     else:
-                        self.us = to_numpy(policy.map_action(policy(Batch({'obs':self.xs, 'info':{}})).act))
-                else:
-                    if self.action_buffer:
-                        self.us = to_numpy(policy(np.concatenate((self.xs[:,0:17],self.action_history.array),axis=1,dtype=np.float32)))
-                        self.action_history.append(self.us)
-                    else:
-                        self.us = to_numpy(policy(self.xs))
+                        if self.action_buffer:
+                            self.us = to_numpy(policy(np.concatenate((self.xs[:,0:17],self.action_history.array),axis=1,dtype=np.float32)))
+                            self.action_history.append(self.us)
+                        else:
+                            self.us = to_numpy(policy(self.xs))
 
                 
             if viz  and  ws.ws is not None  and  not i % int(viz_interval/self.dt):

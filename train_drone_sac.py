@@ -1,5 +1,5 @@
 # custom code
-from custom_collector import FastPyDroneSimCollector
+# from custom_collector import FastPyDroneSimCollector
 from gym_sim import Drone_Sim
 
 # tianshou code
@@ -14,10 +14,10 @@ from tianshou.data.collector import Collector
 from tianshou.env import SubprocVectorEnv, DummyVectorEnv
 
 # spiking specific code
-from spiking_gym_wrapper import SpikingEnv
-from spikingActorProb import SpikingNet
-from masked_actors import MaskedNet
-
+# from spiking_gym_wrapper import SpikingEnv
+# from spikingActorProb import SpikingNet
+# from masked_actors import MaskedNet
+# 
 import torch
 import numpy as np
 import os
