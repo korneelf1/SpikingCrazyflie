@@ -660,7 +660,7 @@ class Drone_Sim(gym.Env):
             v = np.random.uniform(-1.,1.,(self.N, 3)).astype(np.float32)
             w = np.random.uniform(-1.,1.,(self.N, 3)).astype(np.float32)
             rpm = (np.ones((self.N, 4))*self.wmax/2).astype(np.float32)
-            rpm = (np.ones((self.N, 4))/2).astype(np.float32) # try with normalized rpms
+            # rpm = (np.ones((self.N, 4))/2).astype(np.float32) # try with normalized rpms
             q = self.generate_quaternion().astype(np.float32)
 
             # Concatenate the arrays in the specified order: p, v, q, w, rpm
@@ -782,13 +782,19 @@ class Drone_Sim(gym.Env):
  
                 ws.sendData(self.xs[::int(np.ceil(self.N/Nviz))].astype(np.float64))
 
-    def mpl_render(self, observations):
+    def mpl_render(self, observations, fps=30):
         '''Render function for gym: visualizes the simulation in a matplotlib animation window, not very flashy but reasonably useful for debugging'''
         import matplotlib.pyplot as plt
         from mpl_toolkits.mplot3d import Axes3D
         from matplotlib.animation import FuncAnimation
 
         xyz = observations[:,0, :3]
+        # convert to fps (every fps frames)
+        dt_anim = 1/fps
+        print(dt_anim)
+        xyz = xyz[::int(np.ceil(dt_anim/self.dt))]
+        
+
         # Set up the figure and the 3D axis
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
@@ -814,7 +820,7 @@ class Drone_Sim(gym.Env):
             return point,origin,
 
         # Create the animation
-        ani = FuncAnimation(fig, update, frames=xyz.shape[0], interval=self.dt * 10000, blit=True)
+        ani = FuncAnimation(fig, update, frames=xyz.shape[0], interval=dt_anim*1000, blit=True)
 
         # Show the plot
         plt.show()
@@ -859,6 +865,7 @@ if __name__ == "__main__":
                     action_buffer=True, 
                     drone='ogDrone', 
                     disturbances=False)
+    
     
     # position controller gains (attitude/rate hardcoded for now, sorry)
     # needed for the controller built by Till
@@ -923,17 +930,22 @@ if __name__ == "__main__":
     t0 = time()
     t_steps = []
     print(xs_fpdsim.shape)
-    sim.reset(initial_states=xs_fpdsim[0])
+    norm_init = xs_fpdsim[0].copy()
+    norm_init[:,13:17] = norm_init[:,13:17] / sim.wmax
+    sim.reset(initial_states=norm_init)
     from libs.cpuKernels import controller
     G1pinvs = np.linalg.pinv(sim.G1s) / (sim.omegaMaxs*sim.omegaMaxs)[:, :, np.newaxis]
+    print(G1pinvs)
+
+
     t0 = time()
     obs_lst = []
     obs_lst.append(sim.xs[:,:17]) # add first element
-    for i in range(9):
+    for i in range(int(9)):
         controller(sim.xs, sim.us, posPs, velPs, sim.pSets, G1pinvs)
         obs = sim.step(sim.us, enable_reset=False)[0]
         obs_lst.append(obs[:,:17])
-    print(obs_lst)
+    # print(obs_lst)
 
     # from learning to fly.... APPERENTLY NOT SAME DYNAMICS SO IGNORE
     '''
@@ -964,19 +976,23 @@ if __name__ == "__main__":
         sim._compute_reward() 
         print(sim.r)
     '''
-    obs = np.array(obs_lst).reshape(xs_fpdsim.shape)
+    # obs = np.array(obs_lst).reshape(xs_fpdsim.shape)
+    obs = np.array(obs_lst)
+    sim.mpl_render(obs)
     # check if obs array is close to xs_fpdsim
     print("\n\nAre the observations close to the ones from the FPD sim? ->")
-    close = np.allclose(obs, xs_fpdsim)
+    xs_fpdsim_scaled = xs_fpdsim.copy()
+    xs_fpdsim_scaled[:,:,13:17] = xs_fpdsim_scaled[:,:,13:17] / sim.wmax
+    close = np.allclose(obs, xs_fpdsim_scaled)
     if close:
         print("Yes!")
     else:
         print("No! :(")
-        print(np.abs(obs - xs_fpdsim))
+        print(np.abs(obs - xs_fpdsim_scaled))
         print("Last observation my sim:")
         print(obs[-1])
         print("Last observation FastPyDrone sim:")
-        print(xs_fpdsim[-1])
+        print(xs_fpdsim_scaled[-1])
     # sim.mpl_render(obs)
 
 '''

@@ -120,21 +120,22 @@ def check_done(xs, done, t):
             done[0] = True
             t[0] = 0
         
-        pos_threshold = np.sum((np.abs(xs[0:3])>0.6))
+        pos_threshold = np.sum((np.abs(xs[0:3])>1.5))
         velocity_threshold = np.sum((np.abs(xs[3:6]) > 1000))
         angular_threshold  = np.sum((np.abs(xs[10:13]) > 1000))
         time_threshold = t[0]>500
         
-        pos_threshold = 0
-        if pos_threshold:
-            print("position threshold reached, at time: ", t[0])
+        # pos_threshold = 0
+        # if pos_threshold:
+        #     print("position threshold reached, at time: ", t[0], " with position: ", xs[0:3])	
 
-        if velocity_threshold:
-            print("velocity threshold reached, at time: ", t[0])
-        if angular_threshold:
-            print("angular threshold reached, at time: ", t[0])
-        if time_threshold:
-            print("time threshold reached, at time: ", t[0])
+        # if velocity_threshold:
+        #     print("velocity threshold reached, at time: ", t[0])
+        # if angular_threshold:
+        #     print("angular threshold reached, at time: ", t[0])
+        # if time_threshold:
+        #     print("time threshold reached, at time: ", t[0])
+
         if (pos_threshold +  velocity_threshold + angular_threshold + time_threshold)!= 0: # if not zero at least one would be true
             # print(pos_threshold,velocity_threshold,angular_threshold)
             done[0] = True
@@ -148,6 +149,7 @@ def step(x, d, itau, wmax, G1, G2, dt, log_to_idx, x_log):
     q     = x[6:10]
     Omega = x[10:13]
     omega = x[13:17]*wmax # retreive real RPM from normalized
+    # omega = x[13:17]
 
     xdot_local = np.empty(17, dtype=nb.float32)
     #posDot = xdot_local[0:3]
@@ -191,10 +193,11 @@ def step(x, d, itau, wmax, G1, G2, dt, log_to_idx, x_log):
     for j in range(4):
         x[j+6] = q[j] * iqnorm
 
-    for j in range(10,17): # Omega and omega
+    for j in range(10,13): # Omega and omega
         x[j] += dt * xdot_local[j]
-        if j>=13:
-            x[j] = x[j]/wmax[j-13] #  normalize again
+    for j in range(13,17):
+        x[j] += dt * xdot_local[j]/wmax[j-13] #  normalize again
+        # x[j] += dt * xdot_local[j] #  normalize again
     #%% save state
     if log_to_idx >= 0:
         for j in range(17):

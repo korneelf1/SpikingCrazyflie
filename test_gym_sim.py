@@ -35,7 +35,7 @@ class TestGymSim(unittest.TestCase):
         '''
         # done condition 1: abs(position) greater than 0.6
         x1 = np.zeros((1,17)).astype(np.float32)
-        x1[:,:3] = 0.7
+        x1[:,:3] = 2.7
 
         t1 = np.ones((1,)).astype(np.float32) 
         sim_N1.xs = x1
@@ -46,7 +46,7 @@ class TestGymSim(unittest.TestCase):
         assert done == 1
 
         x3 = np.zeros((3,17)).astype(np.float32)
-        x3[1:,:3] = 0.7 # only the second and third drones are out of bounds
+        x3[1:,:3] = 2.7 # only the second and third drones are out of bounds
 
         t3 = np.ones((3,)).astype(np.float32) 
         print(sim_N3.t.shape)
