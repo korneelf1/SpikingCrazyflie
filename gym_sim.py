@@ -746,16 +746,13 @@ class Drone_Sim(gym.Env):
         Nviz = 3 # max number of quadrotors to visualize
 
         viz = True
-        if mode=='human':
-            viz = True
+
         if viz:
             print("initializing websocket. Awaiting connection... ")
             wsI = wsInterface(8765)
         else:
             wsI = dummyInterface()
         with wsI as ws:
-            tsAll = time()
-
             for i in range(n_step):
             # self.global_step_counter += int(self.N)
                 self.xs = self.step()[0]

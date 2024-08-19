@@ -81,4 +81,52 @@ policy = create_policy()
 policy.load_state_dict(torch.load('policy.pth'))
 policy.eval()
 
-env.render(policy=policy, tianshou_policy=True)
+out = env.step_rollout(policy,n_step=1e3, tianshou_policy=True)
+
+xs = out[0]
+dones = out[3]
+
+pos = xs[:,:,:3]
+quat = xs[:,:,6:10]
+vel = xs[:,:,3:6]
+omega = xs[:,:,10:13]
+
+pos_norm = np.linalg.norm(pos,axis=2)
+quat_norm = np.linalg.norm(quat,axis=2)
+vel_norm = np.linalg.norm(vel,axis=2)
+omega_norm = np.linalg.norm(omega,axis=2)
+
+# use matplotlib to visualize the norm of the 4 vectors of the 3 drones
+import matplotlib.pyplot as plt
+plt.figure()
+# plot x y z of positions
+plt.subplot(311)
+plt.plot(pos[:,:,0],label='x')
+plt.legend()
+plt.subplot(312)
+plt.plot(pos[:,:,1],label='y')
+plt.legend()
+plt.subplot(313)
+plt.plot(pos[:,:,2],label='z')
+plt.legend()
+plt.show()
+
+
+plt.figure()
+plt.subplot(221)
+print(pos_norm.shape)
+plt.plot(pos_norm,label='pos')
+plt.legend()
+
+plt.subplot(222)
+plt.plot(quat_norm,label='quat')
+plt.legend()
+
+plt.subplot(223)
+plt.plot(vel_norm,label='vel')
+plt.legend()
+
+plt.subplot(224)
+plt.plot(omega_norm,label='omega')
+plt.legend()
+plt.show()

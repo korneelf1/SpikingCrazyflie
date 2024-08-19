@@ -124,6 +124,17 @@ def check_done(xs, done, t):
         velocity_threshold = np.sum((np.abs(xs[3:6]) > 1000))
         angular_threshold  = np.sum((np.abs(xs[10:13]) > 1000))
         time_threshold = t[0]>500
+        
+        pos_threshold = 0
+        if pos_threshold:
+            print("position threshold reached, at time: ", t[0])
+
+        if velocity_threshold:
+            print("velocity threshold reached, at time: ", t[0])
+        if angular_threshold:
+            print("angular threshold reached, at time: ", t[0])
+        if time_threshold:
+            print("time threshold reached, at time: ", t[0])
         if (pos_threshold +  velocity_threshold + angular_threshold + time_threshold)!= 0: # if not zero at least one would be true
             # print(pos_threshold,velocity_threshold,angular_threshold)
             done[0] = True
