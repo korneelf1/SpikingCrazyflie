@@ -52,7 +52,10 @@ class Learning2Fly(gym.Env):
     
     def reset(self,seed=None):
         sample_initial_parameters(self.device, self.env, self.params, self.rng)
-        initial_state(self.device, self.env, self.params, self.state)
+
+        self.params.parameters.dynamics.mass *= 0.1
+        sample_initial_state(self.device, self.env, self.params, self.state, self.rng)
+        print(self.state.position)
         self.global_step_counter += self.t
         self.t = 0
         return np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32), {}
@@ -237,8 +240,9 @@ class ShmemVectorizedL2F(ShmemVectorEnv):
 
         
 if __name__=='__main__':
-    from stable_baselines3.common.env_checker import check_env
+    # from stable_baselines3.common.env_checker import check_env
     env = Learning2Fly()
-    check_env(env)
-    # register the env
-    gym.register('L2F',Learning2Fly())
+    # check_env(env)
+    # # register the env
+    # gym.register('L2F',Learning2Fly())
+    pass
