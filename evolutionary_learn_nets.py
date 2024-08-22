@@ -1,7 +1,7 @@
 from evotorch.algorithms import PGPE
 from evotorch.logging import StdOutLogger, WandbLogger
 from evotorch.neuroevolution import GymNE
-from gym_sim import Drone_Sim
+
 # from spikingActorProb import SpikingNet
 import torch
 import wandb
@@ -13,8 +13,7 @@ import numpy as np
 from typing import Any, cast
 from torch.distributions import Independent, Normal
 from torch import nn
-
-sim = Drone_Sim()
+from l2f_gym import Learning2Fly
 
 
 # torch.save(actor.state_dict(), "spiking_actor.pth")
@@ -37,22 +36,33 @@ wandb_config = {
     "num_runs": 500,
     "forward_per_sample": 1,
 }
-env_config = {
-    "N_drones": 1,
-    "gpu": False,
-    "drone": "stock drone",
-    }
-device = 'cpu'
+
+env = Learning2Fly()
+state_shape = env.observation_space.shape or env.observation_space.n
+action_shape = env.action_space.shape or env.action_space.n
+max_action = env.action_space.high[0]
+
+# device = "cuda" if torch.cuda.is_available() else "cpu"
+device = "cpu"
+hidden_sizes = [256, 256]
+
+
 def create_policy():
     # create the networks behind actors and critics
     
-    net_a = Net(state_shape=sim.observation_space.shape,
-                    hidden_sizes=[64,64], device=device)
+    net_a = Net(state_shape=state_shape, hidden_sizes=hidden_sizes, device=device)
+    actor = ActorProb(
+        net_a,
+        action_shape,
+        device=device,
+        unbounded=True,
+        conditioned_sigma=True,
+    ).to(device)
         
-    net_c1 = Net(state_shape=sim.observation_space.shape,action_shape=sim.action_space.shape,
+    net_c1 = Net(state_shape=env.observation_space.shape,action_shape=env.action_space.shape,
                     hidden_sizes=[64,64],
                     concat=True,device=device)
-    net_c2 = Net(state_shape=sim.observation_space.shape,action_shape=sim.action_space.shape,
+    net_c2 = Net(state_shape=env.observation_space.shape,action_shape=env.action_space.shape,
                     hidden_sizes=[64,64],
                     concat=True,device=device)
     
@@ -63,7 +73,7 @@ def create_policy():
     # create actors and critics
     actor = ActorProb(
         net_a,
-        sim.action_space.shape,
+        env.action_space.shape,
         unbounded=True,
         conditioned_sigma=True,
         device=device
@@ -80,8 +90,8 @@ def create_policy():
     policy = SACPolicy(actor=actor, actor_optim=actor_optim, \
                         critic=critic1, critic_optim=critic_optim,\
                         critic2=critic2, critic2_optim=critic2_optim,\
-                        action_space=sim.action_space,\
-                        observation_space=sim.observation_space, \
+                        action_space=env.action_space,\
+                        observation_space=env.observation_space, \
                         action_scaling=True, action_bound_method=None) # make sure actions are scaled properly
     return policy
 # actor = SpikingNet(state_shape=simulator.observation_space.shape, 
@@ -89,13 +99,13 @@ def create_policy():
 #                        device="cpu",
 #                        hidden_sizes=[64, 64], repeat=wandb_config["forward_per_sample"])
 
-# net_a = Net(state_shape=sim.observation_space.shape,
+# net_a = Net(state_shape=env.observation_space.shape,
 #                     hidden_sizes=[64,64])
         
 # # create actors and critics
 # actor = ActorProb(
 #         net_a,
-#         sim.action_space.shape,
+#         env.action_space.shape,
 #         unbounded=True,
 #         conditioned_sigma=True,
 #     )
@@ -131,13 +141,13 @@ class PolicyWrapper(nn.Module):
 
         return squashed_action
 actor = PolicyWrapper(actor)
+
 problem = GymNE(
-    env=Drone_Sim,
+    env=Learning2Fly,
     # Linear policy
     # network="Linear(obs_length, act_length)",
     network=actor,
     # network_args=
-    env_config=env_config,
     observation_normalization=True,
     decrease_rewards_by=.0,
     # Use all available CPU cores
@@ -154,7 +164,8 @@ searcher = PGPE(
     num_interactions=wandb_config["num_interactions"],
     popsize_max=wandb_config["popsize_max"],
 )
-# logger = StdOutLogger(searcher)
+
+# logger
 logger = WandbLogger(searcher, project="evotorch drone sim", config=wandb_config)
 searcher.run(wandb_config["num_runs"])
 # torch.save(actor.state_dict(), "spiking_actor.pth")
@@ -162,5 +173,4 @@ searcher.run(wandb_config["num_runs"])
 
 population_center = searcher.status["center"]
 policy = problem.to_policy(population_center)
-torch.save(policy.state_dict(), "ann_actor.pth")
-# problem.visualize(policy)
+torch.save(policy.state_dict(), "ann_actor_evotorch.pth")
