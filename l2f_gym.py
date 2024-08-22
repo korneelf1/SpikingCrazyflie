@@ -2,6 +2,17 @@ from l2f import Rng, Device, Environment, Parameters, State, Observation, Action
 import gymnasium as gym
 import numpy as np
 
+# for vectorization
+from tianshou.env import SubprocVectorEnv, ShmemVectorEnv
+from typing import List, Callable, Optional, Union
+import multiprocessing as mp
+import traceback
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
 class Learning2Fly(gym.Env):
     def __init__(self) -> None:
         super().__init__()
@@ -124,7 +135,110 @@ class Learning2Fly(gym.Env):
         return done
 
 
+def create_learning2fly_env():
+    try:
+        return Learning2Fly()
+    except Exception as e:
+        print(f"Error creating Learning2Fly environment: {e}")
+        traceback.print_exc()
+        return None
+
+class SubprocVectorizedL2F(SubprocVectorEnv):
+    def __init__(self, env_num: int = 4):
+        env_fns = [create_learning2fly_env for _ in range(env_num)]
+        super().__init__(env_fns)
+        logger.info(f"Initialized TianshouSubprocVectorizedL2F with {env_num} environments")
+
+    def reset(self, 
+              mask: Optional[Union[np.ndarray, List[int]]] = None,
+              *,
+              seed: Optional[Union[int, List[int]]] = None,
+              options: Optional[dict] = None):
+        try:
+            if mask is None:
+                mask = list(range(self.env_num))
+            elif isinstance(mask, int):
+                mask = [mask]
+            
+            reset_kwargs = {"seed": seed, "options": options}
+            reset_kwargs = {k: v for k, v in reset_kwargs.items() if v is not None}
+
+            for env_id in mask:
+                self.send(env_id, ("reset", reset_kwargs))
+
+            results = []
+            for env_id in mask:
+                try:
+                    results.append(self.recv(env_id))
+                except EOFError:
+                    logger.error(f"EOFError encountered for environment {env_id}. Attempting to recreate...")
+                    self._reset_env(env_id, **reset_kwargs)
+                    results.append(self.recv(env_id))
+
+            obs_list, info_list = zip(*results)
+            return np.stack(obs_list), info_list
+        except Exception as e:
+            logger.error(f"Error in reset: {e}")
+            traceback.print_exc()
+            raise
+
+    def step(self, action):
+        try:
+            return super().step(action)
+        except EOFError as e:
+            logger.error(f"EOFError in step: {e}")
+            self._reset_all_envs()
+            obs, info = self.reset()
+            return obs, np.zeros(self.env_num), np.ones(self.env_num, dtype=bool), np.ones(self.env_num, dtype=bool), info
+        except Exception as e:
+            logger.error(f"Error in step: {e}")
+            traceback.print_exc()
+            raise
+
+    def _reset_env(self, env_id, **kwargs):
+        self.close_env(env_id)
+        self.workers[env_id] = mp.Process(target=self.worker_fn, args=(self.env_fns[env_id], self.pipes[env_id][1]))
+        self.workers[env_id].start()
+        self.send(env_id, ("reset", kwargs))
+
+    def _reset_all_envs(self, **kwargs):
+        logger.info("Resetting all environments")
+        for env_id in range(self.env_num):
+            self._reset_env(env_id, **kwargs)
+
+    def close(self):
+        try:
+            super().close()
+        except ConnectionResetError:
+            logger.error("ConnectionResetError during close. Some environments may not have closed properly.")
+        except Exception as e:
+            logger.error(f"Error during close: {e}")
+            traceback.print_exc()
+
+class ShmemVectorizedL2F(ShmemVectorEnv):
+    '''
+    Optimized for CPU usage with sub processes, but uses a shared buffer to share experiences.'''
+    def __init__(self, env_num: int = 4):
+        env_fns = [create_learning2fly_env for _ in range(env_num)]
+        super().__init__(env_fns)
+
+    def reset(self, 
+              mask: Optional[Union[np.ndarray, List[int]]] = None,
+              *,
+              seed: Optional[Union[int, List[int]]] = None,
+              options: Optional[dict] = None,
+              env_id: Optional[Union[int, List[int]]] = None):
+        if env_id is not None:
+            if isinstance(env_id, int):
+                env_id = [env_id]
+            mask = env_id
+
+        return super().reset(mask=mask, seed=seed, options=options)
+
+        
 if __name__=='__main__':
     from stable_baselines3.common.env_checker import check_env
     env = Learning2Fly()
     check_env(env)
+    # register the env
+    gym.register('L2F',Learning2Fly())

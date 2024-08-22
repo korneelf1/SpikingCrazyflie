@@ -4,7 +4,7 @@ from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.monitor import Monitor
 
 from l2f import *
-from gym_implement import Learning2Fly
+from l2f_gym import Learning2Fly
 
 env = Learning2Fly()
 env = Monitor(env)
