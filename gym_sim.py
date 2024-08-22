@@ -269,14 +269,15 @@ class Drone_Sim(gym.Env):
             self.taus = np.empty((self.N, 4), dtype=np.float32) # RPM time constant? if so, 0.15sec so for thrust sqrt(0.15)?
 
             # max_rads = 21702/60*2*3.1415
-            self.wmax = 21702
+            self.wmax = 21702/60*2*3.1415
+            Tmax = self.m*GRAVITY*1.5/4
             for i in tqdm(range(self.N), desc="Building crafts"):
                 q = QuadRotor()
                 q.setInertia(self.m, self.I)
-                q.rotors.append(Rotor([-0.028, 0.028, 0], dir='cw', wmax = self.wmax, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 3
-                q.rotors.append(Rotor([0.028, 0.028, 0], dir='ccw', wmax = self.wmax, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 4
-                q.rotors.append(Rotor([-0.028, -0.028, 0], dir='ccw', wmax = self.wmax, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 2	
-                q.rotors.append(Rotor([0.028, -0.028, 0], dir='cw', wmax = self.wmax, tau=0.15, k= 3.16e-10,Izz=0.005964552)) # rotor 1
+                q.rotors.append(Rotor([-0.028, 0.028, 0], dir='cw', wmax = self.wmax, tau=0.06, Tmax=Tmax,Izz=5.964552e-8,cm=0.2)) # rotor 3
+                q.rotors.append(Rotor([0.028, 0.028, 0], dir='ccw', wmax = self.wmax, tau=0.06, Tmax=Tmax,Izz=5.964552e-8,cm=0.2)) # rotor 4
+                q.rotors.append(Rotor([-0.028, -0.028, 0], dir='ccw', wmax = self.wmax, tau=0.06, Tmax=Tmax,Izz=5.964552e-8,cm=0.2)) # rotor 2	
+                q.rotors.append(Rotor([0.028, -0.028, 0], dir='cw', wmax = self.wmax, tau=0.06, Tmax=Tmax,Izz=5.964552e-8,cm=0.2)) # rotor 1
 
                 q.fillArrays(i, self.G1s, self.G2s, self.omegaMaxs, self.taus)
 
@@ -863,7 +864,7 @@ if __name__ == "__main__":
                     T=2, 
                     N_drones=N_drones, 
                     action_buffer=True, 
-                    drone='ogDrone', 
+                    drone='og', 
                     disturbances=False)
     
     
@@ -932,19 +933,31 @@ if __name__ == "__main__":
     print(xs_fpdsim.shape)
     norm_init = xs_fpdsim[0].copy()
     norm_init[:,13:17] = norm_init[:,13:17] / sim.wmax
+    norm_init = np.zeros_like(norm_init)
+    norm_init[:,13:17] = 2029.4/4000
+    norm_init[:,6] = 1
     sim.reset(initial_states=norm_init)
     from libs.cpuKernels import controller
+    
     G1pinvs = np.linalg.pinv(sim.G1s) / (sim.omegaMaxs*sim.omegaMaxs)[:, :, np.newaxis]
-    print(G1pinvs)
+
+    print("G1: ", sim.G1s)
+    print("G1pinv: ", G1pinvs)
+    print("G2: ", sim.G2s)
+    print("itaus: ", sim.itaus)
 
 
     t0 = time()
     obs_lst = []
     obs_lst.append(sim.xs[:,:17]) # add first element
-    for i in range(int(9)):
-        controller(sim.xs, sim.us, posPs, velPs, sim.pSets, G1pinvs)
+    for i in range(int(500)):
+        # controller(sim.xs, sim.us, posPs, velPs, sim.pSets, G1pinvs)
+        sim.us = (np.ones((1,4)) * 0.2574).astype(np.float32)
         obs = sim.step(sim.us, enable_reset=False)[0]
         obs_lst.append(obs[:,:17])
+        # print("Step: ", i)
+        # print("Obs: ", obs[:,:17])
+        # print("Action: ", sim.us)
     # print(obs_lst)
 
     # from learning to fly.... APPERENTLY NOT SAME DYNAMICS SO IGNORE
