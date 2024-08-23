@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class Learning2Fly(gym.Env):
-    def __init__(self, curriculum_terminal=True,seed=None) -> None:
+    def __init__(self, curriculum_terminal=False,seed=None) -> None:
         super().__init__()
         # L2F initialization
         self.device = Device()
@@ -132,11 +132,12 @@ class Learning2Fly(gym.Env):
     def _check_done(self):
         done = False
 
-        pos_limit = 1.5
-        pos_min = 0.6
-        factor = 1/1.5
-        xy_softening = 10 # to first train hover
+        
         if self.curriculum_terminal:
+            pos_limit = 1.5
+            pos_min = 0.6
+            factor = 1/1.5
+            xy_softening = 10 # to first train hover
             if self.global_step_counter%2e4==0:
                 pos_limit = max(pos_min, pos_limit*factor)
                 xy_softening = max(1,xy_softening*factor)
