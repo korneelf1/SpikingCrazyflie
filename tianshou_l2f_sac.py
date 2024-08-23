@@ -17,7 +17,8 @@ from tianshou.utils.net.common import Net
 from tianshou.utils.net.continuous import ActorProb, Critic
 from tianshou.env import DummyVectorEnv
 from l2f_gym import Learning2Fly, SubprocVectorizedL2F, ShmemVectorizedL2F
-
+from tianshou.utils import WandbLogger
+from torch.utils.tensorboard import SummaryWriter
 
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -151,19 +152,49 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
     log_path = os.path.join(args.logdir, log_name)
 
     # logger
-    logger_factory = LoggerFactoryDefault()
-    if args.logger == "wandb":
-        logger_factory.logger_type = "wandb"
-        logger_factory.wandb_project = args.wandb_project
-    else:
-        logger_factory.logger_type = "tensorboard"
+    # logger_factory = LoggerFactoryDefault()
+    # if args.logger == "wandb":
+    #     logger_factory.logger_type = "wandb"
+    #     logger_factory.wandb_project = args.wandb_project
+    # else:
+    #     logger_factory.logger_type = "tensorboard"
 
-    logger = logger_factory.create_logger(
-        log_dir=log_path,
-        experiment_name=log_name,
-        run_id=args.resume_id,
-        config_dict=vars(args),
-    )
+    # logger = logger_factory.create_logger(
+    #     log_dir=log_path,
+    #     experiment_name=log_name,
+    #     run_id=args.resume_id,
+    #     config_dict=vars(args),
+    # )
+    args_wandb = {
+      'epoch': args.epoch,
+      'step_per_epoch': args.step_per_epoch,
+      'step_per_collect': args.step_per_collect, # 2.5 s
+      'test_num': args.test_num,
+      'update_per_step': args.update_per_step,
+      'batch_size': args.batch_size,
+      'wandb_project': 'FastPyDroneGym',
+      'resume_id':1,
+      'logger':'wandb',
+      'algo_name': 'sac',
+      'task': 'stabilize',
+      'seed': int(3),
+      'logdir':'',
+      'spiking':False,
+      'recurrent':False,
+      'masked':False,
+      'logger': 'wandb',
+      'drone': 'stock drone',
+      'buffer_size': 300000,
+      'collector_type': 'Collector',
+      'reinit': True,
+      'reward_function': 'reward_squared_fast_learning',
+      }
+
+    logger = WandbLogger(project="l2f",config=args_wandb)
+    writer = SummaryWriter(log_path)
+    writer.add_text("args", str(args_wandb))
+    logger.load(writer)
+
 
     def save_best_fn(policy: BasePolicy) -> None:
         torch.save(policy.state_dict(), os.path.join(log_path, "policy.pth"))
