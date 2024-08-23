@@ -1,4 +1,4 @@
-from l2f import Rng, Device, Environment, Parameters, State, Observation, Action,initialize_environment,step,initialize_rng,parameters_to_json,sample_initial_parameters,initial_state
+from l2f import Rng, Device, Environment, Parameters, State, Observation, Action,initialize_environment,step,initialize_rng,parameters_to_json,sample_initial_parameters,initial_state, sample_initial_state
 import gymnasium as gym
 import numpy as np
 
@@ -55,19 +55,19 @@ class Learning2Fly(gym.Env):
 
         self.params.parameters.dynamics.mass *= 0.1
         sample_initial_state(self.device, self.env, self.params, self.state, self.rng)
-        print(self.state.position)
+
         self.global_step_counter += self.t
         self.t = 0
         return np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32), {}
     
     def _reward(self):
         # intial parameters
-        Cp = 1 # position weight
+        Cp = 0.1 # position weight
         Cv = .0 # velocity weight
         Cq = 0 # orientation weight
         Ca = .0 # action weight og .334, but just learns to fly out of frame
         Cw = .0 # angular velocity weight 
-        Crs = .2 # reward for survival
+        Crs = 1 # reward for survival
         Cab = 0.0 # action baseline
 
         # curriculum parameters
@@ -82,6 +82,8 @@ class Learning2Fly(gym.Env):
         CaC = 1.4 # orientation factor
         Calim = .5 # orientation limit
 
+        CrsC = .8 # reward for survival factor
+        Crslim = .1 # reward for survival limit
         pos   = self.obs[0:3]
         vel   = self.obs[3:6]
         q     = self.obs[6:10]
@@ -89,9 +91,12 @@ class Learning2Fly(gym.Env):
 
         # curriculum
         if self.global_step_counter % Nc == 0:
+            print("Updating curriculum parameters")
+            # updating the curriculum parameters
             Cp = min(Cp*CpC, Cplim)
-            Cv = min(Cv*CvC, Cvlim)
-            Ca = min(Ca*CaC, Calim)
+            # Cv = min(Cv*CvC, Cvlim)
+            # Ca = min(Ca*CaC, Calim)
+            Crs = max(Crs*CrsC, Crslim)
 
         # r[0] = max(-1e3,-Cp*np.sum((pos-pset)**2) \
         #         - Cv*np.sum((vel)**2) \
