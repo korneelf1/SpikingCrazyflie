@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class Learning2Fly(gym.Env):
-    def __init__(self) -> None:
+    def __init__(self, curriculum_terminal=True,seed=None) -> None:
         super().__init__()
         # L2F initialization
         self.device = Device()
@@ -27,13 +27,17 @@ class Learning2Fly(gym.Env):
         self.next_observation = Observation()
         self.action = Action()
         initialize_environment(self.device, self.env, self.params)
-        initialize_rng(self.device, self.rng, 0)
+        if seed is None:
+            seed = np.random.randint(0, 2**32-1)
+        print("Environment initialized with seed: ", seed)
+        initialize_rng(self.device, self.rng, seed)
 
         # Gym initialization
         self.action_space = gym.spaces.Box(low=-1, high=1, shape=(4,))
         self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(17,))
         self.global_step_counter = 0   
         self.t = 0
+        self.curriculum_terminal = curriculum_terminal # if True, the environment will use soft terminal conditions initially
 
         self.reset()
 
@@ -58,7 +62,10 @@ class Learning2Fly(gym.Env):
 
         self.global_step_counter += self.t
         self.t = 0
-        return np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32), {}
+        self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)
+        print("Obs from reset: ", self.obs)
+        print("shape: ", self.obs.shape)
+        return self.obs, {}
     
     def _reward(self):
         # intial parameters
@@ -124,15 +131,24 @@ class Learning2Fly(gym.Env):
     
     def _check_done(self):
         done = False
-        pos_threshold = np.sum((np.abs(self.obs[0:3])>1.5))
+
+        pos_limit = 1.5
+        pos_min = 0.6
+        factor = 1/1.5
+        xy_softening = 10 # to first train hover
+        if self.curriculum_terminal:
+            if self.global_step_counter%2e4==0:
+                pos_limit = max(pos_min, pos_limit*factor)
+                xy_softening = max(1,xy_softening*factor)
+            z_terminal = self.obs[3]>pos_limit
+            xy_terminal = np.sum((np.abs(self.obs[0:2])>pos_limit*xy_softening))
+            pos_threshold = z_terminal + xy_terminal
+        else:
+            pos_threshold = np.sum((np.abs(self.obs[0:3])>1.5))
+
         velocity_threshold = np.sum((np.abs(self.obs[3:6]) > 1000))
         angular_threshold  = np.sum((np.abs(self.obs[10:13]) > 1000))
         time_threshold = self.t>500
-
-        # print("pos_threshold: ", pos_threshold)
-        # print("velocity_threshold: ", velocity_threshold)
-        # print("angular_threshold: ", angular_threshold)
-        # print("time_threshold: ", time_threshold)
 
         if any(np.isnan(self.obs)):
             done = True
@@ -247,6 +263,10 @@ class ShmemVectorizedL2F(ShmemVectorEnv):
 if __name__=='__main__':
     # from stable_baselines3.common.env_checker import check_env
     env = Learning2Fly()
+    env.reset()
+    env2 = Learning2Fly()
+    env2.reset()
+
     # check_env(env)
     # # register the env
     # gym.register('L2F',Learning2Fly())
