@@ -209,7 +209,7 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
     # )
 
     def save_best_fn(policy: BasePolicy) -> None:
-        torch.save(policy.state_dict(), os.path.join(log_path, "policy.pth"))
+        torch.save(policy.state_dict(), os.path.join(log_path, "policy_snn_actor.pth"))
 
     if not args.watch:
         # trainer
