@@ -104,7 +104,8 @@ logger = WandbLogger(project="l2f",config=args_wandb)
 writer = SummaryWriter(log_path)
 writer.add_text("args", str(args_wandb))
 logger.load(writer)
-
+import wandb
+# wandb.init(mode='disabled')
 
 def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
     env = Learning2Fly()
@@ -130,6 +131,8 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
 
     train_envs = DummyVectorEnv([lambda: Learning2Fly() for _ in range(args.training_num)])
     test_envs = DummyVectorEnv([lambda: Learning2Fly() for _ in range(args.test_num)])
+    
+    logger.wandb_run.watch(actor)
 
     actor_optim = torch.optim.Adam(actor.parameters(), lr=args.actor_lr)
     net_c1 = Net(
