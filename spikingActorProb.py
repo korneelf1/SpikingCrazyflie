@@ -92,15 +92,21 @@ class SMLP(nn.Module):
         Reset the network's internal state
         '''
         self.cur_in = self.lif_in.init_leaky()
-        self.cur_lst = []
+        self.cur_lst = [self.cur_in]
         for i in range(int(len(self.hidden_layers)/2)):
             self.cur_lst.append(self.hidden_layers[2*i+1].init_leaky())
+        self.hidden_states = self.cur_lst
         self.cur_out = self.lif_out.init_leaky()
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, hidden_states: list) -> torch.Tensor:
         '''
         Forward pass through the network
         '''
+        if hidden_states is not None:
+            self.cur_in = hidden_states[0]
+            self.cur_lst = hidden_states[1:-1]
+            self.cur_out = hidden_states[-1]
+
         x = self.layer_in(x)
         x, self.cur_in = self.lif_in(x, self.cur_in)
         # self.cur_in = x
@@ -111,7 +117,8 @@ class SMLP(nn.Module):
         x = self.layer_out(x)
         x, self.cur_out = self.lif_out(x, self.cur_out)
         # self.cur_out = x
-        return x
+        self.hidden_states = [self.cur_in] + self.cur_lst + [self.cur_out]
+        return x, self.hidden_states
 
     def __call__(self, *args: Any) -> Any:
         return self.forward(*args)
@@ -150,6 +157,7 @@ class SpikingNet(NetBase[Any]):
         class:`~tianshou.utils.net.common.MLP`. Default to None.
     :param linear_layer: use this module constructor, which takes the input
         and output dimension as input, as linear layer. Default to nn.Linear.
+    :param reset_in_call: whether to reset the hidden states in the forward, useful for if running in realtime on sequences
     :param repeat: the number of times to repeat the network per given input. Default to 4.
 
     .. seealso::
@@ -177,6 +185,7 @@ class SpikingNet(NetBase[Any]):
         num_atoms: int = 1,
         dueling_param: tuple[dict[str, Any], dict[str, Any]] | None = None,
         linear_layer: TLinearLayer = nn.Linear,
+        reset_in_call: bool = True,
         repeat: int = 4,
     ) -> None:
         super().__init__()
@@ -195,6 +204,7 @@ class SpikingNet(NetBase[Any]):
         output_dim = action_dim if not self.use_dueling and not concat else 0
         
         self.output_dim = output_dim
+        print("output_dim: ", output_dim)
         self.model = SMLP(
             input_dim,
             output_dim,
@@ -204,7 +214,7 @@ class SpikingNet(NetBase[Any]):
         )
 
         self.repeat = repeat
-        
+        self.reset_in_call = reset_in_call
         # self.model = MLP(
         #     input_dim,
         #     output_dim,
@@ -234,7 +244,7 @@ class SpikingNet(NetBase[Any]):
         else:
             self.output_dim = self.model.output_dim
 
-
+        
         self.model.reset()
 
     def forward(
@@ -249,22 +259,29 @@ class SpikingNet(NetBase[Any]):
         :param state: unused and returned as is
         :param info: unused
         """
+        if len(obs.shape) == 1:
+            obs = obs.unsqueeze(0)
         assert len(obs.shape) == 2 # (batch size, obs size) AKA not a sequence
-        self.model.reset()
+        if self.reset_in_call:
+            self.model.reset()
         if isinstance(obs, np.ndarray):
             obs = torch.tensor(obs, device=self.device, dtype=torch.float32)
         logits = torch.zeros(obs.shape[0], self.output_dim, device=self.device)
 
+        hidden_state = state
         for _ in range(self.repeat):
-            logits += self.model(obs)
+            last_logits, hidden_state = self.model(obs, hidden_state)
+
+            logits += last_logits
         # logits = torch.sum(logits, dim=1
 
 
         if self.softmax:
             logits = torch.softmax(logits, dim=-1)
-        return logits, state
+        return logits
 
     def reset(self):
+        print("resetting")
         self.model.reset()
 
 

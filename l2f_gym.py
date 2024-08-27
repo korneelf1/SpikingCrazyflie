@@ -42,11 +42,11 @@ class Learning2Fly(gym.Env):
         self.reset()
 
     def step(self, action):
-        self.action.motor_command = action
+        self.action.motor_command = action.reshape((4,))
         step(self.device, self.env, self.params, self.state, self.action, self.next_state, self.rng)
         self.state = self.next_state
 
-        self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)
+        self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
         self.t += 1
 
         done = self._check_done()
@@ -63,8 +63,6 @@ class Learning2Fly(gym.Env):
         self.global_step_counter += self.t
         self.t = 0
         self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)
-        print("Obs from reset: ", self.obs)
-        print("shape: ", self.obs.shape)
         return self.obs, {}
     
     def _reward(self):
@@ -105,18 +103,6 @@ class Learning2Fly(gym.Env):
             # Ca = min(Ca*CaC, Calim)
             Crs = max(Crs*CrsC, Crslim)
 
-        # r[0] = max(-1e3,-Cp*np.sum((pos-pset)**2) \
-        #         - Cv*np.sum((vel)**2) \
-        #             - Ca*np.sum((motor_commands-Cab)**2) \
-        #                 - Cw*np.sum((qd)**2) \
-        #                     + Crs)
-        # print("pos penalty: ", -Cp*np.sum((pos)**2))
-        # print("vel penalty: ", - Cv*np.sum((vel)**2))
-        # print("action penalty: ", - Ca*np.sum((motor_commands-Cab)**2))
-        # print("orientation penalty: ", -Cq*(1-q[0]**2)) aims to keep upright!
-        # print("angular velocity penalty: ", - Cw*np.sum((qd)**2))
-        # print("reward for survival: ", Crs)
-
         # in theory pos error max sqrt( .6)*2.5 = 1.94
         # vel error max sqrt(1000)*.005 = 0.158
         # qd error max sqrt(1000)*.00 = 0.
@@ -151,7 +137,7 @@ class Learning2Fly(gym.Env):
         angular_threshold  = np.sum((np.abs(self.obs[10:13]) > 1000))
         time_threshold = self.t>500
 
-        if any(np.isnan(self.obs)):
+        if np.any(np.isnan(self.obs)):
             done = True
         elif pos_threshold or velocity_threshold or angular_threshold or time_threshold:
             done = True

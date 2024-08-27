@@ -2,7 +2,7 @@ from evotorch.algorithms import PGPE
 from evotorch.logging import StdOutLogger, WandbLogger
 from evotorch.neuroevolution import GymNE
 
-# from spikingActorProb import SpikingNet
+from spikingActorProb import SpikingNet
 import torch
 import wandb
 from tianshou.utils.net.common import Net
@@ -35,6 +35,7 @@ wandb_config = {
     "drone": "stock drone",
     "num_runs": 500,
     "forward_per_sample": 1,
+    "reinit": True,
 }
 
 env = Learning2Fly()
@@ -94,23 +95,20 @@ def create_policy():
                         observation_space=env.observation_space, \
                         action_scaling=True, action_bound_method=None) # make sure actions are scaled properly
     return policy
-# actor = SpikingNet(state_shape=simulator.observation_space.shape, 
-#                        action_shape=simulator.action_space.shape,
-#                        device="cpu",
-#                        hidden_sizes=[64, 64], repeat=wandb_config["forward_per_sample"])
+actor = SpikingNet(state_shape=env.observation_space.shape, 
+                       action_shape=env.action_space.shape,
+                       device="cpu",
+                       hidden_sizes=[64, 64], repeat=wandb_config["forward_per_sample"],reset_in_call=False)
 
-# net_a = Net(state_shape=env.observation_space.shape,
-#                     hidden_sizes=[64,64])
-        
 # # create actors and critics
-# actor = ActorProb(
-#         net_a,
+# spiking_actor = ActorProb(
+#         actor,
 #         env.action_space.shape,
 #         unbounded=True,
 #         conditioned_sigma=True,
 #     )
 
-actor = create_policy()
+# actor = create_policy()
 
 class PolicyWrapper(nn.Module):
     '''Policy wrapper to extract action from Tianshou policy'''
@@ -123,7 +121,8 @@ class PolicyWrapper(nn.Module):
             state: dict | Batch | np.ndarray | None = None,
             **kwargs: Any,
         ):
-        (loc_B, scale_B), hidden_BH = self.policy.actor(obs, state=state)
+        # print("obs", obs)
+        (loc_B, scale_B), hidden_BH = self.policy(obs, state=state)
         dist = Independent(Normal(loc=loc_B, scale=scale_B), 1)
         if self.policy.deterministic_eval and not self.policy.is_within_training_step:
             act_B = dist.mode
@@ -140,7 +139,10 @@ class PolicyWrapper(nn.Module):
         )
 
         return squashed_action
-actor = PolicyWrapper(actor)
+# spiking_actor = PolicyWrapper(spiking_actor)
+
+
+# spiking_actor = SpikingNet(state_shape=env.observation_space.shape,device=device,hidden_sizes=[256,256],repeat=1)
 
 problem = GymNE(
     env=Learning2Fly,
@@ -166,7 +168,10 @@ searcher = PGPE(
 )
 
 # logger
-logger = WandbLogger(searcher, project="evotorch drone sim", config=wandb_config)
+run = wandb.init(project="evotorch drone sim", config=wandb_config)
+# wandb.run.watch(spiking_actor, log_freq=1)
+logger = WandbLogger(searcher, init=False)
+# wandb.run.watch()
 searcher.run(wandb_config["num_runs"])
 # torch.save(actor.state_dict(), "spiking_actor.pth")
 
