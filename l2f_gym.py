@@ -113,7 +113,7 @@ class Learning2Fly(gym.Env):
                     - Cw*np.sum((qd)**2) \
                         + Crs \
                             -Cp*np.sum((pos)**2) 
-        return r
+        return 1
     
     def _check_done(self):
         done = False
