@@ -197,7 +197,8 @@ class SpikingNet(NetBase[Any]):
 
         input_dim = int(np.prod(state_shape))
         action_dim = int(np.prod(action_shape)) * num_atoms
-
+        if action_dim == 0:
+            raise UserWarning("Action Dimension set to 0.")
         if concat:
             input_dim += action_dim
         self.use_dueling = dueling_param is not None
@@ -278,7 +279,7 @@ class SpikingNet(NetBase[Any]):
 
         if self.softmax:
             logits = torch.softmax(logits, dim=-1)
-        return logits
+        return logits, state
 
     def reset(self):
         print("resetting")
