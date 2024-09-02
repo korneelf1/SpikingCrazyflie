@@ -39,6 +39,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--step-per-epoch", type=int, default=5000)
     parser.add_argument("--step-per-collect", type=int, default=1)
     parser.add_argument("--update-per-step", type=int, default=1)
+    parser.add_argument("--repeat-per-forward", type=int, default=4)
     parser.add_argument("--n-step", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--training-num", type=int, default=12)
@@ -120,7 +121,7 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     # model
-    net_a = SpikingNet(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device)
+    net_a = SpikingNet(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device, action_shape=256, repeat=args.repeat_per_forward)
     actor = ActorProb(
         net_a,
         args.action_shape,
