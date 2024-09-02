@@ -33,7 +33,7 @@ wandb_config = {
     "num_interactions": 150000,
     "popsize_max": 3200,
     "drone": "stock drone",
-    "num_runs": 500,
+    "num_runs": 500 ,
     "forward_per_sample": 1,
     "reinit": True,
 }
@@ -101,12 +101,12 @@ actor = SpikingNet(state_shape=env.observation_space.shape,
                        hidden_sizes=[64, 64], repeat=wandb_config["forward_per_sample"],reset_in_call=False)
 
 # # create actors and critics
-# spiking_actor = ActorProb(
-#         actor,
-#         env.action_space.shape,
-#         unbounded=True,
-#         conditioned_sigma=True,
-#     )
+spiking_actor = ActorProb(
+        actor,
+        env.action_space.shape,
+        unbounded=True,
+        conditioned_sigma=True,
+    )
 
 # actor = create_policy()
 
@@ -124,10 +124,10 @@ class PolicyWrapper(nn.Module):
         # print("obs", obs)
         (loc_B, scale_B), hidden_BH = self.policy(obs, state=state)
         dist = Independent(Normal(loc=loc_B, scale=scale_B), 1)
-        if self.policy.deterministic_eval and not self.policy.is_within_training_step:
-            act_B = dist.mode
-        else:
-            act_B = dist.rsample()
+        # if self.policy.deterministic_eval and not self.policy.is_within_training_step:
+        #     act_B = dist.mode
+        # else:
+        act_B = dist.rsample()
         log_prob = dist.log_prob(act_B).unsqueeze(-1)
         # apply correction for Tanh squashing when computing logprob from Gaussian
         # You can check out the original SAC paper (arXiv 1801.01290): Eq 21.
@@ -139,7 +139,7 @@ class PolicyWrapper(nn.Module):
         )
 
         return squashed_action
-# spiking_actor = PolicyWrapper(spiking_actor)
+actor = PolicyWrapper(spiking_actor)
 
 
 # spiking_actor = SpikingNet(state_shape=env.observation_space.shape,device=device,hidden_sizes=[256,256],repeat=1)
@@ -169,13 +169,20 @@ searcher = PGPE(
 
 # logger
 run = wandb.init(project="evotorch drone sim", config=wandb_config)
-# wandb.run.watch(spiking_actor, log_freq=1)
 logger = WandbLogger(searcher, init=False)
 # wandb.run.watch()
+print("Is actor a module?",isinstance(actor,nn.Module))
+# run.watch(actor, log_freq=1)
+
+print(torch.mean(actor.policy.preprocess.model.layer_out.weight))
+print(torch.std_mean(actor.policy.preprocess.model.layer_out.weight))
 searcher.run(wandb_config["num_runs"])
 # torch.save(actor.state_dict(), "spiking_actor.pth")
-
+# print a summary of the parameters of the policy
 
 population_center = searcher.status["center"]
 policy = problem.to_policy(population_center)
 torch.save(policy.state_dict(), "ann_actor_evotorch.pth")
+print(policy)
+print(torch.mean(policy.wrapped_module.wrapped_module.policy.preprocess.model.layer_out.weight))
+print(torch.std_mean(policy.wrapped_module.wrapped_module.policy.preprocess.model.layer_out.weight))

@@ -1,5 +1,4 @@
-from gym_sim import Drone_Sim
-
+from l2f_gym import Learning2Fly
 # tianshou code
 from tianshou.policy import SACPolicy, BasePolicy
 from tianshou.utils.net.continuous import ActorProb, Critic, RecurrentActorProb, RecurrentCritic
@@ -13,7 +12,7 @@ from tianshou.env import SubprocVectorEnv, DummyVectorEnv
 
 # spiking specific code
 # from spiking_gym_wrapper import SpikingEnv
-# from spikingActorProb import SpikingNet
+from spikingActorProb import SpikingNet
 # from masked_actors import MaskedNet
 # 
 import torch
@@ -21,21 +20,21 @@ import numpy as np
 import os
 
 
-env = Drone_Sim(drone='og',N_drones=3)
+env = Learning2Fly()
 
 observation_space = env.observation_space.shape
 action_space = env.action_space.shape
 
 def create_policy():
     # create the networks behind actors and critics
-    net_a = Net(state_shape=observation_space,
-                    hidden_sizes=[64,64], )
+    net_a = SpikingNet(state_shape=observation_space,
+                    hidden_sizes=[256,256],action_shape=action_space, )
         
     net_c1 = Net(state_shape=observation_space,action_shape=action_space,
-                    hidden_sizes=[64,64],
+                    hidden_sizes=[256,256],
                     concat=True,)
     net_c2 = Net(state_shape=observation_space,action_shape=action_space,
-                    hidden_sizes=[64,64],
+                    hidden_sizes=[256,256],
                     concat=True,)
     
     # model_logger.watch(net_a)
@@ -78,10 +77,21 @@ def create_policy():
 
 
 policy = create_policy()
-policy.load_state_dict(torch.load('policy.pth'))
+policy.load_state_dict(torch.load('stabilize/sac/policy_snn_actor.pth'))
 policy.eval()
 
-out = env.step_rollout(policy,n_step=1e3, tianshou_policy=True)
+out = []
+env.reset()
+
+for i in range(1000):
+    action = policy(env.observation)
+    obs, rewards, dones, info = env.step(action)
+    out.append((obs, rewards, dones, info))
+    if dones:
+        env.reset()
+
+
+
 
 xs = out[0]
 dones = out[3]
