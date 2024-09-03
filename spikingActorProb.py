@@ -7,9 +7,10 @@ import numpy as np
 import torch
 from torch import nn
 
+import wandb
 import snntorch as snn
 from snntorch import surrogate
-
+from alif import ScheduledSigmoidFunction as scheduled_sigmoid
 from tianshou.utils.net.common import (
     MLP,
     BaseActor,
@@ -58,7 +59,10 @@ class SMLP(nn.Module):
         self.hidden_sizes = hidden_sizes
 
         # Initialize surrogate gradient
-        spike_grad1 = surrogate.fast_sigmoid()  # passes default parameters from a closure
+        self._slope = 10
+        self._n_backwards = 0
+        self.spike_grad1 = surrogate.fast_sigmoid(self._slope)  # passes default parameters from a closure
+        # spike_grad1 = scheduled_sigmoid(10)
 
         # create layers and spiking layers
         self.layer_in = nn.Linear(input_dim, hidden_sizes[0], device=self.device)
@@ -67,7 +71,7 @@ class SMLP(nn.Module):
         thresh_in = torch.rand(hidden_sizes[0])
         self.lif_in   = snn.Leaky(beta=betas_in, learn_beta=True, 
                                   threshold=thresh_in, learn_threshold=True, 
-                                  spike_grad=spike_grad1).to(self.device)
+                                  spike_grad=self.spike_grad1).to(self.device)
         self.hidden_layers = []
         for i in range(len(hidden_sizes) - 1):
             self.hidden_layers.append(nn.Linear(hidden_sizes[i], hidden_sizes[i + 1], device=self.device))
@@ -76,16 +80,38 @@ class SMLP(nn.Module):
             thresh = torch.rand(hidden_sizes[i + 1])
             self.hidden_layers.append(snn.Leaky(beta=betas, learn_beta=True,
                                                 threshold=thresh, learn_threshold=True,
-                                                spike_grad=spike_grad1).to(self.device))
+                                                spike_grad=self.spike_grad1).to(self.device))
             
         self.layer_out = nn.Linear(hidden_sizes[-1], output_dim, device=self.device)
         betas_out = torch.rand(output_dim)
         thresh_out = torch.rand(output_dim)
         self.lif_out = snn.Leaky(beta=betas_out, learn_beta=True,
                                     threshold=thresh_out, learn_threshold=True,
-                                    spike_grad=spike_grad1).to(self.device)
+                                    spike_grad=self.spike_grad1).to(self.device)
         
         self.reset()
+
+    # def _register_backward_passes(self,module, grad_input, grad_output):
+    #     self.backwards = []
+    # def _register_nr_backward_hooks(self):
+    #     """
+    #     Registers the number of time each weight is updated.
+    #     """
+    #     for m in self.modules():
+    #         if isinstance(m, nn.Linear):
+    #             m.register_full_backward_hook(self._register_backward_passes)
+    def _update_slope(self):
+        """
+        Update the slope of the surrogate gradient.
+        """
+        
+        def inner(module, grad_input, grad_output):
+            self._n_backwards += 1
+            self.slope = max(self._n_backwards/1e4, 50)
+            if wandb.run is not None:
+                wandb.run.log({"surrogate fast sigmoid slope": self.slope})
+        self.layer_out.register_full_backward_hook(inner)
+
 
     def reset(self):
         '''

@@ -89,6 +89,7 @@ args_wandb = {
       'drone': 'stock drone',
       'buffer_size': 300000,
       'collector_type': 'Collector',
+      'adaptive surrogate slope': True,
       'reinit': True,
       'reward_function': 'reward_squared_fast_learning',
       }
@@ -114,12 +115,15 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
     args.state_shape = env.observation_space.shape or env.observation_space.n
     args.action_shape = env.action_space.shape or env.action_space.n
     args.max_action = env.action_space.high[0]
+
     print("Observations shape:", args.state_shape)
     print("Actions shape:", args.action_shape)
     print("Action range:", np.min(env.action_space.low), np.max(env.action_space.high))
+
     # seed
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
+
     # model
     net_a = SpikingNet(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device, action_shape=256, repeat=args.repeat_per_forward)
     actor = ActorProb(
@@ -133,7 +137,7 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
     train_envs = DummyVectorEnv([lambda: Learning2Fly() for _ in range(args.training_num)])
     test_envs = DummyVectorEnv([lambda: Learning2Fly() for _ in range(args.test_num)])
     
-    logger.wandb_run.watch(actor)
+    logger.wandb_run.watch(actor, log="all")
 
     actor_optim = torch.optim.Adam(actor.parameters(), lr=args.actor_lr)
     net_c1 = Net(
