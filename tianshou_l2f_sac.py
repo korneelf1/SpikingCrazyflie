@@ -19,6 +19,7 @@ from tianshou.env import DummyVectorEnv
 from l2f_gym import Learning2Fly, SubprocVectorizedL2F, ShmemVectorizedL2F
 from tianshou.utils import WandbLogger
 from torch.utils.tensorboard import SummaryWriter
+from alif import CustomSigmoid
 
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -29,7 +30,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--critic-lr", type=float, default=1e-3)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
-    parser.add_argument("--alpha", type=float, default=0.2)
+    parser.add_argument("--alpha", type=float, default=0.0)
     parser.add_argument("--auto-alpha", default=False, action="store_true")
     parser.add_argument("--alpha-lr", type=float, default=3e-4)
     parser.add_argument("--start-timesteps", type=int, default=10000)
@@ -81,7 +82,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     # model
-    net_a = Net(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device)
+    net_a = Net(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device,activation=CustomSigmoid)
     actor = ActorProb(
         net_a,
         args.action_shape,
@@ -188,6 +189,8 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
       'collector_type': 'Collector',
       'reinit': True,
       'reward_function': 'reward_squared_fast_learning',
+      'alpha_sac':0,
+      'activation': 'CustomSigmoid',
       }
 
     logger = WandbLogger(project="l2f",config=args_wandb)

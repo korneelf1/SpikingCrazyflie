@@ -98,3 +98,25 @@ class ScheduledSigmoidFunction:
     def __call__(self, x):
         current_slope = self.update_slope()
         return ScheduledSigmoid.apply(x, current_slope)
+
+class CustomSigmoid(nn.Module):
+    def __init__(self, b=.2):
+        super(CustomSigmoid, self).__init__()
+        self.b = b  # The parameter controlling the steepness of the sigmoid in the backward pass
+        self._n_backwards = 0
+
+    def forward(self, x):
+        # Forward pass with the standard sigmoid (b=0)
+        self.input = x  # Store input for use in backward pass
+        self.sigmoid_output = torch.sigmoid(x)
+        return self.sigmoid_output
+    
+    def backward(self, grad_output):
+        # Backward pass using the derivative of the sigmoid with respect to bx (b non-zero)
+        self._n_backwards += 1
+        if self._n_backwards % 10e4 == 0:
+                self.b = 1-1/max(5,min(self._n_backwards/30e4))
+        sigmoid_b_output = torch.sigmoid(self.b * self.input)
+        sigmoid_derivative = sigmoid_b_output * (1 - sigmoid_b_output)
+        grad_input = grad_output * sigmoid_derivative
+        return grad_input
