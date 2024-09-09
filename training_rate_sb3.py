@@ -1,3 +1,5 @@
+# train a controller for rate commands to motorcommands of the crazyflie
+
 import stable_baselines3 as sb3
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.env_checker import check_env
@@ -6,17 +8,17 @@ from stable_baselines3.common.monitor import Monitor
 from l2f import *
 from l2f_gym import Learning2Fly
 
-env = Learning2Fly()
+env = Learning2Fly(train_rate_commands=True)
 env = Monitor(env)
 check_env(env)
-env = make_vec_env(lambda: Learning2Fly(t_history=1,imu=False, out_forces=False), n_envs=12)
+env = make_vec_env(lambda: Learning2Fly(train_rate_commands=True), n_envs=12)
 
 model = sb3.SAC("MlpPolicy", env, verbose=1)
 
 model.learn(total_timesteps=3e6)
 
-model.save("SAC_l2f_IMU")
-model = sb3.SAC.load("SAC_l2f_IMU")
+model.save("SAC_l2f")
+model = sb3.SAC.load("SAC_l2f")
 
 obs = env.reset()
 obs_lst = []

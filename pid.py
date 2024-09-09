@@ -6,12 +6,13 @@ class PID:
     def __init__(self, kp:NDArray | None = np.ones((3,)), 
                  ki:NDArray | None = np.ones((3,)), 
                  kd:NDArray | None = np.ones((3,)), 
-                 G1pinv:NDArray | None = np.ones((4,4)), dt: float = 0.01):
+                 dt: float = 0.01):
         '''
         kp: proportional gain, array of shape (n,) where n is the number of states
         ki: integral gain, same shape as kp
         kd: derivative gain, same shape as kp
-        G1pinv: inverse of G1 matrix, for motormixing, 4x4 matrix'''
+        dt: time step'''
+
         self.kp = np.eye(kp.shape[0]) * kp
         self.ki = np.eye(kp.shape[0]) * ki
         self.kd = np.eye(kp.shape[0]) * kd
@@ -32,6 +33,30 @@ class PID:
 
         return u
     
+def create_crazyflie_pid_rate():
+    # roll
+    Kp_rollrate = 250
+    Ki_rollrate = 500
+    Kd_rollrate = 2.5
+
+    # pitch
+    Kp_pitchrate = 250  
+    Ki_pitchrate = 500
+    Kd_pitchrate = 2.5
+
+    # yaw
+    Kp_yawrate = 120
+    Ki_yawrate = 16.7
+    Kd_yawrate = 0
+
+    kp = np.array([Kp_rollrate, Kp_pitchrate, Kp_yawrate])
+    ki = np.array([Ki_rollrate, Ki_pitchrate, Ki_yawrate])
+    kd = np.array([Kd_rollrate, Kd_pitchrate, Kd_yawrate])
+
+    pid = PID(kp=kp, ki=ki, kd=kd)
+
+    return pid
+
     # def control(self, error: NDArray):
     #     u = self.update(error)
 
@@ -128,40 +153,47 @@ def quaternion_to_euler(q):
     
     return roll, pitch, yaw
 
+def thrust_to_rpm(thrust: NDArray):
+    '''Convert thrust to rpm
+    "thrust_curve": [0.021300, -0.011200, 0.120100]
+    thrust = 0.0213 - 0.0112*rpm + 0.1201*rpm^2
+    rpm = (-b +- sqrt(b^2 - 4*a*c))/(2*a)
+    '''
+    try:
+        rpms = np.zeros(4)
+        for i in range(4):
+            
+            a = 0.1201
+            b = -0.0112
+            c = 0.0213 - thrust
+            rpm1 = (-b + np.sqrt(b**2 - 4*a*c))/(2*a)
+            rpm2 = (-b - np.sqrt(b**2 - 4*a*c))/(2*a)
+            rpm = np.max([rpm1, rpm2]) # should always be one neg one pos rpm unless very low thrust
+            rpms[i] = rpm
+        # rescale to [-1,1]
+        rpm = rpms*2 - 1
+        return rpm
+    except:
+        raise ValueError("Thrust too low")
+    return 
 if __name__ == '__main__':
-    from gym_sim import Drone_Sim
+    import l2f_gym as l2f
+    import numpy as np
+    env = l2f.Learning2Fly()
+    pid = create_crazyflie_pid_rate()
+    from l2f import parameters_to_json
 
-    env = Drone_Sim(drone = 'og')
-    G1pinvs = np.linalg.pinv(env.G1s) / (env.omegaMaxs*env.omegaMaxs)[:, :, np.newaxis]
-    att_pid = PID(kp=np.array([0.1, 0.1, -0.1])*-20, ki=np.array([0.1, 0.1, 0.1]), kd=np.array([0.1, 0.1, 0.1]), G1pinv=G1pinvs)
-    pid_controller = CascadePID(G1pinvs, 0.01, PID(), att_pid=att_pid, tuning=True)
+    # print(parameters_to_json(env.device, env.env,env.env.DynamicsParameters))
 
-    states = []
-    state = env.reset()[0]
-    for i in range(100):        
-        error = state
-        thrust_settings = pid_controller.update(error[0,:])
-        state, _, _, _,_ = env.step(thrust_settings)
-        states.append(state)
+    obs = env.reset()[0]
+    done = False
+    # pid.reset()
 
-    states = np.array(states)
-    # env.mpl_render(states)
-    import matplotlib.pyplot as plt
-
-    # make a figure with 3 subplots showing the angular velocities
-    fig, axs = plt.subplots(2, 3, figsize=(10, 10))
-    axs[0, 0].plot(states[:,0, 10])
-    axs[0, 0].set_title('Roll rate')
-    axs[0, 1].plot(states[:,0, 11])
-    axs[0, 1].set_title('Pitch rate')
-    axs[0, 2].plot(states[:,0, 12])
-    axs[0, 2].set_title('Yaw rate')
-    axs[1, 0].plot(states[:,0, 0])
-    axs[1, 0].set_title('x-position')
-    axs[1, 1].plot(states[:,0, 1])
-    axs[1, 1].set_title('y-position')
-    axs[1, 2].plot(states[:,0, 2])
-    axs[1, 2].set_title('z-position')
-    # axs[1, 1].plot(states[:, 0, 2])
-    # axs[1, 1].set_title('Thrust')
-    plt.show()
+    rate_target = np.array([0,0,0])
+    while not done:
+        # action = pid.update(obs[10:13])
+        thrust = np.array([0.05,0.05,0.05,0.05])
+        action = thrust_to_rpm(thrust)
+        obs, reward, done, info,_ = env.step(action)
+        print(action)
+        print(obs)

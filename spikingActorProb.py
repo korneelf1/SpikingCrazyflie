@@ -89,7 +89,14 @@ class SMLP(nn.Module):
                                     threshold=thresh_out, learn_threshold=True,
                                     spike_grad=self.spike_grad1).to(self.device)
         
+        if wandb.run is None:
+            print("wandb.run is None")
+            self.run = wandb.init(project="spikingActorProb", reinit=True)
+        else:
+            self.run = wandb.run
+
         self.reset()
+        self._update_slope()
 
     # def _register_backward_passes(self,module, grad_input, grad_output):
     #     self.backwards = []
@@ -107,9 +114,10 @@ class SMLP(nn.Module):
         
         def inner(module, grad_input, grad_output):
             self._n_backwards += 1
-            self.slope = max(self._n_backwards/1e4, 50)
-            if wandb.run is not None:
-                wandb.run.log({"surrogate fast sigmoid slope": self.slope})
+
+            if self._n_backwards % 10e4 == 0:
+                self.slope = max(5,min(self._n_backwards/30e4, 30))
+                self.run.log({"surrogate fast sigmoid slope": self.slope})
         self.layer_out.register_full_backward_hook(inner)
 
 

@@ -51,7 +51,7 @@ hidden_sizes = [256, 256]
 def create_policy():
     # create the networks behind actors and critics
     
-    net_a = Net(state_shape=state_shape, hidden_sizes=hidden_sizes, device=device)
+    net_a = Net(state_shape=state_shape, hidden_sizes=hidden_sizes, device=device, action_shape=action_shape)
     actor = ActorProb(
         net_a,
         action_shape,
@@ -172,7 +172,7 @@ run = wandb.init(project="evotorch drone sim", config=wandb_config)
 logger = WandbLogger(searcher, init=False)
 # wandb.run.watch()
 print("Is actor a module?",isinstance(actor,nn.Module))
-# run.watch(actor, log_freq=1)
+run.watch(actor, log='all',)
 
 print(torch.mean(actor.policy.preprocess.model.layer_out.weight))
 print(torch.std_mean(actor.policy.preprocess.model.layer_out.weight))

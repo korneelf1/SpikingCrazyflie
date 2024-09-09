@@ -23,7 +23,7 @@ from spiking_gym_wrapper import SpikingEnv
 from spikingActorProb import SpikingNet
 
 import wandb
-wandb.init(mode='disabled')
+# wandb.init(mode='disabled')
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--buffer-size", type=int, default=1000000)

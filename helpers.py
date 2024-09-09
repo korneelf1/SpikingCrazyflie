@@ -14,17 +14,21 @@ import torch
 class NumpyDeque(object):
     def __init__(self, shape:tuple, device='cpu') -> None:
         self.shape_arr = shape
-
+        print(len(self.shape_arr))
+        print(self.shape_arr)
         self.array = np.zeros((self.shape_arr), dtype=np.float32)
 
     def __len__(self):
         return self.shape_arr[1]
     
     def append(self, els):
-        assert els.shape[0] == self.shape_arr[0] 
-
-        self.array = np.roll(self.array, els.shape[1], axis=1)
-        self.array[:,0:els.shape[1]] = els.astype(np.float32)
+        if len(self.shape_arr) == 1: # no batch but individual
+            self.array = np.roll(self.array, els.shape[0], axis=0)
+            self.array[0:els.shape[0]] = els.astype(np.float32)
+        else:
+            assert els.shape[0] == self.shape_arr[0] 
+            self.array = np.roll(self.array, els.shape[1], axis=1)
+            self.array[:,0:els.shape[1]] = els.astype(np.float32)
 
     def reset(self, vecs=None):
         if vecs is None:
@@ -40,9 +44,77 @@ class NumpyDeque(object):
         if dtype:
             return self.array.astype(dtype)
         return self.array
+    def __getitem__(self, idx):
+        return self.array[idx]
     @property
     def shape(self):
         return self.shape_arr
+
+def quaternion_to_euler(q):
+    '''
+    q: np.array of shape (4,)
+    '''
+    qw, qx, qy, qz = q
+    # roll (x-axis rotation)
+    sinr_cosp = 2 * (qw * qx + qy * qz)
+    cosr_cosp = 1 - 2 * (qx * qx + qy * qy)
+    roll = np.arctan2(sinr_cosp, cosr_cosp)
+
+    # pitch (y-axis rotation)
+    sinp = 2 * (qw * qy - qz * qx)
+    pitch = np.arcsin(sinp)
+
+    # yaw (z-axis rotation)
+    siny_cosp = 2 * (qw * qz + qx * qy)
+    cosy_cosp = 1 - 2 * (qy * qy + qz * qz)
+    yaw = np.arctan2(siny_cosp, cosy_cosp)
+
+    return np.array([roll, pitch, yaw])
+
+
+def forcetorque_to_rpm(ft):
+    '''
+    ft: np.array of shape (4,)
+    NOTE: if SAC then ft is [-1,1]
+    https://github.com/arplaboratory/learning_to_fly_controller/blob/d52b11a03caa1dadaf6b6bf02f328719b5bdd215/rl_tools_controller.c#L265
+    and power distribution quadrotor
+    '''
+    # Motor Mixing Matrix
+    A = 0.046*0.707106781/4
+    B = 0.046*0.707106781/4
+    C = 0.005964552/4
+    MM= np.array([[1/4, -A, -B, -C],
+                    [1/4, -A, B, C],
+                    [1/4, A, B, -C],
+                    [1/4, A, -B, C]]) # why so different than legacy code?
+    
+    Farr = MM@ft
+
+    # thrust = a * pwm^2 + b * pwm from power distribution (different than the thrust = c1 + c2*rpm + c3*rpm^2)
+    pwmToThrustA = 0.091492681 
+    pwmToThrustB = 0.067673604
+    
+    # pwm = (-pwmToThrustB + np.sqrt(pwmToThrustB**2 - 4*pwmToThrustA*(-Farr)))/(2*pwmToThrustA)
+    # clip between 0 and 1 and scale to -1 to 1
+    # pwm = np.clip(pwm, 0, 1) * 2 - 1
+
+
+    # Calculate RPM
+    # # F = c1 + c2*rpm + c3*rpm^2
+    # # F = MM*ft
+    # # c1 + c2*rpm + c3*rpm^2 = MM*ft
+    c1 = 0.0213
+    c2 = -0.0112
+    c3 = 0.1201
+    # F = MM@ft
+    rpm = max(np.roots([c3, c2, c1 - Farr[0]])) # only take the positive root
+    # # reschale from 0 to 1 to -1 to 1
+    pwm = 2*rpm - 1
+
+    # # clip between -1 and 1
+    # rpm = np.clip(rpm, -1, 1)
+    print(pwm)
+    return pwm
 
 
 if __name__=='__main__':
@@ -98,4 +170,8 @@ if __name__=='__main__':
     print(test_qeue)
     test_qeue.reset(np.array([0,1,0]))
     print(test_qeue)
+
+    # test forcetorque_to_rpm
+    ft = np.array([0.027*9.81*0.,.0,.00,.00])
+    print(forcetorque_to_rpm(ft))
 

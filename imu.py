@@ -43,11 +43,29 @@ def quaternion_rotation_matrix(Q):
     return rot_matrix
 
 class IMU:
-    def __init__(self, noise=np.array([0, 0, 0, 0, 0, 0]), bias=np.array([0, 0, 0, 0, 0, 0]), dt=0.01, offset=np.array([0, 0, 0])):
+    def __init__(self, 
+                 noise=np.array([0.0015497692442013257, 0.0018856712200106122, 0.0017949298128139245, 0.0033169208, 0.003474, 0.002747] ), 
+                 bias=np.array([0, 0, 0, 0, 0, 0]), 
+                 dt=0.01, 
+                 offset=np.array([0, 0, 0])):
         '''
         noise: standard deviation of the noise
         bias: initial value of the bias (modelled as brownian motion)
-        offset: offset of the sensor in body frame'''
+        offset: offset of the sensor in body frame
+        
+        From static measurements with crazyflie, we have:
+        accelerometer noise:
+        x: 0.0015497692442013257 m/s^2
+        y: 0.0018856712200106122 m/s^2
+        z: 0.0017949298128139245 m/s^2
+
+        gyroscope noise:
+        x: 0.18986995961776781 deg/s = 0.0033169208 rad/s
+        y: 0.19904941377037574 deg/s = 0.003474 rad/s
+        z: 0.15737015901676 deg/s = 0.002747 rad/s
+
+        noise = [0.0015497692442013257, 0.0018856712200106122, 0.0017949298128139245, 0.0033169208, 0.003474, 0.002747] # m/s^2, rad/s
+        '''
         assert len(noise) == 6
         assert len(bias) == 6
         assert len(offset) == 3
@@ -62,16 +80,17 @@ class IMU:
 
         self.offset = offset
 
-        self.vel_history = NumpyDeque((100, 3))
-        self.accel_history = NumpyDeque((100, 3))
-        self.gyro_history = NumpyDeque((100, 3))
+        self.vel_history = NumpyDeque((10, 3))
+        self.accel_history = NumpyDeque((10, 3))
+        self.gyro_history = NumpyDeque((10, 3))
+
+        self.vel_body_prev = np.array([0, 0, 0])
 
     def add_brownian_bias(self):
         self.bias += np.random.normal(0, 0.01, size=(6,)) * np.sqrt(self.dt)
     def add_noise(self):
-        self.add_brownian_bias()
-        self.accel = np.random.normal(self.accel, self.noise) - self.bias
-        self.gyro = np.random.normal(self.gyro, self.noise) - self.bias
+        self.accel = np.random.normal(self.accel, self.noise[:3]) - self.bias[:3]
+        self.gyro = np.random.normal(self.gyro, self.noise[3:]) - self.bias[3:]
 
 
     def simulate(self, state):
@@ -80,18 +99,22 @@ class IMU:
         '''
         # update acceleration
         vel = state[3:6]
-        self.vel_history.append(vel)
+        # self.vel_history.append(vel.reshape(1,3))
         q = state[6:10]
         R = quaternion_rotation_matrix(q)
 
         # transfrom velocity to body frame
         vel_body = np.dot(R.T, vel)
+        # self.vel_history.append(vel_body.reshape(3,1))
         # transform gravity to body frame
         accel_grav = np.dot(R, np.array([0, 0, -9.81])) 
-        # compute acceleration from velocity history
-        accel_vel_change = (self.vel_history[0] - self.vel_history[1]) / self.dt
 
-        self.accel = accel_grav + accel_vel_change
+        accel_grav_body = np.dot(R.T, accel_grav)
+        # compute acceleration from velocity history
+        accel_vel_change = (vel_body - self.vel_body_prev)/self.dt
+        # accel_vel_change = (self.vel_history[0] - self.vel_history[1]) / self.dt
+
+        self.accel = accel_grav_body + accel_vel_change
 
         self.gyro = state[10:13]
 
@@ -99,13 +122,16 @@ class IMU:
         self.gyro = state[10:13]
 
         self.add_noise()
-        return np.concatenate([self.accel, self.gyro])
+
+        # observation should be position, acceleration, angular velocity
+        pos = state[:3]
+        return np.concatenate([pos,self.accel, self.gyro])
 
     def reset(self):
         self.accel = np.array([0, 0, 0])
         self.gyro = np.array([0, 0, 0])
         self.bias = np.array([0, 0, 0, 0, 0, 0])
-
+        self.vel_body_prev = np.array([0, 0, 0])
 
     def render(self):
         pass
