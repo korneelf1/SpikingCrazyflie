@@ -9,7 +9,8 @@ from l2f_gym import Learning2Fly
 env = Learning2Fly()
 env = Monitor(env)
 check_env(env)
-env = make_vec_env(lambda: Learning2Fly(t_history=1,imu=False, out_forces=False), n_envs=12)
+env = make_vec_env(lambda: Learning2Fly(t_history=1,imu=False, out_forces=False, euler= True), n_envs=12)
+print(env.observation_space)
 
 model = sb3.SAC("MlpPolicy", env, verbose=1)
 

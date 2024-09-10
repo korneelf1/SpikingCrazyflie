@@ -62,7 +62,9 @@ def quaternion_to_euler(q):
 
     # pitch (y-axis rotation)
     sinp = 2 * (qw * qy - qz * qx)
-    pitch = np.arcsin(sinp)
+    a = np.sqrt(1+2*(qw*qy-qz*qx))
+    b = np.sqrt(1-2*(qw*qy-qz*qx))
+    pitch = -np.pi/2 + 2*np.arctan2(a,b)
 
     # yaw (z-axis rotation)
     siny_cosp = 2 * (qw * qz + qx * qy)

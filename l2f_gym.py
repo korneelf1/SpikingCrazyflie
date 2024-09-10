@@ -8,8 +8,8 @@ from typing import List, Callable, Optional, Union
 import multiprocessing as mp
 import traceback
 import logging
-from imu import IMU
-from helpers import NumpyDeque, forcetorque_to_rpm
+from imu import IMU, quaternion_rotation_matrix
+from helpers import NumpyDeque, forcetorque_to_rpm, quaternion_to_euler
 import torch
 from collections import deque
 
@@ -19,13 +19,13 @@ logger = logging.getLogger(__name__)
 
 
 class Learning2Fly(gym.Env):
-    def __init__(self, curriculum_terminal=False,seed=None, train_rate_commands=False, imu=False, t_history=1, out_forces=True) -> None:
+    def __init__(self, curriculum_terminal=False,seed=None, euler=True, imu=False, t_history=10, out_forces=False) -> None:
         '''
         Initializes the Learning2Fly environment.
         Args:
             curriculum_terminal (bool): If True, the environment will use soft terminal conditions initially.
             seed (int): The seed to initialize the environment with.
-            train_rate_commands (bool): If True, the environment will return the rate commands and thrust command to find motor commands.
+            euler (bool): If True, the environment will return euler angles rather than quaternions, and return velocity in body frame.
             imu (bool): If True, the environment will return the IMU data.
             t_history (int): The number of timesteps to include in the observation. 1 is only last
             out_forces (bool): If True, the actions are the forces and moments that are tehn converted to rpms
@@ -57,18 +57,20 @@ class Learning2Fly(gym.Env):
             self.action_space = gym.spaces.Box(low=np.array([0,-.1,-.1,-.1]), high=np.array([0.7,.1,.1,.1]), shape=(4,))
         else:
             self.action_space = gym.spaces.Box(low=-1, high=1, shape=(4,))
-        self.rate_to_commands = train_rate_commands
-        if train_rate_commands:
-            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(4*t_history,))
-        elif imu:
+
+        if imu:
             self.imu_history = NumpyDeque(shape=(9*t_history,),device='cpu')
             # state history is needed to allow single transitions with the IMU, you need initial velocity and orientation
             self.states_history = NumpyDeque(shape=(6*t_history,),device='cpu') # holds velocity and orientation in */euler angels
-            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(9*t_history+6*t_history,))
+            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(9*t_history+6,)) # IMU and pos history, and initial velocity and rotation
         else:
-            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(17*t_history,))
+            self.euler = euler
+            if self.euler:
+                self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(16*t_history,))
+            else:
+                self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(17*t_history,))
 
-            self.obs = NumpyDeque((self.observation_space.shape[0],),device='cpu')
+        # self.obs = NumpyDeque((self.observation_space.shape[0],),device='cpu')
         self.out_forces = out_forces
 
         self.global_step_counter = 0   
@@ -85,21 +87,33 @@ class Learning2Fly(gym.Env):
 
         self.state = self.next_state
 
-        if self.rate_to_commands:
-            self.obs_curr = np.array(self.state.angular_velocity).astype(np.float32)
-            self.obs_curr = np.concatenate([[0.027*9.81], self.obs_curr]).astype(np.float32)
+        if self.euler:
+            R = quaternion_rotation_matrix(self.state.orientation)
+
+            # transfrom velocity to body frame
+            vel_body = np.dot(R.T, self.state.linear_velocity)
+            self.obs_curr = np.concatenate([self.state.position, quaternion_to_euler(self.state.orientation), vel_body, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+
+
+        elif self.IMU is not None:
+            self.obs_curr = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+
+            # simulate the imu
+            imu_sim = self.IMU.simulate(self.obs_curr)
+            self.imu_history.append(imu_sim)
+
+            # you need a history of info to let network estimate velocities etc
+            self.obs_curr = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+            
+            # append history of states
+            self.states_history.append(np.concatenate([vel_body, self.state.angular_velocity]))
+            self.obs_curr = np.concatenate([self.imu_history.array, self.states_history.array[-6:]]).astype(np.float32) # take oldest velocity and orientation
+
         else:
             self.obs_curr = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
-            if self.IMU is not None:
-                self.obs_curr = self.IMU.simulate(self.obs_curr)
-                self.imu_history.append(self.obs_curr)
-                
-                euler_curr = self.state.orientation
-                self.states_history.append(np.concatenate([self.state.linear_velocity, self.state.angular_velocity]))
-                self.obs_curr = np.concatenate([self.imu_history.array, self.states_history.array[-6:]]).astype(np.float32)
-            else:
-                self.obs = self.obs_curr    
-        
+
+ 
+    
 
         self.t += 1
 
@@ -107,110 +121,104 @@ class Learning2Fly(gym.Env):
         
         reward = self._reward()
         
-        self.obs.array[13:] = np.zeros((4,))
-        return self.obs.array, reward, done,done, {}
+        # self.obs.array[13:] = np.zeros((4,))
+        # self.obs_curr[12:] = np.zeros((4,))
+        return self.obs_curr, reward, done,done, {}
     
     def reset(self,seed=None):
         sample_initial_parameters(self.device, self.env, self.params, self.rng)
 
         self.params.parameters.dynamics.mass *= 0.1
 
-        # self.params.parameters.dynamics.mass = 0.0274
-
-        print("Resetting environment with mass: ", self.params.parameters.dynamics.mass)
         sample_initial_state(self.device, self.env, self.params, self.state, self.rng)
         
         self.global_step_counter += self.t
         self.t = 0
-        self.obs_curr = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)
-        if self.rate_to_commands:
-            self.obs_curr = np.array(self.state.angular_velocity).astype(np.float32)
-            self.obs_curr = np.concatenate([[0.027*9.81], self.obs]).astype(np.float32)
-            
-            self.obs.reset()
-            self.obs.append(self.obs_curr)
-        elif self.IMU is not None:
-            # you need a history of info to let network estimate velocities etc
-            self.IMU.reset()
-            self.obs.reset()
-            initial_state(self.device, self.env, self.params, self.state) # we use perfect state with noise injected rather than the sampled state
-            self.obs_curr = self.IMU.simulate(self.obs_curr)
-            
-            # fill observation with hover information
-            hover = 0.6670265023020774*2-1
-            for i in range(self.t_history-1):
-                self.step(np.ones((4,))*hover*np.random.normal(0,.05))
-        
-        
 
-        self.obs = self.states_history
-        self.obs.array[13:] = np.zeros((4,))
-        return self.obs.array, {}
+        self.imu_history.reset()
+        self.states_history.reset()
+        
+        # fill observations with t_history steps
+        for _ in range(self.t_history):
+            self.step(np.ones((4,))*0.6670265023020774*2-1) # pass hover action
+
+        if self.euler:
+            R = quaternion_rotation_matrix(self.state.orientation)
+
+            # transfrom velocity to body frame
+            vel_body = np.dot(R.T, self.state.linear_velocity)
+            self.obs_curr = np.concatenate([self.state.position, quaternion_to_euler(self.state.orientation), vel_body, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+
+
+        elif self.IMU is not None:
+            self.obs_curr = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+
+            # simulate the imu
+            imu_sim = self.IMU.simulate(self.obs_curr)
+            self.imu_history.append(imu_sim)
+
+            # you need a history of info to let network estimate velocities etc
+            self.obs_curr = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+            
+            # append history of states
+            self.states_history.append(np.concatenate([vel_body, self.state.angular_velocity]))
+            self.obs_curr = np.concatenate([self.imu_history.array, self.states_history.array[-6:]]).astype(np.float32) # take oldest velocity and orientation
+
+        else:
+            self.obs_curr = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+
+ 
+    
+        return self.obs_curr, {}
     
     def _reward(self):
-        if self.rate_to_commands:
-            # intial parameters
-            Cp = 0.0 # position weight
-            Cv = .0 # velocity weight
-            Cq = 0 # orientation weight
-            Ca = .0 # action weight og .334, but just learns to fly out of frame
-            Cw = .10 # angular velocity weight 
-            Crs = 0 # reward for survival
-            Cab = 0.0 # action baseline
-            # curriculum parameters
-            Nc = 1e8 # interval of application of curriculum (basically dont use it)
-            qd    = self.obs[1:-1]
-            r =  - Ca*np.sum((np.array(self.action.motor_command)-Cab)**2) \
-                        - Cw*np.sum((qd)**2) \
-            
-        else:
-            # intial parameters
-            Cp = 0.10 # position weight
-            Cv = .00 # velocity weight
-            Cq = 0 # orientation weight
-            Ca = .0 # action weight og .334, but just learns to fly out of frame
-            Cw = .00 # angular velocity weight 
-            Crs = 1 # reward for survival
-            Cab = 0.0 # action baseline
+        # intial parameters
+        Cp = 0.10 # position weight
+        Cv = .00 # velocity weight
+        Cq = 0 # orientation weight
+        Ca = .0 # action weight og .334, but just learns to fly out of frame
+        Cw = .00 # angular velocity weight 
+        Crs = 1 # reward for survival
+        Cab = 0.0 # action baseline
 
-            # curriculum parameters
-            Nc = 1e5 # interval of application of curriculum
+        # curriculum parameters
+        Nc = 1e5 # interval of application of curriculum
 
-            CpC = 1.2 # position factor
-            Cplim = 20 # position limit
+        CpC = 1.2 # position factor
+        Cplim = 20 # position limit
 
-            CvC = 1.4 # velocity factor
-            Cvlim = 1.5 # velocity limit
+        CvC = 1.4 # velocity factor
+        Cvlim = 1.5 # velocity limit
 
-            CaC = 1.4 # orientation factor
-            Calim = .5 # orientation limit
+        CaC = 1.4 # orientation factor
+        Calim = .5 # orientation limit
 
-            CrsC = .8 # reward for survival factor
-            Crslim = .1 # reward for survival limit
-            pos   = self.obs[0:3]
-            vel   = self.obs[3:6]
-            q     = self.obs[6:10]
-            qd    = self.obs[10:13]
+        CrsC = .8 # reward for survival factor
+        Crslim = .1 # reward for survival limit
+        pos   = self.obs_curr[0:3]
+        vel   = self.obs_curr[3:6]
+        q     = self.obs_curr[6:10]
+        qd    = self.obs_curr[10:13]
 
-            # # curriculum
-            # if self.global_step_counter % Nc == 0:
-            #     print("Updating curriculum parameters")
-            #     # updating the curriculum parameters
-            #     Cp = min(Cp*CpC, Cplim)
-            #     # Cv = min(Cv*CvC, Cvlim)
-            #     # Ca = min(Ca*CaC, Calim)
-            #     Crs = max(Crs*CrsC, Crslim)
+        # # curriculum
+        # if self.global_step_counter % Nc == 0:
+        #     print("Updating curriculum parameters")
+        #     # updating the curriculum parameters
+        #     Cp = min(Cp*CpC, Cplim)
+        #     # Cv = min(Cv*CvC, Cvlim)
+        #     # Ca = min(Ca*CaC, Calim)
+        #     Crs = max(Crs*CrsC, Crslim)
 
-            # in theory pos error max sqrt( .6)*2.5 = 1.94
-            # vel error max sqrt(1000)*.005 = 0.158
-            # qd error max sqrt(1000)*.00 = 0.
-            # should roughly be between -2 and 2
-            r = - Cv*np.sum((vel)**2) \
-                    - Ca*np.sum((np.array(self.action.motor_command)-Cab)**2) \
-                        -Cq*(1-q[0]**2)\
-                        - Cw*np.sum((qd)**2) \
-                            + Crs \
-                                -Cp*np.sum((pos)**2) 
+        # in theory pos error max sqrt( .6)*2.5 = 1.94
+        # vel error max sqrt(1000)*.005 = 0.158
+        # qd error max sqrt(1000)*.00 = 0.
+        # should roughly be between -2 and 2
+        r = - Cv*np.sum((vel)**2) \
+                - Ca*np.sum((np.array(self.action.motor_command)-Cab)**2) \
+                    -Cq*(1-q[0]**2)\
+                    - Cw*np.sum((qd)**2) \
+                        + Crs \
+                            -Cp*np.sum((pos)**2) 
         return r
     
     def _check_done(self):
@@ -237,9 +245,6 @@ class Learning2Fly(gym.Env):
 
         if np.any(np.isnan(self.obs)):
             return True
-        elif self.rate_to_commands:
-            if time_threshold:
-                done = True
         elif pos_threshold or velocity_threshold or angular_threshold or time_threshold:
             done = True
         
