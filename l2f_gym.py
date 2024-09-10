@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class Learning2Fly(gym.Env):
-    def __init__(self, curriculum_terminal=False,seed=None, euler=True, imu=False, t_history=10, out_forces=False) -> None:
+    def __init__(self, curriculum_terminal=False,seed=None, euler=True, imu=True, t_history=10, out_forces=False) -> None:
         '''
         Initializes the Learning2Fly environment.
         Args:
@@ -58,13 +58,13 @@ class Learning2Fly(gym.Env):
         else:
             self.action_space = gym.spaces.Box(low=-1, high=1, shape=(4,))
 
+        self.euler = euler
         if imu:
             self.imu_history = NumpyDeque(shape=(9*t_history,),device='cpu')
             # state history is needed to allow single transitions with the IMU, you need initial velocity and orientation
             self.states_history = NumpyDeque(shape=(6*t_history,),device='cpu') # holds velocity and orientation in */euler angels
             self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(9*t_history+6,)) # IMU and pos history, and initial velocity and rotation
         else:
-            self.euler = euler
             if self.euler:
                 self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(16*t_history,))
             else:
@@ -87,30 +87,36 @@ class Learning2Fly(gym.Env):
 
         self.state = self.next_state
 
-        if self.euler:
+        
+
+        if self.IMU is not None:
             R = quaternion_rotation_matrix(self.state.orientation)
 
             # transfrom velocity to body frame
             vel_body = np.dot(R.T, self.state.linear_velocity)
-            self.obs_curr = np.concatenate([self.state.position, quaternion_to_euler(self.state.orientation), vel_body, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
-
-
-        elif self.IMU is not None:
-            self.obs_curr = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+        
+            self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
 
             # simulate the imu
-            imu_sim = self.IMU.simulate(self.obs_curr)
+            imu_sim = self.IMU.simulate(self.obs)
             self.imu_history.append(imu_sim)
 
             # you need a history of info to let network estimate velocities etc
-            self.obs_curr = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+            self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
             
             # append history of states
             self.states_history.append(np.concatenate([vel_body, self.state.angular_velocity]))
-            self.obs_curr = np.concatenate([self.imu_history.array, self.states_history.array[-6:]]).astype(np.float32) # take oldest velocity and orientation
+            self.obs = np.concatenate([self.imu_history.array, self.states_history.array[-6:]]).astype(np.float32) # take oldest velocity and orientation
 
         else:
-            self.obs_curr = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+            if self.euler:
+                R = quaternion_rotation_matrix(self.state.orientation)
+
+                # transfrom velocity to body frame
+                vel_body = np.dot(R.T, self.state.linear_velocity)
+                self.obs = np.concatenate([self.state.position, quaternion_to_euler(self.state.orientation), vel_body, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+            else:
+                self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
 
  
     
@@ -122,8 +128,8 @@ class Learning2Fly(gym.Env):
         reward = self._reward()
         
         # self.obs.array[13:] = np.zeros((4,))
-        # self.obs_curr[12:] = np.zeros((4,))
-        return self.obs_curr, reward, done,done, {}
+        # self.obs[12:] = np.zeros((4,))
+        return self.obs, reward, done,done, {}
     
     def reset(self,seed=None):
         sample_initial_parameters(self.device, self.env, self.params, self.rng)
@@ -135,41 +141,49 @@ class Learning2Fly(gym.Env):
         self.global_step_counter += self.t
         self.t = 0
 
-        self.imu_history.reset()
-        self.states_history.reset()
+        if self.IMU is not None:
+            self.imu_history.reset()
+            self.states_history.reset()
         
         # fill observations with t_history steps
         for _ in range(self.t_history):
             self.step(np.ones((4,))*0.6670265023020774*2-1) # pass hover action
 
-        if self.euler:
-            R = quaternion_rotation_matrix(self.state.orientation)
+        
 
-            # transfrom velocity to body frame
-            vel_body = np.dot(R.T, self.state.linear_velocity)
-            self.obs_curr = np.concatenate([self.state.position, quaternion_to_euler(self.state.orientation), vel_body, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+        if self.IMU is not None:
+            if self.euler:
+                R = quaternion_rotation_matrix(self.state.orientation)
 
+                # transfrom velocity to body frame
+                vel_body = np.dot(R.T, self.state.linear_velocity)
 
-        elif self.IMU is not None:
-            self.obs_curr = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+            self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
 
             # simulate the imu
-            imu_sim = self.IMU.simulate(self.obs_curr)
+            imu_sim = self.IMU.simulate(self.obs)
             self.imu_history.append(imu_sim)
 
             # you need a history of info to let network estimate velocities etc
-            self.obs_curr = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+            self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
             
             # append history of states
             self.states_history.append(np.concatenate([vel_body, self.state.angular_velocity]))
-            self.obs_curr = np.concatenate([self.imu_history.array, self.states_history.array[-6:]]).astype(np.float32) # take oldest velocity and orientation
+            self.obs = np.concatenate([self.imu_history.array, self.states_history.array[-6:]]).astype(np.float32) # take oldest velocity and orientation
 
         else:
-            self.obs_curr = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+            if self.euler:
+                R = quaternion_rotation_matrix(self.state.orientation)
+
+                # transfrom velocity to body frame
+                vel_body = np.dot(R.T, self.state.linear_velocity)
+                self.obs = np.concatenate([self.state.position, quaternion_to_euler(self.state.orientation), vel_body, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+            else:
+                self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
 
  
     
-        return self.obs_curr, {}
+        return self.obs, {}
     
     def _reward(self):
         # intial parameters
@@ -195,10 +209,10 @@ class Learning2Fly(gym.Env):
 
         CrsC = .8 # reward for survival factor
         Crslim = .1 # reward for survival limit
-        pos   = self.obs_curr[0:3]
-        vel   = self.obs_curr[3:6]
-        q     = self.obs_curr[6:10]
-        qd    = self.obs_curr[10:13]
+        pos   = self.obs[0:3]
+        vel   = self.obs[3:6]
+        q     = self.obs[6:10]
+        qd    = self.obs[10:13]
 
         # # curriculum
         # if self.global_step_counter % Nc == 0:
