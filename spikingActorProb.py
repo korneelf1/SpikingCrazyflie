@@ -51,6 +51,8 @@ class SMLP(nn.Module):
                  hidden_sizes: Sequence[int],
                  activation: ModuleType | Sequence[ModuleType] | None = snn.Leaky,
                  device: str | int | torch.device = "cpu",
+                 scheduled_surrogate: bool = False,
+                 slope:int = 10
                  ) -> None:
         super().__init__()
         self.device = device
@@ -59,8 +61,8 @@ class SMLP(nn.Module):
         self.hidden_sizes = hidden_sizes
 
         # Initialize surrogate gradient
-        self._slope = 10
-        self._n_backwards = 0
+        self._slope = slope
+
         self.spike_grad1 = surrogate.fast_sigmoid(self._slope)  # passes default parameters from a closure
         # spike_grad1 = scheduled_sigmoid(10)
 
@@ -88,30 +90,16 @@ class SMLP(nn.Module):
         self.lif_out = snn.Leaky(beta=betas_out, learn_beta=True,
                                     threshold=thresh_out, learn_threshold=True,
                                     spike_grad=self.spike_grad1).to(self.device)
-        
+        # if scheduled_surrogate:
+        #     self._update_slope()
         self.reset()
-
-    # def _register_backward_passes(self,module, grad_input, grad_output):
-    #     self.backwards = []
-    # def _register_nr_backward_hooks(self):
-    #     """
-    #     Registers the number of time each weight is updated.
-    #     """
-    #     for m in self.modules():
-    #         if isinstance(m, nn.Linear):
-    #             m.register_full_backward_hook(self._register_backward_passes)
-    def _update_slope(self):
-        """
-        Update the slope of the surrogate gradient.
-        """
-        
-        def inner(module, grad_input, grad_output):
-            self._n_backwards += 1
-            self.slope = max(self._n_backwards/1e4, 50)
-            if wandb.run is not None:
-                wandb.run.log({"surrogate fast sigmoid slope": self.slope})
-        self.layer_out.register_full_backward_hook(inner)
-
+    def update_slope(self, slope):
+        self._slope = slope
+        self.spike_grad1 = surrogate.fast_sigmoid(self._slope)
+        self.lif_in.spike_grad = self.spike_grad1
+        self.lif_out.spike_grad = self.spike_grad1
+        for i in range(int(len(self.hidden_layers)/2)):
+            self.hidden_layers[2*i+1].spike_grad = self.spike_grad1
 
     def reset(self):
         '''
@@ -123,6 +111,7 @@ class SMLP(nn.Module):
             self.cur_lst.append(self.hidden_layers[2*i+1].init_leaky())
         self.hidden_states = self.cur_lst
         self.cur_out = self.lif_out.init_leaky()
+
 
     def forward(self, x: torch.Tensor, hidden_states: list) -> torch.Tensor:
         '''
@@ -213,6 +202,7 @@ class SpikingNet(NetBase[Any]):
         linear_layer: TLinearLayer = nn.Linear,
         reset_in_call: bool = True,
         repeat: int = 4,
+        scheduled_surrogate: bool = False
     ) -> None:
         super().__init__()
         self.device = device
@@ -238,7 +228,13 @@ class SpikingNet(NetBase[Any]):
             hidden_sizes,
             activation,
             device,
+            slope=10
         )
+        self.input_dim = input_dim
+        self.hidden_sizes = hidden_sizes
+        self.output_dim = output_dim
+        self.activation = activation
+        self.device = device
 
         self.repeat = repeat
         self.reset_in_call = reset_in_call
@@ -255,25 +251,29 @@ class SpikingNet(NetBase[Any]):
         # )
         if self.use_dueling:  # dueling DQN
             raise NotImplementedError("Dueling DQN is not supported in spiking networks.")
-            assert dueling_param is not None
-            kwargs_update = {
-                "input_dim": self.model.output_dim,
-                "device": self.device,
-            }
-            # Important: don't change the original dict (e.g., don't use .update())
-            q_kwargs = {**dueling_param[0], **kwargs_update}
-            v_kwargs = {**dueling_param[1], **kwargs_update}
-
-            q_kwargs["output_dim"] = 0 if concat else action_dim
-            v_kwargs["output_dim"] = 0 if concat else num_atoms
-            self.Q, self.V = MLP(**q_kwargs), MLP(**v_kwargs)
-            self.output_dim = self.Q.output_dim
         else:
             self.output_dim = self.model.output_dim
 
         
         self.model.reset()
+        self._n_backwards = 0
+        self._n_reset = 0
+        self.scheduled = False
+        if scheduled_surrogate:
+            self._slope = 10
+            self.scheduled = True
+            # self._update_slope()
+        
 
+    def _update_slope(self):
+        """
+        Update the slope of the surrogate gradient.
+        """
+        def inner(module, grad_input, grad_output):
+            self._n_backwards += 1
+            
+        self.model.layer_out.register_full_backward_hook(inner)
+        
     def forward(
         self,
         obs: np.ndarray | torch.Tensor,
@@ -290,7 +290,7 @@ class SpikingNet(NetBase[Any]):
             obs = obs.unsqueeze(0)
         assert len(obs.shape) == 2 # (batch size, obs size) AKA not a sequence
         if self.reset_in_call:
-            self.model.reset()
+            self.reset()
         if isinstance(obs, np.ndarray):
             obs = torch.tensor(obs, device=self.device, dtype=torch.float32)
         logits = torch.zeros(obs.shape[0], self.output_dim, device=self.device)
@@ -308,7 +308,39 @@ class SpikingNet(NetBase[Any]):
         return logits, state
 
     def reset(self):
-        print("resetting")
+        if self.scheduled:
+            self._n_reset += 1
+            # print(self._n_reset)
+            # schedule first 20 epochs nothing happens
+            # after 20 epochs start making the surrogate steeper every 3*60e3 steps +1 to the slope until 30
+            # n_reset is 10e3 per epoch
+            steps_per_epoch = 10e3
+            start_resets = steps_per_epoch*60    
+            if self._n_reset > start_resets: # after 20 epochs start making the surrogate steeper
+                
+                update_interval = steps_per_epoch*10
+                if self._n_reset % update_interval == 0 and self._slope<30: # each epoch is 20e4 steps -> every 2 epochs # every 100 steps is 400 backwards -> 5e3 steps is 20e3 backwards every 9 epochs would be 18e4 backwards
+                    if wandb.run is not None:
+                        # print('logging')
+                        wandb.run.log({"surrogate fast sigmoid slope": self._slope})
+                    # save self.model.state_dict()
+                    # torch.save(self.model.state_dict(), "smlp.pth")
+                    # print("saving model")
+                    # for i in self.model.state_dict():
+                    #     print(i)
+                    #     # compute average and std of the weights
+                    #     print(torch.mean(self.model.state_dict()[i]), torch.std(self.model.state_dict()[i]))
+
+                    # self._slope +=1
+                    self._slope = min(10+(self._n_reset - start_resets)/update_interval, 30)
+                    # print("updating model, current slope: ", self._slope)
+                    # create model with new slope
+                    self.model.update_slope(self._slope)
+                    # load the saved state dict
+                    # self.model.load_state_dict(torch.load("smlp.pth"))
+                    # self._update_slope()
+                    print("updating slope: ", self.model._slope)
+                    
         self.model.reset()
 
 

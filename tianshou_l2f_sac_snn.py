@@ -23,7 +23,7 @@ from spiking_gym_wrapper import SpikingEnv
 from spikingActorProb import SpikingNet
 
 import wandb
-wandb.init(mode='disabled')
+# wandb.init(mode='disabled')
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--buffer-size", type=int, default=1000000)
@@ -33,7 +33,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--critic-lr", type=float, default=1e-3)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
-    parser.add_argument("--alpha", type=float, default=0.2)
+    parser.add_argument("--alpha", type=float, default=0.0)
     parser.add_argument("--auto-alpha", default=False, action="store_true")
     parser.add_argument("--alpha-lr", type=float, default=3e-4)
     parser.add_argument("--start-timesteps", type=int, default=10000)
@@ -94,6 +94,7 @@ args_wandb = {
       'adaptive surrogate slope': True,
       'reinit': True,
       'reward_function': 'reward_squared_fast_learning',
+      'alpha': 0.0,
       }
 # log
 import datetime
@@ -127,7 +128,7 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
     torch.manual_seed(args.seed)
 
     # model
-    net_a = SpikingNet(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device, action_shape=256, repeat=args.repeat_per_forward)
+    net_a = SpikingNet(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device, action_shape=256, repeat=args.repeat_per_forward, scheduled_surrogate=False)
     actor = ActorProb(
         net_a,
         args.action_shape,
@@ -219,7 +220,7 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
     # )
 
     def save_best_fn(policy: BasePolicy) -> None:
-        torch.save(policy.state_dict(), os.path.join(log_path, "policy_snn_actor_1.pth"))
+        torch.save(policy.state_dict(), os.path.join(log_path, "policy_snn_actor_scheduled_alpha0.pth"))
 
     if not args.watch:
         # trainer
@@ -228,6 +229,7 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
             train_collector=train_collector,
             test_collector=test_collector,
             max_epoch=args.epoch,
+            # max_epoch=1,
             step_per_epoch=args.step_per_epoch,
             step_per_collect=args.step_per_collect,
             episode_per_test=args.test_num,
