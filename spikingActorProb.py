@@ -22,7 +22,6 @@ from tianshou.utils.net.common import (
     ModuleType,
     ArgsType
 )
-from tianshou.utils.pickle import setstate
 
 SIGMA_MIN = -20
 SIGMA_MAX = 2
@@ -132,7 +131,7 @@ class SMLP(nn.Module):
         self.hidden_states = self.cur_lst
         self.cur_out = self.lif_out.init_leaky()
 
-    def forward(self, x: torch.Tensor, hidden_states: list) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, hidden_states: list=None) -> torch.Tensor:
         '''
         Forward pass through the network
         '''
