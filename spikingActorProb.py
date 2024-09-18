@@ -30,6 +30,50 @@ T = TypeVar("T")
 
 TRecurrentState = TypeVar("TRecurrentState", bound=Any)
 
+class IntegratorSpiker(torch.nn.Module):
+    def __init__(self, layer_size = 64, integrator_ratio=0.5):
+        n_integrators = int(layer_size * integrator_ratio)
+        n_spikers = layer_size - n_integrators
+
+        self.spike_grad = snn.surrogate.fast_sigmoid(10)
+
+        self.betas = torch.nn.Parameter(torch.rand(n_spikers))
+        self.thresholds = torch.nn.Parameter(torch.rand(n_spikers))
+        self.lif1 = snn.Leaky(beta=self.betas, learn_beta=True,
+                            threshold=self.thresholds, learn_threshold=True,
+                            spikegrad=self.spike_grad)
+        
+        
+        self.thresholds_integrators = torch.nn.Parameter(torch.rand(n_integrators))
+        self.lif_integrators = snn.Leaky(beta=1, learn_beta=False,
+                            threshold=self.thresholds_integrators, learn_threshold=True,
+                            spikegrad=self.spike_grad)
+        
+        self.reset()
+        
+    def set_slope(self, slope):
+        self.spike_grad = snn.surrogate.fast_sigmoid(slope)
+        self.lif1.spikegrad = self.spike_grad
+        self.lif_integrators.spikegrad = self.spike_grad
+
+    def reset(self):
+        self.cur_1 = self.lif1.init_leaky()
+        self.cur_int = self.lif_integrators.init_leaky()
+
+    def forward(self, x, hiddens):
+        if hiddens is not None:
+            self.cur_1 = hiddens[0]
+            self.cur_int = hiddens[1]
+
+        x_1, self.cur_1 = self.lif1(x, self.cur_1)
+
+        x_int, self.cur_int = self.lif_integrators(x, self.cur_int)
+
+        x = torch.cat((x_1, x_int), dim=1)
+
+        return x, [self.cur_1, self.cur_int]
+
+
 class SMLP(nn.Module):
     """
     A simple spiking multi-layer perceptron (MLP) network.
@@ -66,11 +110,17 @@ class SMLP(nn.Module):
         # create layers and spiking layers
         self.layer_in = nn.Linear(input_dim, hidden_sizes[0], device=self.device)
 
+        
         betas_in = torch.rand(hidden_sizes[0])
         thresh_in = torch.rand(hidden_sizes[0])
         self.lif_in   = snn.Leaky(beta=betas_in, learn_beta=True, 
                                   threshold=thresh_in, learn_threshold=True, 
                                   spike_grad=self.spike_grad1).to(self.device)
+
+        # velocity and orientation prediction and injection layers
+        self.vel_orient_layer = nn.Linear(hidden_sizes[0], 6, device=self.device)
+        self.vel_orient_injection = torch.cat(torch.eye(6,requires_grad=False), torch.zeros(6,hidden_sizes[0]-6)).to(self.device)
+
         self.hidden_layers = []
         for i in range(len(hidden_sizes) - 1):
             self.hidden_layers.append(nn.Linear(hidden_sizes[i], hidden_sizes[i + 1], device=self.device))
@@ -145,17 +195,22 @@ class SMLP(nn.Module):
         # self.cur_in = x
         for i in range(int(len(self.hidden_layers)/2)):
             x = self.hidden_layers[2*i](x)
+            if i == 0:
+                vel_orient = self.vel_orient_layer(x)
+                x = x + torch.matmul(vel_orient, self.vel_orient_injection)
             x, self.cur_lst[i] = self.hidden_layers[2*i+1](x, self.cur_lst[i])
             self.cur_lst[i] = x
         x = self.layer_out(x)
         x, self.cur_out = self.lif_out(x, self.cur_out)
         # self.cur_out = x
         self.hidden_states = [self.cur_in] + self.cur_lst + [self.cur_out]
-        return x, self.hidden_states
+        return x, self.hidden_states, vel_orient
 
     def __call__(self, *args: Any) -> Any:
         return self.forward(*args)
     
+
+
 class SpikingNet(NetBase[Any]):
     """A spiking network for DRL usage.
 
@@ -220,13 +275,12 @@ class SpikingNet(NetBase[Any]):
         linear_layer: TLinearLayer = nn.Linear,
         reset_in_call: bool = True,
         repeat: int = 4,
+
     ) -> None:
         super().__init__()
         self.device = device
         self.softmax = softmax
         self.num_atoms = num_atoms
-        self.Q: MLP | None = None
-        self.V: MLP | None = None
 
         input_dim = int(np.prod(state_shape))
         action_dim = int(np.prod(action_shape)) * num_atoms
@@ -262,19 +316,6 @@ class SpikingNet(NetBase[Any]):
         # )
         if self.use_dueling:  # dueling DQN
             raise NotImplementedError("Dueling DQN is not supported in spiking networks.")
-            assert dueling_param is not None
-            kwargs_update = {
-                "input_dim": self.model.output_dim,
-                "device": self.device,
-            }
-            # Important: don't change the original dict (e.g., don't use .update())
-            q_kwargs = {**dueling_param[0], **kwargs_update}
-            v_kwargs = {**dueling_param[1], **kwargs_update}
-
-            q_kwargs["output_dim"] = 0 if concat else action_dim
-            v_kwargs["output_dim"] = 0 if concat else num_atoms
-            self.Q, self.V = MLP(**q_kwargs), MLP(**v_kwargs)
-            self.output_dim = self.Q.output_dim
         else:
             self.output_dim = self.model.output_dim
 
@@ -319,18 +360,23 @@ class SpikingNet(NetBase[Any]):
         self.model.reset()
 
 
-class Actor(BaseActor):
-    """Simple actor network that directly outputs actions for continuous action space.
-    Used primarily in DDPG and its variants. For probabilistic policies, see :class:`~ActorProb`.
-
-    It will create an actor operated in continuous action space with structure of preprocess_net ---> action_shape.
+class POMDPDActorProb(BaseActor):
+    """
+    Spiking Actor for POMDPs.
+    Utilizes an extra output for the velocity and orientation predictions.
+    A loss function based on these outputs can be added to the RL algorithm.
+    
+    Used primarily in SAC, PPO and variants thereof. For deterministic policies, see :class:`~Actor`.
 
     :param preprocess_net: a self-defined preprocess_net, see usage.
         Typically, an instance of :class:`~tianshou.utils.net.common.Net`.
     :param action_shape: a sequence of int for the shape of action.
     :param hidden_sizes: a sequence of int for constructing the MLP after
         preprocess_net.
-    :param max_action: the scale for the final action.
+    :param max_action: the scale for the final action logits.
+    :param unbounded: whether to apply tanh activation on final logits.
+    :param conditioned_sigma: True when sigma is calculated from the
+        input, False when sigma is an independent parameter.
     :param preprocess_net_output_dim: the output dimension of
         `preprocess_net`. Only used when `preprocess_net` does not have the attribute `output_dim`.
 
@@ -338,6 +384,7 @@ class Actor(BaseActor):
     :ref:`build_the_network`.
     """
 
+    # TODO: force kwargs, adjust downstream code
     def __init__(
         self,
         preprocess_net: nn.Module | Net,
@@ -345,21 +392,42 @@ class Actor(BaseActor):
         hidden_sizes: Sequence[int] = (),
         max_action: float = 1.0,
         device: str | int | torch.device = "cpu",
+        unbounded: bool = False,
+        conditioned_sigma: bool = False,
         preprocess_net_output_dim: int | None = None,
+        state_pred_size: int = 6,
     ) -> None:
         super().__init__()
-        self.device = device
+        if unbounded and not np.isclose(max_action, 1.0):
+            warnings.warn("Note that max_action input will be discarded when unbounded is True.")
+            max_action = 1.0
         self.preprocess = preprocess_net
+        self.device = device
         self.output_dim = int(np.prod(action_shape))
         input_dim = get_output_dim(preprocess_net, preprocess_net_output_dim)
-        self.last = MLP(
-            input_dim,
-            self.output_dim,
-            hidden_sizes,
-            device=self.device,
-        )
-        raise NotImplementedError("Spiking networks do not support deterministic actors for continuous action spaces.")
+
+        if len(hidden_sizes) >= 1:
+            warnings.warn("Hidden sizes larger than one are now ANN rather than SNN.")
+
+        self.mu = MLP(input_dim, self.output_dim, hidden_sizes, device=self.device)
+        self._c_sigma = conditioned_sigma
+        if conditioned_sigma:
+            self.sigma = MLP(
+                input_dim,
+                self.output_dim,
+                hidden_sizes,
+                device=self.device,
+            )
+        else:
+            warnings.warn("Fixed sigma is not tested for SNNs, could lead to bad performance.")
+            self.sigma_param = nn.Parameter(torch.zeros(self.output_dim, 1))
+
+        # also have head for the additional output
+        self.vel_orient_head = MLP(input_dim, state_pred_size, hidden_sizes=hidden_sizes, device=self.device)
+
+        
         self.max_action = max_action
+        self._unbounded = unbounded
 
     def get_preprocess_net(self) -> nn.Module:
         return self.preprocess
@@ -370,19 +438,28 @@ class Actor(BaseActor):
     def forward(
         self,
         obs: np.ndarray | torch.Tensor,
+        # vel_orient: torch.Tensor,
         state: Any = None,
         info: dict[str, Any] | None = None,
-    ) -> tuple[torch.Tensor, Any]:
-        """Mapping: s_B -> action_values_BA, hidden_state_BH | None.
-
-        Returns a tensor representing the actions directly, i.e, of shape
-        `(n_actions, )`, and a hidden state (which may be None).
-        The hidden state is only not None if a recurrent net is used as part of the
-        learning algorithm (support for RNNs is currently experimental).
-        """
-        action_BA, hidden_BH = self.preprocess(obs, state)
-        action_BA = self.max_action * torch.tanh(self.last(action_BA))
-        return action_BA, hidden_BH
+    ) -> tuple[tuple[torch.Tensor, torch.Tensor], Any]:
+        """Mapping: obs -> logits -> (mu, sigma)."""
+        if info is None:
+            info = {}
+        
+        # obs = torch.cat((obs, vel_orient), dim=1)
+        logits, hidden = self.preprocess(obs, state)
+        mu = self.mu(logits)
+        vel_orient = self.vel_orient_head(logits)
+        if not self._unbounded:
+            mu = self.max_action * torch.tanh(mu)
+        if self._c_sigma:
+            sigma = torch.clamp(self.sigma(logits), min=SIGMA_MIN, max=SIGMA_MAX).exp()
+        else:
+            shape = [1] * len(mu.shape)
+            shape[1] = -1
+            sigma = (self.sigma_param.view(shape) + torch.zeros_like(mu)).exp()
+        
+        return (mu, sigma), state, vel_orient
 
 
 
