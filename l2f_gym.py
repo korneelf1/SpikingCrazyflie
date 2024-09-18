@@ -115,7 +115,7 @@ class Learning2Fly(gym.Env):
             self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
             
             # append history of states
-            self.states_history.append(np.concatenate([vel_body, self.state.angular_velocity]))
+            self.states_history.append(np.concatenate([vel_body, quaternion_to_euler(self.state.orientation)]))
             if self.imu_only:
                 self.obs = self.imu_history.array.astype(np.float32)
 
@@ -183,7 +183,8 @@ class Learning2Fly(gym.Env):
 
             else:
                 # append history of states
-                self.states_history.append(np.concatenate([vel_body, self.state.angular_velocity]))
+                # originally it was vel_body and self.state.angular_velocity????
+                self.states_history.append(np.concatenate([vel_body, quaternion_to_euler(self.state.orientation)]))
                 self.obs = np.concatenate([self.imu_history.array, self.states_history.array[-6:]]).astype(np.float32) # take oldest velocity and orientation
 
         else:
