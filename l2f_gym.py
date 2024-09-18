@@ -99,8 +99,6 @@ class Learning2Fly(gym.Env):
 
         self.state = self.next_state
 
-        
-
         if self.IMU is not None:
             R = quaternion_rotation_matrix(self.state.orientation)
 
@@ -270,17 +268,19 @@ class Learning2Fly(gym.Env):
         else:
             pos_threshold = np.sum((np.abs(self.obs[0:3])>1.5))
 
-        velocity_threshold = np.sum((np.abs(self.obs[3:6]) > 1000))
-        angular_threshold  = np.sum((np.abs(self.obs[10:13]) > 1000))
+        if self.IMU is None:
+            velocity_threshold = np.sum((np.abs(self.obs[3:6]) > 1000))
+            angular_threshold  = np.sum((np.abs(self.obs[10:13]) > 1000))
+        else:
+            velocity_threshold = np.sum((np.abs(self.obs[9:12]) > 1000))
+            angular_threshold  = np.sum((np.abs(self.obs[6:9]) > 1000))
         time_threshold = self.t>500
 
         if np.any(np.isnan(self.obs)):
             return True
         elif pos_threshold or velocity_threshold or angular_threshold or time_threshold:
-            done = True
-        
+            done = True        
             
-
         return done
 
 
