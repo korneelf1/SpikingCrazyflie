@@ -176,6 +176,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
     #     config_dict=vars(args),
     # )
     args_wandb = {
+      'experiment description': 'First test of the custom SAC, now we have an additional loss to learn the velocity and orietation, but we do not yet use our own prediction for adding to the IMU data.',  
       'epoch': args.epoch,
       'step_per_epoch': args.step_per_epoch,
       'step_per_collect': args.step_per_collect, # 2.5 s
