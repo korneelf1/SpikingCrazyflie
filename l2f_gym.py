@@ -148,7 +148,7 @@ class Learning2Fly(gym.Env):
         self.params.parameters.dynamics.mass *= 0.1
 
         sample_initial_state(self.device, self.env, self.params, self.state, self.rng)
-        
+        # print("Initial state: ", self.state.position)
         self.global_step_counter += self.t
         self.t = 0
 
@@ -196,9 +196,7 @@ class Learning2Fly(gym.Env):
                 self.obs = np.concatenate([self.state.position, quaternion_to_euler(self.state.orientation), vel_body, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
             else:
                 self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
-
- 
-    
+                # print(self.obs)
         return self.obs, {}
     
     def _reward(self):
