@@ -9,6 +9,9 @@ from tianshou.utils.net.common import MLP
 import snntorch as snn
 
 
+import matplotlib.pyplot as plt
+# plt.ion()
+
 def gather_dataset(num_samples=1000, T_max=250):
     '''Uses a trained controller (ann_actor) to collect data from the environment. The data saved consists of the states.
     These states are then appended with IMU data and saved in a numpy array.
@@ -16,7 +19,7 @@ def gather_dataset(num_samples=1000, T_max=250):
     env = Learning2Fly(imu=False,t_history=1,euler=True) # if euler states are pos, vel_body, orientation_euler, angular velocity
     print(env.observation_space)
     # actor = torch.load("ann_actor.pth")
-    actor = sb3.SAC.load("SAC_l2f_euler.zip")
+    actor = sb3.SAC.load("SAC_l2f_IMU_vel_penalty_further")
     print(actor)
     # Initialize the IMU
     imu = IMU(euler_in=True )
@@ -79,10 +82,16 @@ class IntegratorSpiker(torch.nn.Module):
         self.spike_grad = snn.surrogate.fast_sigmoid(10)
 
         self.betas = torch.nn.Parameter(torch.rand(n_spikers))
+        self.alphas = torch.nn.Parameter(torch.rand(n_spikers))
         self.thresholds = torch.nn.Parameter(torch.rand(n_spikers))
         self.lif1 = snn.Leaky(beta=self.betas, learn_beta=True,
                             threshold=self.thresholds, learn_threshold=True,
                             spike_grad=self.spike_grad)
+
+        self.syn1 = snn.Synaptic(beta= self.betas, learn_beta=True,
+                                 alpha= self.alphas, learn_alpha=True,
+                                 threshold=self.thresholds, learn_threshold=True,
+                                 spike_grad=self.spike_grad)
         
         
         self.thresholds_integrators = torch.nn.Parameter(torch.rand(n_integrators))
@@ -99,20 +108,21 @@ class IntegratorSpiker(torch.nn.Module):
 
     def reset(self):
         self.cur_1 = self.lif1.init_leaky()
+        self.cur_syn, self.I_syn = self.syn1.init_synaptic()
         self.cur_int = self.lif_integrators.init_leaky()
 
     def forward(self, x, hiddens):
         if hiddens is not None:
-            self.cur_1 = hiddens[0]
+            self.cur_1, self.I_syn = hiddens[0]
             self.cur_int = hiddens[1]
 
-        x_1, self.cur_1 = self.lif1(x, self.cur_1)
-
+        # x_1, self.cur_1 = self.lif1(x, self.cur_1)
+        x_1, self.cur_syn, self.I_syn = self.syn1(x, self.cur_1, self.I_syn)
         x_int, self.cur_int = self.lif_integrators(x, self.cur_int)
 
         x = torch.cat((x_1, x_int), dim=1)
 
-        return x, [self.cur_1, self.cur_int]
+        return x, [(self.cur_1, self.I_syn), self.cur_int]
     
 class StateEstimator(torch.nn.Module):
     def __init__(self, spiking=True):
@@ -124,17 +134,25 @@ class StateEstimator(torch.nn.Module):
         self.lin_1 = torch.nn.Linear(16, 32)
         
         self.leaky = IntegratorSpiker(layer_size=32, integrator_ratio=0.5)
+
         self.lin_2 = torch.nn.Linear(64, 6)
 
+
         self.reset()
+        self.out = torch.zeros(6)
+        self.alpha = .999
 
     def reset(self):
         self.leaky.reset()
+        self.out = torch.zeros(6)
 
-    def forward_single(self, x, hidden=None):
+    def forward_single(self, x_in: torch.Tensor, hidden=None):
+        x = x_in.clone()
+        x[:,-6:] = (1-self.alpha) * self.out + (self.alpha) * x_in[:, -6:]
         x = self.lin_1(x)
         x, hidden = self.leaky(x, hidden)
         x = self.lin_2(x)
+        self.out = x.detach().clone()
         return x, hidden
     
     def forward(self, x):
@@ -159,8 +177,10 @@ class StateEstimator(torch.nn.Module):
         optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
         criterion = torch.nn.MSELoss()
 
-        for epoch in range(epochs):
+        for epoch in tqdm(range(epochs), desc="Training"):
             losses = []
+            if epoch > 15:
+                self.alpha = .999*(1-epoch/100)
             for imu,true_states in dataloader:
                 optimizer.zero_grad()
                 y_pred = self.forward(imu)
@@ -171,34 +191,51 @@ class StateEstimator(torch.nn.Module):
                 losses.append(loss.item())
                 loss.backward()
                 optimizer.step()
+            
             print(f"Epoch {epoch}, Loss: {torch.mean(torch.tensor(losses))}")
         
         # create one plot with the last model
-        self.plot_difference_prediction_true(y_pred[1,:], true_states[1,:,3:9])
-        torch.save(self, "state_estimator.pth")
+        self.plot_difference_prediction_true(y_pred[1,:], true_states[1,:,:9])
+        # torch.save(self, "state_estimator.pth")
+
     def plot_difference_prediction_true(self, prediction, true):
         # print(prediction, true)
-        import matplotlib.pyplot as plt
+        
         # tensor to array
+
         prediction = prediction.detach().numpy()
         true = true.detach().numpy()
-
-        fig, ax = plt.subplots(2, 3)
+        true_pos = true[:,:3]
+        true = true[:,3:]
+        fig, ax = plt.subplots(3, 3)
         # in each subplot plot one of prediction[:,:, i] and true[:,:, i]
-        subfigs = ["x", "y", "z", "vx", "vy", "vz"]
+        ax[0,0].plot(true_pos[:,0], c='g')
+        ax[0,0].set_title("x")
+        ax[0,1].plot(true_pos[:,1], c='g')
+        ax[0,1].set_title("y")
+        ax[0,2].plot(true_pos[:,2], c='g')
+        ax[0,2].set_title("z")
+
+        subfigs = ["vx", "vy", "vz", "vvx", "vvy", "vvz"]
         for i in range(6):
-            ax[i//3, i%3].plot(prediction[:,i], c='r')
-            ax[i//3, i%3].plot(true[:,i], c='g')
-            ax[i//3, i%3].set_title(subfigs[i])
+            ax[i//3+1, i%3].plot(prediction[:,i], c='r')
+            ax[i//3+1, i%3].plot(true[:,i], c='g')
+            ax[i//3+1, i%3].set_title(subfigs[i])
         # ax[0].plot(prediction)
         # ax[0].set_title("Prediction")
         # ax[1].plot(true)
         # ax[1].set_title("True")
+        # Redraw the plot
+        # plt.draw()
+ 
+        # # Pause for a short duration to allow visualization
+        # plt.pause(0.001)
+ 
         plt.show()
         
 if __name__ == "__main__":
     print("Gathering data")
-    # dataset = gather_dataset(num_samples=10000, T_max=250)
+    # dataset = gather_dataset(num_samples=5000, T_max=250)
     # torch.save(dataset, "dataset.pth")
     dataset = torch.load("dataset.pth")
     # print(data.tensors)
@@ -206,4 +243,9 @@ if __name__ == "__main__":
 
     stateestimator = StateEstimator(spiking=True)
     print(stateestimator)
-    stateestimator.train(dataset=dataset, epochs=100, warmup = 20)    
+    stateestimator.train(dataset=dataset, epochs=1, warmup = 35)    
+
+    # # train ANN:
+    # stateestimator = StateEstimator(spiking=False)
+    # print(stateestimator)
+    # stateestimator.train(dataset=dataset, epochs=50, warmup = 20)
