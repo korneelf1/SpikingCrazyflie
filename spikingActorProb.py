@@ -145,29 +145,14 @@ class SMLP(nn.Module):
             self.run = wandb.run
 
         self.reset()
-        self._update_slope()
 
-    # def _register_backward_passes(self,module, grad_input, grad_output):
-    #     self.backwards = []
-    # def _register_nr_backward_hooks(self):
-    #     """
-    #     Registers the number of time each weight is updated.
-    #     """
-    #     for m in self.modules():
-    #         if isinstance(m, nn.Linear):
-    #             m.register_full_backward_hook(self._register_backward_passes)
-    def _update_slope(self):
-        """
-        Update the slope of the surrogate gradient.
-        """
-        
-        def inner(module, grad_input, grad_output):
-            self._n_backwards += 1
-
-            if self._n_backwards % 10e4 == 0:
-                self.slope = max(5,min(self._n_backwards/30e4, 30))
-                self.run.log({"surrogate fast sigmoid slope": self.slope})
-        self.layer_out.register_full_backward_hook(inner)
+    def update_slope(self, slope):
+        self._slope = slope
+        self.spike_grad1 = surrogate.fast_sigmoid(self._slope)
+        self.lif_in.spike_grad = self.spike_grad1
+        self.lif_out.spike_grad = self.spike_grad1
+        for i in range(int(len(self.hidden_layers)/2)):
+            self.hidden_layers[2*i+1].spike_grad = self.spike_grad1
 
 
     def reset(self):
@@ -275,6 +260,7 @@ class SpikingNet(NetBase[Any]):
         linear_layer: TLinearLayer = nn.Linear,
         reset_in_call: bool = True,
         repeat: int = 4,
+        scheduled_surrogate: bool = False,
 
     ) -> None:
         super().__init__()
@@ -321,6 +307,23 @@ class SpikingNet(NetBase[Any]):
 
         
         self.model.reset()
+        self._n_backwards = 0
+        self._n_reset = 0
+        self.scheduled = False
+        if scheduled_surrogate:
+            self._slope = 10
+            self.scheduled = True
+            # self._update_slope()
+        
+
+    def _update_slope(self):
+        """
+        Update the slope of the surrogate gradient.
+        """
+        def inner(module, grad_input, grad_output):
+            self._n_backwards += 1
+            
+        self.model.layer_out.register_full_backward_hook(inner)
 
     def forward(
         self,
@@ -367,7 +370,39 @@ class SpikingNet(NetBase[Any]):
         return logits, state
 
     def reset(self):
-        print("resetting")
+        if self.scheduled:
+            self._n_reset += 1
+            # print(self._n_reset)
+            # schedule first 20 epochs nothing happens
+            # after 20 epochs start making the surrogate steeper every 3*60e3 steps +1 to the slope until 30
+            # n_reset is 10e3 per epoch
+            steps_per_epoch = 10e3
+            start_resets = steps_per_epoch*60    
+            if self._n_reset > start_resets: # after 20 epochs start making the surrogate steeper
+                
+                update_interval = steps_per_epoch*10
+                if self._n_reset % update_interval == 0 and self._slope<30: # each epoch is 20e4 steps -> every 2 epochs # every 100 steps is 400 backwards -> 5e3 steps is 20e3 backwards every 9 epochs would be 18e4 backwards
+                    if wandb.run is not None:
+                        # print('logging')
+                        wandb.run.log({"surrogate fast sigmoid slope": self._slope})
+                    # save self.model.state_dict()
+                    # torch.save(self.model.state_dict(), "smlp.pth")
+                    # print("saving model")
+                    # for i in self.model.state_dict():
+                    #     print(i)
+                    #     # compute average and std of the weights
+                    #     print(torch.mean(self.model.state_dict()[i]), torch.std(self.model.state_dict()[i]))
+
+                    # self._slope +=1
+                    self._slope = min(10+(self._n_reset - start_resets)/update_interval, 30)
+                    # print("updating model, current slope: ", self._slope)
+                    # create model with new slope
+                    self.model.update_slope(self._slope)
+                    # load the saved state dict
+                    # self.model.load_state_dict(torch.load("smlp.pth"))
+                    # self._update_slope()
+                    print("updating slope: ", self.model._slope)
+                    
         self.model.reset()
 
 

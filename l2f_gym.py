@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 class Learning2Fly(gym.Env):
     def __init__(self, curriculum_terminal=False,
                  seed=None, 
-                 euler=False, 
-                 imu=False,
+                 euler=True, 
+                 imu=True,
                  imu_only=False, 
                  t_history=1, 
                  out_forces=False) -> None:
