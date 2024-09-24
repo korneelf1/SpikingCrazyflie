@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 class Learning2Fly(gym.Env):
     def __init__(self, curriculum_terminal=False,
                  seed=None, 
-                 euler=True, 
-                 imu=True,
+                 euler=False, 
+                 imu=False,
                  imu_only=False, 
                  t_history=1, 
                  out_forces=False) -> None:
@@ -201,10 +201,10 @@ class Learning2Fly(gym.Env):
     
     def _reward(self):
         # intial parameters
-        Cp = 0.10 # position weight
-        Cv = .00 # velocity weight
+        Cp = 0.20 # position weight
+        Cv = .0200 # velocity weight
         Cq = 0 # orientation weight
-        Ca = .0 # action weight og .334, but just learns to fly out of frame
+        Ca = .334 # action weight og .334, but just learns to fly out of frame
         Cw = .00 # angular velocity weight 
         Crs = 1 # reward for survival
         Cab = 0.0 # action baseline
@@ -223,10 +223,17 @@ class Learning2Fly(gym.Env):
 
         CrsC = .8 # reward for survival factor
         Crslim = .1 # reward for survival limit
-        pos   = self.obs[0:3]
-        vel   = self.obs[3:6]
-        q     = self.obs[6:10]
-        qd    = self.obs[10:13]
+        if self.IMU is None:
+            pos   = self.obs[0:3]
+            vel   = self.obs[3:6]
+            q     = self.obs[6:10]
+            qd    = self.obs[10:13]
+        else:
+            pos   = self.obs[0:3]
+            vel   = self.obs[-6:-3]
+            q     = self.obs[-3:]
+            qd    = self.obs[6:9]
+
 
         # # curriculum
         # if self.global_step_counter % Nc == 0:
@@ -251,28 +258,37 @@ class Learning2Fly(gym.Env):
     
     def _check_done(self):
         done = False
-
+        if self.IMU is None:
+            pos   = self.obs[0:3]
+            vel   = self.obs[3:6]
+            q     = self.obs[6:10]
+            qd    = self.obs[10:13]
+        else:
+            pos   = self.obs[0:3]
+            vel   = self.obs[-6:-3]
+            q     = self.obs[-3:]
+            qd    = self.obs[6:9]
         
         if self.curriculum_terminal:
-            pos_limit = 1.5
+            pos_limit = 1.
             pos_min = 0.6
             factor = 1/1.5
-            xy_softening = 10 # to first train hover
+            xy_softening = 1 # to first train hover
             if self.global_step_counter%2e4==0:
                 pos_limit = max(pos_min, pos_limit*factor)
                 xy_softening = max(1,xy_softening*factor)
-            z_terminal = self.obs[3]>pos_limit
-            xy_terminal = np.sum((np.abs(self.obs[0:2])>pos_limit*xy_softening))
+            z_terminal = pos[3]>pos_limit
+            xy_terminal = np.sum((np.abs(pos[0:2])>pos_limit*xy_softening))
             pos_threshold = z_terminal + xy_terminal
         else:
-            pos_threshold = np.sum((np.abs(self.obs[0:3])>1.5))
+            pos_threshold = np.sum((np.abs(pos[0:3])>1.5))
 
         if self.IMU is None:
-            velocity_threshold = np.sum((np.abs(self.obs[3:6]) > 1000))
-            angular_threshold  = np.sum((np.abs(self.obs[10:13]) > 1000))
+            velocity_threshold = np.sum((np.abs(vel[3:6]) > 1000))
+            angular_threshold  = np.sum((np.abs(qd[10:13]) > 1000))
         else:
-            velocity_threshold = np.sum((np.abs(self.obs[9:12]) > 1000))
-            angular_threshold  = np.sum((np.abs(self.obs[6:9]) > 1000))
+            velocity_threshold = np.sum((np.abs(vel[9:12]) > 1000))
+            angular_threshold  = np.sum((np.abs(qd[6:9]) > 1000))
         time_threshold = self.t>500
 
         if np.any(np.isnan(self.obs)):
