@@ -9,15 +9,16 @@ from l2f_gym import Learning2Fly
 env = Learning2Fly()
 env = Monitor(env)
 check_env(env)
-env = make_vec_env(lambda: Learning2Fly(t_history=1,imu=False, imu_only=False, euler=True), n_envs=12)
+env = make_vec_env(lambda: Learning2Fly(t_history=12,imu=True, imu_only=False, euler=True), n_envs=12)
 print(env.observation_space)
 
-model = sb3.SAC("MlpPolicy", env, verbose=1)
+# model = sb3.SAC.load("SAC_l2f_IMU_history_1", env = env)
+model = sb3.SAC("MlpPolicy", env, verbose=1, tensorboard_log="./sac_l2f_imu_history_1")
 
-model.learn(total_timesteps=3e6)
+model.learn(total_timesteps=5e6)
 
-model.save("SAC_l2f_IMU")
-model = sb3.SAC.load("SAC_l2f_IMU")
+model.save("SAC_l2f_IMU_history_1")
+model = sb3.SAC.load("SAC_l2f_IMU_history_1")
 
 obs = env.reset()
 obs_lst = []
