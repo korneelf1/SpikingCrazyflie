@@ -117,9 +117,9 @@ class SMLP(nn.Module):
                                   threshold=thresh_in, learn_threshold=True, 
                                   spike_grad=self.spike_grad1).to(self.device)
 
-        # velocity and orientation prediction and injection layers
-        self.vel_orient_layer = nn.Linear(hidden_sizes[0], 6, device=self.device)
-        self.vel_orient_injection = torch.cat(torch.eye(6,requires_grad=False), torch.zeros(6,hidden_sizes[0]-6)).to(self.device)
+        # # velocity and orientation prediction and injection layers
+        # self.vel_orient_layer = nn.Linear(hidden_sizes[0], 6, device=self.device)
+        # self.vel_orient_injection = torch.cat(torch.eye(6,requires_grad=False), torch.zeros(6,hidden_sizes[0]-6)).to(self.device)
 
         self.hidden_layers = []
         for i in range(len(hidden_sizes) - 1):
@@ -195,16 +195,16 @@ class SMLP(nn.Module):
         # self.cur_in = x
         for i in range(int(len(self.hidden_layers)/2)):
             x = self.hidden_layers[2*i](x)
-            if i == 0:
-                vel_orient = self.vel_orient_layer(x)
-                x = x + torch.matmul(vel_orient, self.vel_orient_injection)
+            # if i == 0:
+            #     vel_orient = self.vel_orient_layer(x)
+            #     x = x + torch.matmul(vel_orient, self.vel_orient_injection)
             x, self.cur_lst[i] = self.hidden_layers[2*i+1](x, self.cur_lst[i])
             self.cur_lst[i] = x
         x = self.layer_out(x)
         x, self.cur_out = self.lif_out(x, self.cur_out)
         # self.cur_out = x
         self.hidden_states = [self.cur_in] + self.cur_lst + [self.cur_out]
-        return x, self.hidden_states, vel_orient
+        return x, self.hidden_states
 
     def __call__(self, *args: Any) -> Any:
         return self.forward(*args)
@@ -334,9 +334,16 @@ class SpikingNet(NetBase[Any]):
         :param state: unused and returned as is
         :param info: unused
         """
+        obs = torch.tensor(obs, device=self.device, dtype=torch.float32)
         if len(obs.shape) == 1:
             obs = obs.unsqueeze(0)
-        assert len(obs.shape) == 2 # (batch size, obs size) AKA not a sequence
+        # assert len(obs.shape) == 2 # (batch size, obs size) AKA not a sequence
+        if len(obs.shape) == 2:
+            t_max = 1
+            obs = obs.unsqueeze(1)
+        elif len(obs.shape) == 3:
+            assert obs.shape[1] == 32
+            t_max = obs.shape[1]
         if self.reset_in_call:
             self.model.reset()
         if isinstance(obs, np.ndarray):
@@ -344,10 +351,14 @@ class SpikingNet(NetBase[Any]):
         logits = torch.zeros(obs.shape[0], self.output_dim, device=self.device)
 
         hidden_state = state
-        for _ in range(self.repeat):
-            last_logits, hidden_state = self.model(obs, hidden_state)
+        for t in range(t_max):
+            for _ in range(self.repeat):
 
-            logits += last_logits
+                last_logits, hidden_state = self.model(obs[:,t], hidden_state)
+      
+    
+
+        logits += last_logits
         # logits = torch.sum(logits, dim=1
 
 
