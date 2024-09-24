@@ -128,6 +128,7 @@ class Learning2Fly(gym.Env):
 
                 # transfrom velocity to body frame
                 vel_body = np.dot(R.T, self.state.linear_velocity)
+                self.state.rpm = np.zeros_like(self.state.rpm)
                 self.obs = np.concatenate([self.state.position, quaternion_to_euler(self.state.orientation), vel_body, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
             else:
                 self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
