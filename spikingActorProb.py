@@ -121,7 +121,7 @@ class SMLP(nn.Module):
         # self.vel_orient_layer = nn.Linear(hidden_sizes[0], 6, device=self.device)
         # self.vel_orient_injection = torch.cat(torch.eye(6,requires_grad=False), torch.zeros(6,hidden_sizes[0]-6)).to(self.device)
 
-        self.hidden_layers = []
+        self.hidden_layers = nn.ModuleList()
         for i in range(len(hidden_sizes) - 1):
             self.hidden_layers.append(nn.Linear(hidden_sizes[i], hidden_sizes[i + 1], device=self.device))
 
