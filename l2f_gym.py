@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class Learning2Fly(gym.Env):
-    def __init__(self, curriculum_terminal=False,seed=None) -> None:
+    def __init__(self, curriculum_terminal=False,seed=None, rpm=True) -> None:
         super().__init__()
         # L2F initialization
         self.device = Device()
@@ -31,10 +31,14 @@ class Learning2Fly(gym.Env):
             seed = np.random.randint(0, 2**32-1)
         print("Environment initialized with seed: ", seed)
         initialize_rng(self.device, self.rng, seed)
-
+        self.rpm = rpm # if True, the environment will use RPM in observation space
         # Gym initialization
         self.action_space = gym.spaces.Box(low=-1, high=1, shape=(4,))
-        self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(17,))
+        if self.rpm:
+            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(17,))
+        else:
+            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(13,))
+
         self.global_step_counter = 0   
         self.t = 0
         self.curriculum_terminal = curriculum_terminal # if True, the environment will use soft terminal conditions initially
@@ -46,7 +50,10 @@ class Learning2Fly(gym.Env):
         step(self.device, self.env, self.params, self.state, self.action, self.next_state, self.rng)
         self.state = self.next_state
 
-        self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+        if self.rpm:
+            self.obs = np.concatenate([self.state.position, self.state.linear_velocity, self.state.orientation, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+        else:
+            self.obs = np.concatenate([self.state.position, self.state.linear_velocity, self.state.orientation, self.state.angular_velocity]).astype(np.float32)
         self.t += 1
 
         done = self._check_done()
@@ -62,46 +69,45 @@ class Learning2Fly(gym.Env):
 
         self.global_step_counter += self.t
         self.t = 0
-        self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)
+        if self.rpm:
+            self.obs = np.concatenate([self.state.position, self.state.linear_velocity, self.state.orientation, self.state.angular_velocity, self.state.rpm]).astype(np.float32)
+        else:
+            self.obs = np.concatenate([self.state.position, self.state.linear_velocity, self.state.orientation, self.state.angular_velocity]).astype(np.float32)
         return self.obs, {}
     
     def _reward(self):
         # intial parameters
-        Cp = 0.1 # position weight
-        Cv = .0 # velocity weight
+        Cp = 0.25 # position weight
+        Cv = .010 # velocity weight
         Cq = 0 # orientation weight
         Ca = .0 # action weight og .334, but just learns to fly out of frame
-        Cw = .0 # angular velocity weight 
+        Cw = .0010 # angular velocity weight 
         Crs = 1 # reward for survival
-        Cab = 0.0 # action baseline
+        Cab = 0.334 # action baseline
 
         # curriculum parameters
-        Nc = 1e5 # interval of application of curriculum
+        Nc = 5e5 # interval of application of curriculum
 
         CpC = 1.2 # position factor
-        Cplim = 20 # position limit
+        Cplim = 3 # position limit
 
         CvC = 1.4 # velocity factor
         Cvlim = 1.5 # velocity limit
 
-        CaC = 1.4 # orientation factor
-        Calim = .5 # orientation limit
 
-        CrsC = .8 # reward for survival factor
-        Crslim = .1 # reward for survival limit
         pos   = self.obs[0:3]
         vel   = self.obs[3:6]
         q     = self.obs[6:10]
         qd    = self.obs[10:13]
 
         # curriculum
-        if self.global_step_counter % Nc == 0:
+        if self.global_step_counter % Nc == 0 and not self.global_step_counter == 0:
             print("Updating curriculum parameters")
             # updating the curriculum parameters
             Cp = min(Cp*CpC, Cplim)
-            # Cv = min(Cv*CvC, Cvlim)
+            Cv = min(Cv*CvC, Cvlim)
             # Ca = min(Ca*CaC, Calim)
-            Crs = max(Crs*CrsC, Crslim)
+            # Crs = max(Crs*CrsC, Crslim)
 
         # in theory pos error max sqrt( .6)*2.5 = 1.94
         # vel error max sqrt(1000)*.005 = 0.158
@@ -113,25 +119,27 @@ class Learning2Fly(gym.Env):
                     - Cw*np.sum((qd)**2) \
                         + Crs \
                             -Cp*np.sum((pos)**2) 
-        return 1
+        
+        # print(r)
+        return r
     
     def _check_done(self):
         done = False
 
         
         if self.curriculum_terminal:
-            pos_limit = 1.5
+            pos_limit = 1.
             pos_min = 0.6
             factor = 1/1.5
             xy_softening = 10 # to first train hover
-            if self.global_step_counter%2e4==0:
+            if self.global_step_counter%5e5==0:
                 pos_limit = max(pos_min, pos_limit*factor)
                 xy_softening = max(1,xy_softening*factor)
             z_terminal = self.obs[3]>pos_limit
             xy_terminal = np.sum((np.abs(self.obs[0:2])>pos_limit*xy_softening))
             pos_threshold = z_terminal + xy_terminal
         else:
-            pos_threshold = np.sum((np.abs(self.obs[0:3])>1.5))
+            pos_threshold = np.sum((np.abs(self.obs[0:3])>.5))
 
         velocity_threshold = np.sum((np.abs(self.obs[3:6]) > 1000))
         angular_threshold  = np.sum((np.abs(self.obs[10:13]) > 1000))
