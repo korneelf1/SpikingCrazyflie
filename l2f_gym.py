@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class Learning2Fly(gym.Env):
-    def __init__(self, curriculum_terminal=False,seed=None, rpm=True) -> None:
+    def __init__(self, curriculum_terminal=True,seed=None, rpm=True) -> None:
         super().__init__()
         # L2F initialization
         self.device = Device()
@@ -77,11 +77,11 @@ class Learning2Fly(gym.Env):
     
     def _reward(self):
         # intial parameters
-        Cp = 0.25 # position weight
-        Cv = .010 # velocity weight
+        Cp = 0.1 # position weight
+        Cv = .000 # velocity weight
         Cq = 0 # orientation weight
         Ca = .0 # action weight og .334, but just learns to fly out of frame
-        Cw = .0010 # angular velocity weight 
+        Cw = .0000 # angular velocity weight 
         Crs = 1 # reward for survival
         Cab = 0.334 # action baseline
 
@@ -139,7 +139,7 @@ class Learning2Fly(gym.Env):
             xy_terminal = np.sum((np.abs(self.obs[0:2])>pos_limit*xy_softening))
             pos_threshold = z_terminal + xy_terminal
         else:
-            pos_threshold = np.sum((np.abs(self.obs[0:3])>.5))
+            pos_threshold = np.sum((np.abs(self.obs[0:3])>1.5))
 
         velocity_threshold = np.sum((np.abs(self.obs[3:6]) > 1000))
         angular_threshold  = np.sum((np.abs(self.obs[10:13]) > 1000))
