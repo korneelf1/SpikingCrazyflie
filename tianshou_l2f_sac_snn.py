@@ -128,7 +128,7 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
     torch.manual_seed(args.seed)
 
     # model
-    net_a = SpikingNet(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device, action_shape=256, repeat=args.repeat_per_forward, scheduled_surrogate=False)
+    net_a = SpikingNet(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device, action_shape=256, repeat=args.repeat_per_forward, scheduled_surrogate=True)
     actor = ActorProb(
         net_a,
         args.action_shape,
