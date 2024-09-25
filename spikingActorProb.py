@@ -22,7 +22,7 @@ from tianshou.utils.net.common import (
     ModuleType,
     ArgsType
 )
-from tianshou.utils.pickle import setstate
+# from tianshou.utils.pickle import setstate
 
 SIGMA_MIN = -20
 SIGMA_MAX = 2
@@ -74,7 +74,7 @@ class SMLP(nn.Module):
         self.lif_in   = snn.Leaky(beta=betas_in, learn_beta=True, 
                                   threshold=thresh_in, learn_threshold=True, 
                                   spike_grad=self.spike_grad1).to(self.device)
-        self.hidden_layers = []
+        self.hidden_layers = nn.ModuleList()
         for i in range(len(hidden_sizes) - 1):
             self.hidden_layers.append(nn.Linear(hidden_sizes[i], hidden_sizes[i + 1], device=self.device))
 
@@ -95,6 +95,7 @@ class SMLP(nn.Module):
         self.reset()
     def update_slope(self, slope):
         self._slope = slope
+        print("updating model, current slope: ", self._slope)
         self.spike_grad1 = surrogate.fast_sigmoid(self._slope)
         self.lif_in.spike_grad = self.spike_grad1
         self.lif_out.spike_grad = self.spike_grad1
@@ -111,7 +112,7 @@ class SMLP(nn.Module):
             self.cur_lst.append(self.hidden_layers[2*i+1].init_leaky())
         self.hidden_states = self.cur_lst
         self.cur_out = self.lif_out.init_leaky()
-
+        
 
     def forward(self, x: torch.Tensor, hidden_states: list) -> torch.Tensor:
         '''
@@ -310,8 +311,7 @@ class SpikingNet(NetBase[Any]):
     def reset(self):
         if self.scheduled:
             self._n_reset += 1
-            # print(self._n_reset)
-            # schedule first 20 epochs nothing happens
+                    # schedule first 20 epochs nothing happens
             # after 20 epochs start making the surrogate steeper every 3*60e3 steps +1 to the slope until 30
             # n_reset is 10e3 per epoch
             steps_per_epoch = 10e3
@@ -323,24 +323,11 @@ class SpikingNet(NetBase[Any]):
                     if wandb.run is not None:
                         # print('logging')
                         wandb.run.log({"surrogate fast sigmoid slope": self._slope})
-                    # save self.model.state_dict()
-                    # torch.save(self.model.state_dict(), "smlp.pth")
-                    # print("saving model")
-                    # for i in self.model.state_dict():
-                    #     print(i)
-                    #     # compute average and std of the weights
-                    #     print(torch.mean(self.model.state_dict()[i]), torch.std(self.model.state_dict()[i]))
-
-                    # self._slope +=1
                     self._slope = min(10+(self._n_reset - start_resets)/update_interval, 30)
                     # print("updating model, current slope: ", self._slope)
                     # create model with new slope
                     self.model.update_slope(self._slope)
-                    # load the saved state dict
-                    # self.model.load_state_dict(torch.load("smlp.pth"))
-                    # self._update_slope()
-                    print("updating slope: ", self.model._slope)
-                    
+
         self.model.reset()
 
 
