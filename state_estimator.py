@@ -1,3 +1,5 @@
+import torch.utils
+import torch.utils.data
 from l2f_gym import Learning2Fly
 from imu import IMU
 import torch
@@ -7,10 +9,50 @@ import stable_baselines3 as sb3
 from spikingActorProb import SMLP
 from tianshou.utils.net.common import MLP
 import snntorch as snn
+import wandb
 
 
 import matplotlib.pyplot as plt
 # plt.ion()
+
+import torch
+'''
+This manual implementation is required to be able to pickle 
+the model for parallelization'''
+def fast_sigmoid_forward(ctx, input_, slope):
+    ctx.save_for_backward(input_)
+    ctx.slope = slope
+    out = (input_ > 0).float()
+    return out
+
+def fast_sigmoid_backward(ctx, grad_output):
+    (input_,) = ctx.saved_tensors
+    grad_input = grad_output.clone()
+    grad = grad_input / (ctx.slope * torch.abs(input_) + 1.0) ** 2
+    return grad, None
+
+class FastSigmoid(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input_, slope=25):
+        return fast_sigmoid_forward(ctx, input_, slope)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return fast_sigmoid_backward(ctx, grad_output)
+
+class FastSigmoidWrapper:
+    def __init__(self, slope=25):
+        self.slope = slope
+
+    def __call__(self, x):
+        return FastSigmoid.apply(x, self.slope)
+
+
+def fast_sigmoid(slope=25):
+    """Returns a callable object for the FastSigmoid function with a specific slope."""
+    return FastSigmoidWrapper(slope)
+
+
 
 def gather_dataset(num_samples=1000, T_max=250):
     '''Uses a trained controller (ann_actor) to collect data from the environment. The data saved consists of the states.
@@ -79,7 +121,7 @@ class IntegratorSpiker(torch.nn.Module):
         n_spikers = layer_size
 
 
-        self.spike_grad = snn.surrogate.fast_sigmoid(10)
+        self.spike_grad = fast_sigmoid(10)
 
         self.betas = torch.nn.Parameter(torch.rand(n_spikers))
         self.alphas = torch.nn.Parameter(torch.rand(n_spikers))
@@ -102,7 +144,7 @@ class IntegratorSpiker(torch.nn.Module):
         self.reset()
         
     def set_slope(self, slope):
-        self.spike_grad = snn.surrogate.fast_sigmoid(slope)
+        self.spike_grad = fast_sigmoid(slope)
         self.lif1.spikegrad = self.spike_grad
         self.lif_integrators.spikegrad = self.spike_grad
 
@@ -129,13 +171,13 @@ class StateEstimator(torch.nn.Module):
         super(StateEstimator, self).__init__()
         self.spiking = spiking
 
-        self.spike_grad = snn.surrogate.fast_sigmoid(10)
+        self.spike_grad = fast_sigmoid(10)
 
-        self.lin_1 = torch.nn.Linear(16, 32)
+        self.lin_1 = torch.nn.Linear(16, 32*2)
         
-        self.leaky = IntegratorSpiker(layer_size=32, integrator_ratio=0.5)
+        self.leaky = IntegratorSpiker(layer_size=32*2, integrator_ratio=0.5)
 
-        self.lin_2 = torch.nn.Linear(64, 6)
+        self.lin_2 = torch.nn.Linear(64*2, 6)
 
 
         self.reset()
@@ -148,7 +190,7 @@ class StateEstimator(torch.nn.Module):
 
     def forward_single(self, x_in: torch.Tensor, hidden=None):
         x = x_in.clone()
-        x[:,-6:] = (1-self.alpha) * self.out + (self.alpha) * x_in[:, -6:]
+        x[:,-6:] = (self.alpha) * self.out + (1-self.alpha) * x_in[:, -6:]
         x = self.lin_1(x)
         x, hidden = self.leaky(x, hidden)
         x = self.lin_2(x)
@@ -169,7 +211,11 @@ class StateEstimator(torch.nn.Module):
         return x_out
     
     def train(self, dataset, epochs=10, warmup=0):
-        dataloader = DataLoader(dataset, batch_size=256, shuffle=True)
+        
+        run = wandb.init(project='StateEstimator')
+        dataset_train, dataset_test = torch.utils.data.random_split(dataset,[0.75,0.25])
+        dataloader = DataLoader(dataset_train, batch_size=1028, shuffle=True)
+        dataloader_test = DataLoader(dataset_test, batch_size=128, shuffle=True)
         if self.spiking:
             super().train()
         # else:
@@ -179,8 +225,24 @@ class StateEstimator(torch.nn.Module):
 
         for epoch in tqdm(range(epochs), desc="Training"):
             losses = []
-            if epoch > 15:
-                self.alpha = .999*(1-epoch/100)
+            if epoch % 10==0:
+                # do test
+                for imu,true_states in dataloader_test:
+                    y_pred = self.forward(imu)
+                    # print(y_pred.shape, true_states.shape)
+                    # extract intial states from true_states and substract from predicted states
+                    # gotta compare to t+1 true state shape B, T, 13
+                    loss = criterion(y_pred[:,warmup:-1], true_states[:,warmup+1:,3:9])
+                    losses.append(loss.item())
+                wandb.log({'loss test': torch.mean(torch.tensor(losses))})
+                if epoch/epochs < 0.95:
+                
+                    self.alpha = 1*((epoch/(epochs*0.95)))
+                else:
+                    self.alpha = 1
+                wandb.log({'alpha': self.alpha})
+            
+                
             for imu,true_states in dataloader:
                 optimizer.zero_grad()
                 y_pred = self.forward(imu)
@@ -191,14 +253,14 @@ class StateEstimator(torch.nn.Module):
                 losses.append(loss.item())
                 loss.backward()
                 optimizer.step()
-            
+            wandb.log({'loss train': torch.mean(torch.tensor(losses))})
             print(f"Epoch {epoch}, Loss: {torch.mean(torch.tensor(losses))}")
-        
-        # create one plot with the last model
-        self.plot_difference_prediction_true(y_pred[1,:], true_states[1,:,:9])
-        # torch.save(self, "state_estimator.pth")
+            if epoch%25==0 or epoch == epochs-1:
+                # create one plot with the last model
+                self.plot_difference_prediction_true(y_pred[1,:], true_states[1,:,:9], epoch = epoch)
+        torch.save(self, "state_estimator.pth")
 
-    def plot_difference_prediction_true(self, prediction, true):
+    def plot_difference_prediction_true(self, prediction, true, epoch=0):
         # print(prediction, true)
         
         # tensor to array
@@ -230,12 +292,13 @@ class StateEstimator(torch.nn.Module):
  
         # # Pause for a short duration to allow visualization
         # plt.pause(0.001)
- 
-        plt.show()
+        # Log the image
+        wandb.log({"img": [wandb.Image(fig, caption=f"State Estimator Performance epoch {epoch}")]})
+        # plt.savefig('VelocityOrientationTracking.png')
         
 if __name__ == "__main__":
     print("Gathering data")
-    # dataset = gather_dataset(num_samples=5000, T_max=250)
+    # dataset = gather_dataset(num_samples=10000, T_max=250)
     # torch.save(dataset, "dataset.pth")
     dataset = torch.load("dataset.pth")
     # print(data.tensors)
@@ -243,7 +306,7 @@ if __name__ == "__main__":
 
     stateestimator = StateEstimator(spiking=True)
     print(stateestimator)
-    stateestimator.train(dataset=dataset, epochs=1, warmup = 35)    
+    stateestimator.train(dataset=dataset, epochs=500, warmup = 35)    
 
     # # train ANN:
     # stateestimator = StateEstimator(spiking=False)

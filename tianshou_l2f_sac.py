@@ -7,6 +7,7 @@ import pprint
 
 import numpy as np
 import torch
+import torch.nn as nn
 
 from tianshou.data import Collector, CollectStats, ReplayBuffer, VectorReplayBuffer
 from tianshou.highlevel.logger import LoggerFactoryDefault
@@ -20,6 +21,7 @@ from l2f_gym import Learning2Fly, SubprocVectorizedL2F, ShmemVectorizedL2F
 from tianshou.utils import WandbLogger
 from torch.utils.tensorboard import SummaryWriter
 from alif import CustomSigmoid
+
 
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -39,7 +41,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--step-per-collect", type=int, default=1)
     parser.add_argument("--update-per-step", type=int, default=1)
     parser.add_argument("--n-step", type=int, default=1)
-    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--training-num", type=int, default=12)
     parser.add_argument("--test-num", type=int, default=10)
     parser.add_argument("--logdir", type=str, default="log")
@@ -82,7 +84,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     # model
-    net_a = Net(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device,activation=CustomSigmoid)
+    net_a = Net(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device,activation=nn.Sigmoid)
     actor = ActorProb(
         net_a,
         args.action_shape,
@@ -190,7 +192,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
       'reinit': True,
       'reward_function': 'reward_squared_fast_learning',
       'alpha_sac':0,
-      'activation': 'CustomSigmoid',
+      'activation': 'Sigmoid',
       }
 
     logger = WandbLogger(project="l2f",config=args_wandb)
