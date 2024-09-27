@@ -12,6 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+import wandb
 
 class Learning2Fly(gym.Env):
     def __init__(self, curriculum_terminal=False,seed=None) -> None:
@@ -29,7 +30,7 @@ class Learning2Fly(gym.Env):
         initialize_environment(self.device, self.env, self.params)
         if seed is None:
             seed = np.random.randint(0, 2**32-1)
-        print("Environment initialized with seed: ", seed)
+        # print("Environment initialized with seed: ", seed)
         initialize_rng(self.device, self.rng, seed)
 
         # Gym initialization
@@ -46,7 +47,7 @@ class Learning2Fly(gym.Env):
         step(self.device, self.env, self.params, self.state, self.action, self.next_state, self.rng)
         self.state = self.next_state
 
-        self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+        self.obs = np.concatenate([self.state.position,  self.state.linear_velocity, self.state.orientation, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
         self.t += 1
 
         done = self._check_done()
@@ -62,7 +63,7 @@ class Learning2Fly(gym.Env):
 
         self.global_step_counter += self.t
         self.t = 0
-        self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)
+        self.obs = np.concatenate([self.state.position,  self.state.linear_velocity, self.state.orientation, self.state.angular_velocity, self.state.rpm]).astype(np.float32)
         return self.obs, {}
     
     def _reward(self):
@@ -96,7 +97,9 @@ class Learning2Fly(gym.Env):
 
         # curriculum
         if self.global_step_counter % Nc == 0:
-            print("Updating curriculum parameters")
+            # print("Updating curriculum parameters")
+            if wandb.run is not None:
+                wandb.run.log({'Position Term':Cp,'Survival Reward':Crs})
             # updating the curriculum parameters
             Cp = min(Cp*CpC, Cplim)
             # Cv = min(Cv*CvC, Cvlim)
@@ -113,7 +116,7 @@ class Learning2Fly(gym.Env):
                     - Cw*np.sum((qd)**2) \
                         + Crs \
                             -Cp*np.sum((pos)**2) 
-        return 1
+        return r
     
     def _check_done(self):
         done = False
