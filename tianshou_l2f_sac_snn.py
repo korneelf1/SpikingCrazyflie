@@ -28,7 +28,7 @@ import wandb
 args_wandb = {
       'epoch': 2e2,
       'step_per_epoch': 5e3,
-      'step_per_collect': 250, # 2.5 s
+      'step_per_collect': 1, # 2.5 s
       'update_per_step': 2,
       'test_num': 50,
       'update_per_step': 2,
