@@ -92,7 +92,7 @@ class Learning2Fly(gym.Env):
         Cab = 0.0 # action baseline
 
         # curriculum parameters
-        Nc = 1e5 # interval of application of curriculum
+        Nc = 3e5 # interval of application of curriculum
 
         CpC = 1.2 # position factor
         Cplim = 20 # position limit
