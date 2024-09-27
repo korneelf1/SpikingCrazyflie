@@ -11,7 +11,7 @@ env = Monitor(env)
 check_env(env)
 env = make_vec_env(lambda: Learning2Fly(), n_envs=12)
 
-model = sb3.TD3("MlpPolicy", env, verbose=1)
+model = sb3.SAC("MlpPolicy", env, verbose=1)
 
 model.learn(total_timesteps=3e6)
 
