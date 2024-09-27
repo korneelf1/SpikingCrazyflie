@@ -8,6 +8,7 @@ from typing import List, Callable, Optional, Union
 import multiprocessing as mp
 import traceback
 import logging
+import helpers
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -15,7 +16,8 @@ logger = logging.getLogger(__name__)
 import wandb
 
 class Learning2Fly(gym.Env):
-    def __init__(self, curriculum_terminal=False,seed=None) -> None:
+    def __init__(self, curriculum_terminal=False,seed=None, action_history=True) -> None:
+
         super().__init__()
         # L2F initialization
         self.device = Device()
@@ -33,9 +35,12 @@ class Learning2Fly(gym.Env):
         # print("Environment initialized with seed: ", seed)
         initialize_rng(self.device, self.rng, seed)
 
+        if action_history:
+            action_history_len = 32
+            self.action_history = helpers.NumpyDeque((1,4*action_history_len))
         # Gym initialization
         self.action_space = gym.spaces.Box(low=-1, high=1, shape=(4,))
-        self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(17,))
+        self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(17+4*32,))
         self.global_step_counter = 0   
         self.t = 0
         self.curriculum_terminal = curriculum_terminal # if True, the environment will use soft terminal conditions initially
@@ -47,7 +52,12 @@ class Learning2Fly(gym.Env):
         step(self.device, self.env, self.params, self.state, self.action, self.next_state, self.rng)
         self.state = self.next_state
 
-        self.obs = np.concatenate([self.state.position,  self.state.linear_velocity, self.state.orientation, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+        if hasattr(self, 'action_history'):
+            self.action_history.append(np.array(self.action.motor_command).reshape(1,4))
+            self.obs = np.concatenate([self.state.position,  self.state.linear_velocity, self.state.orientation, self.state.angular_velocity, self.state.rpm, self.action_history.array.flatten()]).astype(np.float32)
+        else:
+            self.obs = np.concatenate([self.state.position,  self.state.linear_velocity, self.state.orientation, self.state.angular_velocity, self.state.rpm]).astype(np.float32)   
+         
         self.t += 1
 
         done = self._check_done()
@@ -63,7 +73,12 @@ class Learning2Fly(gym.Env):
 
         self.global_step_counter += self.t
         self.t = 0
-        self.obs = np.concatenate([self.state.position,  self.state.linear_velocity, self.state.orientation, self.state.angular_velocity, self.state.rpm]).astype(np.float32)
+        if hasattr(self, 'action_history'):
+            self.action_history.reset()
+            self.action_history.append(np.array(self.action.motor_command).reshape(1,4))
+            self.obs = np.concatenate([self.state.position,  self.state.linear_velocity, self.state.orientation, self.state.angular_velocity, self.state.rpm, self.action_history.array.flatten()]).astype(np.float32)
+        else:
+            self.obs = np.concatenate([self.state.position,  self.state.linear_velocity, self.state.orientation, self.state.angular_velocity, self.state.rpm]).astype(np.float32)   
         return self.obs, {}
     
     def _reward(self):
@@ -105,6 +120,7 @@ class Learning2Fly(gym.Env):
             # Cv = min(Cv*CvC, Cvlim)
             # Ca = min(Ca*CaC, Calim)
             Crs = max(Crs*CrsC, Crslim)
+            print("\n\n\nCurriculum parameters updated\n\n\n")
 
         # in theory pos error max sqrt( .6)*2.5 = 1.94
         # vel error max sqrt(1000)*.005 = 0.158
