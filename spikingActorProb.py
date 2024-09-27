@@ -265,6 +265,7 @@ class SpikingNet(NetBase[Any]):
             self.output_dim = self.model.output_dim
 
         self._epoch = 0 # is updated by collector test_episode...
+        self._prev_epoch = 0 # avoid constant updating of the surrogate gradient
         self.model.reset()
         self.scheduled = slope_schedule
         if self.scheduled:
