@@ -49,8 +49,8 @@ args_wandb = {
       'collector_type': 'Collector',
       'reinit': True,
       'reward_function': 'reward_squared_fast_learning',
-      'slope': 10,
-      'slope_schedule': False,
+      'slope': 5,
+      'slope_schedule': True,
 
       }
 

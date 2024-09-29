@@ -70,7 +70,7 @@ class SMLP(nn.Module):
         self.lif_in   = snn.Leaky(beta=betas_in, learn_beta=True, 
                                   threshold=thresh_in, learn_threshold=True, 
                                   spike_grad=spike_grad1).to(self.device)
-        self.hidden_layers = []
+        self.hidden_layers = nn.ModuleList()
         for i in range(len(hidden_sizes) - 1):
             self.hidden_layers.append(nn.Linear(hidden_sizes[i], hidden_sizes[i + 1], device=self.device))
 
