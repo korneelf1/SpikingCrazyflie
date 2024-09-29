@@ -254,7 +254,7 @@ class StateEstimator(torch.nn.Module):
                 loss.backward()
                 optimizer.step()
             wandb.log({'loss train': torch.mean(torch.tensor(losses))})
-            print(f"Epoch {epoch}, Loss: {torch.mean(torch.tensor(losses))}")
+            # print(f"Epoch {epoch}, Loss: {torch.mean(torch.tensor(losses))}")
             if epoch%25==0 or epoch == epochs-1:
                 # create one plot with the last model
                 self.plot_difference_prediction_true(y_pred[1,:], true_states[1,:,:9], epoch = epoch)
@@ -278,7 +278,7 @@ class StateEstimator(torch.nn.Module):
         ax[0,2].plot(true_pos[:,2], c='g')
         ax[0,2].set_title("z")
 
-        subfigs = ["vx", "vy", "vz", "vvx", "vvy", "vvz"]
+        subfigs = ["vx", "vy", "vz", "roll", "pitch", "yaw"]
         for i in range(6):
             ax[i//3+1, i%3].plot(prediction[:,i], c='r')
             ax[i//3+1, i%3].plot(true[:,i], c='g')
@@ -306,7 +306,7 @@ if __name__ == "__main__":
 
     stateestimator = StateEstimator(spiking=True)
     print(stateestimator)
-    stateestimator.train(dataset=dataset, epochs=500, warmup = 35)    
+    stateestimator.train(dataset=dataset, epochs=500, warmup = 50)    
 
     # # train ANN:
     # stateestimator = StateEstimator(spiking=False)
