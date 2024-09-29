@@ -58,7 +58,7 @@ class SMLP(nn.Module):
         self.hidden_sizes = hidden_sizes
 
         # Initialize surrogate gradient
-        spike_grad1 = surrogate.fast_sigmoid()  # passes default parameters from a closure
+        spike_grad1 = surrogate.fast_sigmoid(slope=5)  # passes default parameters from a closure
 
         # create layers and spiking layers
         self.layer_in = nn.Linear(input_dim, hidden_sizes[0], device=self.device)
