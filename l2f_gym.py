@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class Learning2Fly(gym.Env):
-    def __init__(self, curriculum_terminal=False,seed=None) -> None:
+    def __init__(self, curriculum_terminal=False,seed=None, rpm:bool=False) -> None:
         super().__init__()
         # L2F initialization
         self.device = Device()
@@ -34,7 +34,13 @@ class Learning2Fly(gym.Env):
 
         # Gym initialization
         self.action_space = gym.spaces.Box(low=-1, high=1, shape=(4,))
-        self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(17,))
+        
+        self.rpm = rpm
+        if self.rpm:
+            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(17,))
+
+        else:
+            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(13,))
         self.global_step_counter = 0   
         self.t = 0
         self.curriculum_terminal = curriculum_terminal # if True, the environment will use soft terminal conditions initially
@@ -46,7 +52,11 @@ class Learning2Fly(gym.Env):
         step(self.device, self.env, self.params, self.state, self.action, self.next_state, self.rng)
         self.state = self.next_state
 
-        self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+        if self.rpm:
+            self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+        else:
+            self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity]).astype(np.float32)
+        
         self.t += 1
 
         done = self._check_done()
@@ -62,17 +72,21 @@ class Learning2Fly(gym.Env):
 
         self.global_step_counter += self.t
         self.t = 0
-        self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)
+        
+        if self.rpm:
+            self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+        else:
+            self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity]).astype(np.float32)
         return self.obs, {}
     
     def _reward(self):
         # intial parameters
-        Cp = 0.1 # position weight
+        Cp = 1 # position weight
         Cv = .0 # velocity weight
         Cq = 0 # orientation weight
         Ca = .0 # action weight og .334, but just learns to fly out of frame
         Cw = .0 # angular velocity weight 
-        Crs = 1 # reward for survival
+        Crs = 0 # reward for survival
         Cab = 0.0 # action baseline
 
         # curriculum parameters
@@ -113,7 +127,7 @@ class Learning2Fly(gym.Env):
                     - Cw*np.sum((qd)**2) \
                         + Crs \
                             -Cp*np.sum((pos)**2) 
-        return 1
+        return r
     
     def _check_done(self):
         done = False
@@ -146,9 +160,9 @@ class Learning2Fly(gym.Env):
         return done
 
 
-def create_learning2fly_env():
+def create_learning2fly_env(**kwargs):
     try:
-        return Learning2Fly()
+        return Learning2Fly(**kwargs)
     except Exception as e:
         print(f"Error creating Learning2Fly environment: {e}")
         traceback.print_exc()
