@@ -24,7 +24,7 @@ from spikingActorProb import SpikingNet
 
 # wandb
 import wandb
-# wandb.init(mode='disabled')
+wandb.init(mode='disabled')
 args_wandb = {
       'epoch': 2e2,
       'step_per_epoch': 5e3,
@@ -49,21 +49,22 @@ args_wandb = {
       'collector_type': 'Collector',
       'reinit': True,
       'reward_function': 'reward_squared_fast_learning',
-      'slope': 3,
+      'slope': 5,
       'slope_schedule': False,
-
+        'alpha': 0.0,
+        'action_history': False,
       }
 
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--buffer-size", type=int, default=1000000)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--hidden-sizes", type=int, nargs="*", default=[256])
+    parser.add_argument("--hidden-sizes", type=int, nargs="*", default=[256,256])
     parser.add_argument("--actor-lr", type=float, default=1e-3)
     parser.add_argument("--critic-lr", type=float, default=1e-3)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
-    parser.add_argument("--alpha", type=float, default=0.0)
+    parser.add_argument("--alpha", type=float, default=args_wandb['alpha'])
     parser.add_argument("--auto-alpha", default=False, action="store_true")
     parser.add_argument("--alpha-lr", type=float, default=3e-4)
     parser.add_argument("--start-timesteps", type=int, default=10000)
@@ -119,7 +120,7 @@ import wandb
 # wandb.init(mode='disabled')
 
 def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
-    env = Learning2Fly()
+    env = Learning2Fly(action_history=args_wandb['action_history'])
     
     args.state_shape = env.observation_space.shape or env.observation_space.n
     args.action_shape = env.action_space.shape or env.action_space.n
@@ -171,6 +172,8 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
         alpha_optim = torch.optim.Adam([log_alpha], lr=args.alpha_lr)
         args.alpha = (target_entropy, log_alpha, alpha_optim)
 
+    print("Does spiking network have attribute epoch?")
+    print(hasattr(actor.preprocess, "epoch"))
     policy: SACPolicy = SACPolicy(
         actor=actor,
         actor_optim=actor_optim,
@@ -254,4 +257,4 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
 
 if __name__ == "__main__":
     test_sac(logger=logger)
-    wandb.Artifact()
+    # wandb.Artifact()

@@ -22,7 +22,6 @@ from tianshou.utils.net.common import (
     ModuleType,
     ArgsType
 )
-from tianshou.utils.pickle import setstate
 
 SIGMA_MIN = -20
 SIGMA_MAX = 2
@@ -99,7 +98,7 @@ class SMLP(nn.Module):
             self.hidden_layers[2*i+1].spike_grad = spike_grad1
         self.lif_out.spike_grad = spike_grad1
         if wandb.run is not None:
-            wandb.run.log({"slope in MLP": slope})
+            wandb.run.log({"slope in SMLP": slope})
 
     def reset(self):
         '''
@@ -274,16 +273,16 @@ class SpikingNet(NetBase[Any]):
             print("\nScheduling the surrogate gradient slope\n")
             print("###############################################\n")
 
-    
-    # define attribute epoch
-    @property
-    def epoch(self):
-        return self._epoch    
-    # define setter for epoch
+            
+            # define attribute epoch
+            @property
+            def epoch(self):
+                return self._epoch    
+            # define setter for epoch
 
-    @epoch.setter
-    def epoch(self, value):
-        self._epoch = value
+            @epoch.setter
+            def epoch(self, value):
+                self._epoch = value
 
 
     def forward(
