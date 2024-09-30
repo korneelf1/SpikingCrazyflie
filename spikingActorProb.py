@@ -172,7 +172,7 @@ class SMLP(nn.Module):
             self.run = wandb.run
 
         self.reset()
-        self._update_slope()
+        self.update_slope(10)
 
     # def _register_backward_passes(self,module, grad_input, grad_output):
     #     self.backwards = []
@@ -183,18 +183,17 @@ class SMLP(nn.Module):
     #     for m in self.modules():
     #         if isinstance(m, nn.Linear):
     #             m.register_full_backward_hook(self._register_backward_passes)
-    def _update_slope(self):
+    def update_slope(self, slope):
         """
         Update the slope of the surrogate gradient.
         """
-        
-        def inner(module, grad_input, grad_output):
-            self._n_backwards += 1
-
-            if self._n_backwards % 10e4 == 0:
-                self.slope = max(5,min(self._n_backwards/30e4, 30))
-                self.run.log({"surrogate fast sigmoid slope": self.slope})
-        self.layer_out.register_full_backward_hook(inner)
+        print("Updating slope: ", slope)
+        self.spike_grad1 = surrogate.fast_sigmoid(slope)
+        self._slope = slope
+        self.lif_in.spikegrad = self.spike_grad1
+        for i in range(len(self.hidden_layers)//2):
+            self.hidden_layers[2*i+1].spikegrad = self.spike_grad1
+        self.lif_out.spikegrad = self.spike_grad1
 
 
     def reset(self):

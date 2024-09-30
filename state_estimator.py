@@ -322,6 +322,8 @@ class KnowledgeDistillation:
         for epoch in tqdm(range(epochs), desc="Training"):
             losses = []
             # do test
+            if epoch % 10==0 and epoch>100:
+                self.student.model.update_slope(5+2*(epoch // 10))
             for imu,true_states in dataloader:
                 IMU_inputs = imu[:,:,16:]
                 student_preds = torch.empty(true_states.shape)
@@ -361,8 +363,14 @@ if __name__ == "__main__":
     # torch.save(dataset, "dataset_with_actions.pth")
     dataset = torch.load("dataset_with_actions.pth")
     from spikingActorProb import SMLP
+    from tianshou.utils.net.common import MLP
     from torch import nn
-    student = SMLP(29,256,[256,256], activation=snn.Synaptic)
+
+    student = SMLP(29,256,[256,256], activation=snn.Leaky)
+
+    student.update_slope(25)
+
+    student = MLP(29,output_dim=256,hidden_sizes=[256,256], activation=nn.Sigmoid)
     class Wrapper(nn.Module):
         def __init__(self, model):
             super().__init__()
@@ -370,12 +378,13 @@ if __name__ == "__main__":
             self.linear = nn.Linear(256,4)
         def forward(self, x):
             x = self.model(x)[0]
-            return nn.Tanh()(self.linear(x))
+            return self.linear(x)
         def reset(self):
-            self.model.reset()
+            if hasattr(self.model, 'reset'):
+                self.model.reset()
     student_model = Wrapper(student)
     trainer = KnowledgeDistillation(None, student_model)
-    trainer.train(dataset, epochs=100, warmup=248)
+    trainer.train(dataset, epochs=100, warmup=1)
     # dataset = torch.load("dataset_with_actions.pth")
     # # print(data.tensors)
     # # dataset = TensorDataset(torch.load("dataset.pth"))
