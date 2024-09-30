@@ -70,8 +70,9 @@ def gather_dataset(num_samples=1000, T_max=250):
     # Initialize the state and label arrays
     states = torch.empty((num_samples, T_max, 13))
 
-    labels = torch.empty((num_samples, T_max, 9+7))
+    IMU_data = torch.empty((num_samples, T_max, 9+7))
 
+    actions = torch.empty((num_samples, T_max, 4))
     t = 0
     for i in tqdm(range(num_samples), desc="Gathering data"):
         filled = False
@@ -88,6 +89,7 @@ def gather_dataset(num_samples=1000, T_max=250):
                 # Get the action from the actor
                 # print(state.shape)
                 action = actor.predict(state,deterministic=True)[0]
+                actions[i, t] = torch.tensor(action)
                 # print(action)
                 state, reward, done, _ ,_= env.step(action)
                 state = torch.tensor(state, dtype=torch.float32)
@@ -97,7 +99,7 @@ def gather_dataset(num_samples=1000, T_max=250):
                 imu_data = imu.simulate(state)
                 # pos_imu = torch.cat((state[0:3], torch.from_numpy(imu_data)), dim=0)
                 # Get the labels
-                labels[i, t] = torch.cat((torch.from_numpy(imu_data), state[3:10]),dim=0)
+                IMU_data[i, t] = torch.cat((torch.from_numpy(imu_data), state[3:10]),dim=0)
 
                 if done:
                     t= 0 # discard the episode
@@ -106,8 +108,11 @@ def gather_dataset(num_samples=1000, T_max=250):
                 if t == T_max-1:
                     filled = True
     print(states.shape)
-    print(labels.shape)
-    dataset = TensorDataset(labels, states)
+    
+    # stack a 2,250,16 with a 2,250,13 to get a 2,250,29
+    stacked = torch.cat((IMU_data, states), dim=2)
+    print(stacked.shape)
+    dataset = TensorDataset(stacked, actions)
 
     
     return dataset
@@ -295,18 +300,89 @@ class StateEstimator(torch.nn.Module):
         # Log the image
         wandb.log({"img": [wandb.Image(fig, caption=f"State Estimator Performance epoch {epoch}")]})
         # plt.savefig('VelocityOrientationTracking.png')
-        
+
+class KnowledgeDistillation:
+    def __init__(self, teacher, student):
+        self.teacher = teacher
+        self.student = student
+        self.alpha = 0.5
+        self.beta = 0.5
+        self.criterion = torch.nn.MSELoss()
+        self.optimizer = torch.optim.Adam(self.student.parameters(), lr=1e-3)
+
+    def train(self, dataset, epochs=10, warmup=0):
+        run = wandb.init(project='KnowledgeDistillation')
+        dataset_train = torch.load('dataset_with_actions.pth')
+        IMU_inputs = dataset_train.tensors[0][:,:,16:]
+        actions = dataset_train.tensors[1]
+        dataloader = DataLoader(dataset_train, batch_size=100, shuffle=True)
+
+        # self.teacher.eval()
+        self.student.train()
+        for epoch in tqdm(range(epochs), desc="Training"):
+            losses = []
+            # do test
+            for imu,true_states in dataloader:
+                IMU_inputs = imu[:,:,16:]
+                student_preds = torch.empty(true_states.shape)
+                self.student.reset()
+                for t in range(1, imu.shape[1]):
+                    y_pred_student = self.student.forward(imu[:,t,:])[0]
+                    student_preds[:,t] = y_pred_student
+                loss = self.criterion(student_preds[:,warmup:-1,:], true_states[:,warmup:-1,:])
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+
+                losses.append(loss.item())
+                # y_pred_teacher = self.teacher.forward(imu)
+                # y_pred_student = self.student.forward(imu)
+                # loss = self.criterion(y_pred_student[:,warmup:-1], y_pred_teacher[:,warmup:-1])
+                # losses.append(loss.item())
+            wandb.log({'loss test': torch.mean(torch.tensor(losses))})
+            print(f"Epoch {epoch}, Loss: {torch.mean(torch.tensor(losses))}")
+                
+            # for imu,true_states in dataloader:
+            #     self.optimizer.zero_grad()
+            #     y_pred_teacher = self.teacher.forward(imu)
+            #     y_pred_student = self.student.forward(imu)
+            #     loss = self.criterion(y_pred_student[:,warmup:-1], y_pred_teacher[:,warmup:-1])
+            #     losses.append(loss.item())
+            #     loss.backward()
+            #     self.optimizer.step()
+            # wandb.log({'loss train': torch.mean(torch.tensor(losses))})
+            # print(f"Epoch {epoch}, Loss: {torch.mean(torch.tensor(losses))}")
+            # if epoch%25==0 or epoch == epochs-1:
+            #     # create one plot with the last model
+            #     self.student.plot_difference_prediction_true(y_pred_student[1,:], y_pred_teacher[1,:], epoch = epoch)    
 if __name__ == "__main__":
     print("Gathering data")
-    # dataset = gather_dataset(num_samples=10000, T_max=250)
-    # torch.save(dataset, "dataset.pth")
-    dataset = torch.load("dataset.pth")
-    # print(data.tensors)
-    # dataset = TensorDataset(torch.load("dataset.pth"))
+    # dataset = gather_dataset(num_samples=100, T_max=250)
+    # torch.save(dataset, "dataset_with_actions.pth")
+    dataset = torch.load("dataset_with_actions.pth")
+    from spikingActorProb import SMLP
+    from torch import nn
+    student = SMLP(29,256,[256,256], activation=snn.Synaptic)
+    class Wrapper(nn.Module):
+        def __init__(self, model):
+            super().__init__()
+            self.model = model
+            self.linear = nn.Linear(256,4)
+        def forward(self, x):
+            x = self.model(x)[0]
+            return nn.Tanh()(self.linear(x))
+        def reset(self):
+            self.model.reset()
+    student_model = Wrapper(student)
+    trainer = KnowledgeDistillation(None, student_model)
+    trainer.train(dataset, epochs=100, warmup=248)
+    # dataset = torch.load("dataset_with_actions.pth")
+    # # print(data.tensors)
+    # # dataset = TensorDataset(torch.load("dataset.pth"))
 
-    stateestimator = StateEstimator(spiking=True)
-    print(stateestimator)
-    stateestimator.train(dataset=dataset, epochs=500, warmup = 50)    
+    # stateestimator = StateEstimator(spiking=True)
+    # print(stateestimator)
+    # stateestimator.train(dataset=dataset, epochs=500, warmup = 50)    
 
     # # train ANN:
     # stateestimator = StateEstimator(spiking=False)

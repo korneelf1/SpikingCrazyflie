@@ -35,7 +35,7 @@ class IntegratorSpiker(torch.nn.Module):
         n_integrators = int(layer_size * integrator_ratio)
         n_spikers = layer_size - n_integrators
 
-        self.spike_grad = snn.surrogate.fast_sigmoid(10)
+        self.spike_grad = snn.surrogate.fast_sigmoid(5)
 
         self.betas = torch.nn.Parameter(torch.rand(n_spikers))
         self.thresholds = torch.nn.Parameter(torch.rand(n_spikers))
@@ -87,6 +87,7 @@ class SMLP(nn.Module):
     :param act_args
     :param device
     :param linear_layer
+    :param add_out add an aditional output for a supervised loss
     """
     def __init__(self,
                  input_dim: int,
@@ -94,6 +95,7 @@ class SMLP(nn.Module):
                  hidden_sizes: Sequence[int],
                  activation: ModuleType | Sequence[ModuleType] | None = snn.Leaky,
                  device: str | int | torch.device = "cpu",
+                 add_out: bool = False,
                  ) -> None:
         super().__init__()
         self.device = device
@@ -110,16 +112,27 @@ class SMLP(nn.Module):
         # create layers and spiking layers
         self.layer_in = nn.Linear(input_dim, hidden_sizes[0], device=self.device)
 
-        
+        self.sec_order = False
+        if activation == snn.Synaptic:
+            self.sec_order = True
         betas_in = torch.rand(hidden_sizes[0])
         thresh_in = torch.rand(hidden_sizes[0])
-        self.lif_in   = snn.Leaky(beta=betas_in, learn_beta=True, 
+        alpha_in = torch.rand(hidden_sizes[0])
+        if self.sec_order:  
+            self.lif_in = snn.Synaptic(beta=betas_in, learn_beta=True, 
+                                  threshold=thresh_in, learn_threshold=True, 
+                                  alpha=alpha_in, learn_alpha=True,
+                                  spike_grad=self.spike_grad1).to(self.device)
+        else:
+            self.lif_in   = snn.Leaky(beta=betas_in, learn_beta=True, 
                                   threshold=thresh_in, learn_threshold=True, 
                                   spike_grad=self.spike_grad1).to(self.device)
 
-        # velocity and orientation prediction and injection layers
-        self.vel_orient_layer = nn.Linear(hidden_sizes[0], 6, device=self.device)
-        self.vel_orient_injection = torch.cat(torch.eye(6,requires_grad=False), torch.zeros(6,hidden_sizes[0]-6)).to(self.device)
+        self.add_out = add_out
+        if self.add_out:
+            # velocity and orientation prediction and injection layers
+            self.vel_orient_layer = nn.Linear(hidden_sizes[0], 6, device=self.device)
+            self.vel_orient_injection = torch.cat(torch.eye(6,requires_grad=False), torch.zeros(6,hidden_sizes[0]-6)).to(self.device)
 
         self.hidden_layers = []
         for i in range(len(hidden_sizes) - 1):
@@ -127,16 +140,30 @@ class SMLP(nn.Module):
 
             betas = torch.rand(hidden_sizes[i + 1])
             thresh = torch.rand(hidden_sizes[i + 1])
-            self.hidden_layers.append(snn.Leaky(beta=betas, learn_beta=True,
+            alphas = torch.rand(hidden_sizes[i + 1])
+            if self.sec_order:
+                self.hidden_layers.append(snn.Synaptic(beta=betas, learn_beta=True,
                                                 threshold=thresh, learn_threshold=True,
+                                                alpha=alphas, learn_alpha=True,
                                                 spike_grad=self.spike_grad1).to(self.device))
+            else:
+                self.hidden_layers.append(snn.Leaky(beta=betas, learn_beta=True,
+                                                    threshold=thresh, learn_threshold=True,
+                                                    spike_grad=self.spike_grad1).to(self.device))
             
         self.layer_out = nn.Linear(hidden_sizes[-1], output_dim, device=self.device)
         betas_out = torch.rand(output_dim)
         thresh_out = torch.rand(output_dim)
-        self.lif_out = snn.Leaky(beta=betas_out, learn_beta=True,
+        alpha_out = torch.rand(output_dim)
+        if self.sec_order:
+            self.lif_out = snn.Synaptic(beta=betas_out, learn_beta=True,
                                     threshold=thresh_out, learn_threshold=True,
+                                    alpha=alpha_out, learn_alpha=True,
                                     spike_grad=self.spike_grad1).to(self.device)
+        else:
+            self.lif_out = snn.Leaky(beta=betas_out, learn_beta=True,
+                                        threshold=thresh_out, learn_threshold=True,
+                                        spike_grad=self.spike_grad1).to(self.device)
         
         if wandb.run is None:
             print("wandb.run is None")
@@ -174,12 +201,23 @@ class SMLP(nn.Module):
         '''
         Reset the network's internal state
         '''
-        self.cur_in = self.lif_in.init_leaky()
-        self.cur_lst = [self.cur_in]
-        for i in range(int(len(self.hidden_layers)/2)):
-            self.cur_lst.append(self.hidden_layers[2*i+1].init_leaky())
-        self.hidden_states = self.cur_lst
-        self.cur_out = self.lif_out.init_leaky()
+        if self.sec_order:
+            self.cur_in, self.syn_in = self.lif_in.init_synaptic()
+            self.cur_lst = [self.cur_in]
+            self.syn_lst = [self.syn_in]
+            for i in range(int(len(self.hidden_layers)/2)):
+                self.cur_lst.append(self.hidden_layers[2*i+1].init_synaptic())
+                self.syn_lst.append(self.hidden_layers[2*i+1].init_synaptic())
+            self.hidden_states = self.cur_lst
+            self.cur_out, self.syn_out = self.lif_out.init_synaptic()
+
+        else:
+            self.cur_in = self.lif_in.init_leaky()
+            self.cur_lst = [self.cur_in]
+            for i in range(int(len(self.hidden_layers)/2)):
+                self.cur_lst.append(self.hidden_layers[2*i+1].init_leaky())
+            self.hidden_states = self.cur_lst
+            self.cur_out = self.lif_out.init_leaky()
 
     def forward(self, x: torch.Tensor, hidden_states: list=None) -> torch.Tensor:
         '''
@@ -191,20 +229,35 @@ class SMLP(nn.Module):
             self.cur_out = hidden_states[-1]
 
         x = self.layer_in(x)
-        x, self.cur_in = self.lif_in(x, self.cur_in)
-        # self.cur_in = x
-        for i in range(int(len(self.hidden_layers)/2)):
-            x = self.hidden_layers[2*i](x)
-            if i == 0:
-                vel_orient = self.vel_orient_layer(x)
-                x = x + torch.matmul(vel_orient, self.vel_orient_injection)
-            x, self.cur_lst[i] = self.hidden_layers[2*i+1](x, self.cur_lst[i])
-            self.cur_lst[i] = x
-        x = self.layer_out(x)
-        x, self.cur_out = self.lif_out(x, self.cur_out)
-        # self.cur_out = x
-        self.hidden_states = [self.cur_in] + self.cur_lst + [self.cur_out]
-        return x, self.hidden_states, vel_orient
+        if self.sec_order:
+            x, self.cur_in, self.syn_in = self.lif_in(x, self.cur_in, self.syn_in)
+            for i in range(int(len(self.hidden_layers)/2)):
+                x = self.hidden_layers[2*i](x)
+                x, self.cur_lst[i], self.syn_lst[i] = self.hidden_layers[2*i+1](x, self.cur_lst[i], self.syn_lst[i])
+            x = self.layer_out(x)
+            x, self.cur_out, self.syn_out = self.lif_out(x, self.cur_out, self.syn_out)
+            self.hidden_states = [self.cur_in] + self.cur_lst + [self.cur_out]
+            
+        else:
+            x, self.cur_in = self.lif_in(x, self.cur_in)
+            # self.cur_in = x
+            for i in range(int(len(self.hidden_layers)/2)):
+                x = self.hidden_layers[2*i](x)
+                if self.add_out:
+                    if i == 0:
+                        vel_orient = self.vel_orient_layer(x)
+                        x = x + torch.matmul(vel_orient, self.vel_orient_injection)
+                    x, self.cur_lst[i] = self.hidden_layers[2*i+1](x, self.cur_lst[i])
+                self.cur_lst[i] = x
+            x = self.layer_out(x)
+            x, self.cur_out = self.lif_out(x, self.cur_out)
+            # self.cur_out = x
+            self.hidden_states = [self.cur_in] + self.cur_lst + [self.cur_out]
+        if self.add_out:
+            return x, self.hidden_states, vel_orient
+        else:
+
+            return x, self.hidden_states
 
     def __call__(self, *args: Any) -> Any:
         return self.forward(*args)
