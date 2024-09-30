@@ -49,8 +49,8 @@ args_wandb = {
       'collector_type': 'Collector',
       'reinit': True,
       'reward_function': 'reward_squared_fast_learning',
-      'slope': 5,
-      'slope_schedule': True,
+      'slope': 3,
+      'slope_schedule': False,
 
       }
 
@@ -63,7 +63,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--critic-lr", type=float, default=1e-3)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
-    parser.add_argument("--alpha", type=float, default=0.2)
+    parser.add_argument("--alpha", type=float, default=0.0)
     parser.add_argument("--auto-alpha", default=False, action="store_true")
     parser.add_argument("--alpha-lr", type=float, default=3e-4)
     parser.add_argument("--start-timesteps", type=int, default=10000)

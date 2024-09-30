@@ -35,6 +35,8 @@ class Learning2Fly(gym.Env):
         # print("Environment initialized with seed: ", seed)
         initialize_rng(self.device, self.rng, seed)
 
+        # curriculum parameters
+        self.Nc = 3e4 # interval of application of curriculum
         if action_history:
             action_history_len = 32
             self.action_history = helpers.NumpyDeque((1,4*action_history_len))
@@ -91,8 +93,7 @@ class Learning2Fly(gym.Env):
         Crs = 1 # reward for survival
         Cab = 0.0 # action baseline
 
-        # curriculum parameters
-        Nc = 3e5 # interval of application of curriculum
+        
 
         CpC = 1.2 # position factor
         Cplim = 20 # position limit
@@ -111,7 +112,7 @@ class Learning2Fly(gym.Env):
         qd    = self.obs[10:13]
 
         # curriculum
-        if self.global_step_counter % Nc == 0:
+        if self.global_step_counter > self.Nc == 0:
             # print("Updating curriculum parameters")
             if wandb.run is not None:
                 wandb.run.log({'Position Term':Cp,'Survival Reward':Crs})
@@ -121,6 +122,7 @@ class Learning2Fly(gym.Env):
             # Ca = min(Ca*CaC, Calim)
             Crs = max(Crs*CrsC, Crslim)
             print("\n\n\nCurriculum parameters updated\n\n\n")
+            self.Nc += self.Nc
 
         # in theory pos error max sqrt( .6)*2.5 = 1.94
         # vel error max sqrt(1000)*.005 = 0.158

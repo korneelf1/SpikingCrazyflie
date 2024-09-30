@@ -86,7 +86,7 @@ class SMLP(nn.Module):
         self.lif_out = snn.Leaky(beta=betas_out, learn_beta=True,
                                     threshold=thresh_out, learn_threshold=True,
                                     spike_grad=spike_grad1).to(self.device)
-        
+        print("slope: ", slope)
         self.reset()
 
     def update_slope(self, slope: float):
@@ -232,7 +232,7 @@ class SpikingNet(NetBase[Any]):
             slope,
 
         )
-
+        self.slope_init = slope
         self.repeat = repeat
         self.reset_in_call = reset_in_call
         # self.model = MLP(
@@ -326,11 +326,11 @@ class SpikingNet(NetBase[Any]):
             
             # now we have epoch -> use as scheduler
             epochs_before_update = 25
-            epoch_update_interval = 15
+            epoch_update_interval = 50
             # avoid constantly updating the surrogate gradient!
             if self._prev_epoch != self._epoch:
                 if self._epoch == 1:
-                    self._slope = 10
+                    # self._slope = 10
                     self.model.update_slope(self._slope)
                     if wandb.run is not None:
                             # print('logging')
@@ -341,7 +341,7 @@ class SpikingNet(NetBase[Any]):
                         if wandb.run is not None:
                             # print('logging')
                             wandb.run.log({"surrogate fast sigmoid slope": self._slope})
-                        self._slope = min(10+(self._epoch - epochs_before_update)/epoch_update_interval, 25)
+                        self._slope = min(self.slope_init+(self._epoch - epochs_before_update)/epoch_update_interval, 25)
                         # print("updating model, current slope: ", self._slope)
                         # create model with new slope
                         self.model.update_slope(self._slope)
