@@ -68,7 +68,7 @@ class SMLP(nn.Module):
         self.lif_in   = snn.Leaky(beta=betas_in, learn_beta=True, 
                                   threshold=thresh_in, learn_threshold=True, 
                                   spike_grad=spike_grad1).to(self.device)
-        self.hidden_layers = []
+        self.hidden_layers = nn.ModuleList()
         for i in range(len(hidden_sizes) - 1):
             self.hidden_layers.append(nn.Linear(hidden_sizes[i], hidden_sizes[i + 1], device=self.device))
 
@@ -187,6 +187,7 @@ class SpikingNet(NetBase[Any]):
         linear_layer: TLinearLayer = nn.Linear,
         reset_in_call: bool = True,
         repeat: int = 4,
+        rpm: bool = False,
     ) -> None:
         super().__init__()
         self.device = device
@@ -196,6 +197,8 @@ class SpikingNet(NetBase[Any]):
         self.V: MLP | None = None
 
         input_dim = int(np.prod(state_shape))
+        if not rpm:
+            input_dim -= 4
         action_dim = int(np.prod(action_shape)) * num_atoms
         if action_dim == 0:
             raise UserWarning("Action Dimension set to 0.")
@@ -263,15 +266,17 @@ class SpikingNet(NetBase[Any]):
         if len(obs.shape) == 1:
             obs = obs.unsqueeze(0)
         assert len(obs.shape) == 2 # (batch size, obs size) AKA not a sequence
+        
         if self.reset_in_call:
             self.model.reset()
         if isinstance(obs, np.ndarray):
             obs = torch.tensor(obs, device=self.device, dtype=torch.float32)
         logits = torch.zeros(obs.shape[0], self.output_dim, device=self.device)
 
+        obs_no_rpms = obs[:, :-4]
         hidden_state = state
         for _ in range(self.repeat):
-            last_logits, hidden_state = self.model(obs, hidden_state)
+            last_logits, hidden_state = self.model(obs_no_rpms, hidden_state)
 
             logits += last_logits
         # logits = torch.sum(logits, dim=1
@@ -423,6 +428,7 @@ class ActorProb(BaseActor):
         """Mapping: obs -> logits -> (mu, sigma)."""
         if info is None:
             info = {}
+        # mask the rpms 
         logits, hidden = self.preprocess(obs, state)
         mu = self.mu(logits)
         if not self._unbounded:
