@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 import wandb
 
 class Learning2Fly(gym.Env):
-    def __init__(self, curriculum_terminal=False,seed=None,rpm=False, action_history=True) -> None:
+    def __init__(self, curriculum_terminal=False,seed=None,rpm=False, action_history=False) -> None:
 
         super().__init__()
         # L2F initialization
@@ -36,7 +36,7 @@ class Learning2Fly(gym.Env):
         initialize_rng(self.device, self.rng, seed)
 
         # curriculum parameters
-        self.Nc = 3e4 # interval of application of curriculum
+        self.Nc = 5e8 # interval of application of curriculum, roughly 10 epochs
 
         self.rpm = rpm
         if action_history:
@@ -56,6 +56,31 @@ class Learning2Fly(gym.Env):
         self.t = 0
         self.curriculum_terminal = curriculum_terminal # if True, the environment will use soft terminal conditions initially
 
+        # Reward parameters
+                # intial parameters
+        self.Cp = 0.1 # position weight
+        self.Cv = .0 # velocity weight
+        self.Cq = 0 # orientation weight
+        self.Ca = .0 # action weight og .334, but just learns to fly out of frame
+        self.Cw = .0 # angular velocity weight 
+        self.Crs = 1 # reward for survival
+        self.Cab = 0.0 # action baseline
+
+        
+
+        self.CpC = 1.2 # position factor
+        self.Cplim = 20 # position limit
+
+        # CvC = 1.4 # velocity factor
+        # Cvlim = 1.5 # velocity limit
+
+        # CaC = 1.4 # orientation factor
+        # Calim = .5 # orientation limit
+
+        self.CrsC = .8 # reward for survival factor
+        self.Crslim = .1 # reward for survival limit
+
+
         self.reset()
 
     def step(self, action):
@@ -74,6 +99,7 @@ class Learning2Fly(gym.Env):
         self.t += 1
 
         done = self._check_done()
+        # print("Step: ", self.t, "Done: ", done)
         reward = self._reward()
 
         return self.obs, reward, done,done, {}
@@ -84,7 +110,7 @@ class Learning2Fly(gym.Env):
         self.params.parameters.dynamics.mass *= 0.1
         sample_initial_state(self.device, self.env, self.params, self.state, self.rng)
 
-        self.global_step_counter += self.t
+        # self.global_step_counter += self.t
         self.t = 0
         if hasattr(self, 'action_history'):
             self.action_history.reset()
@@ -98,56 +124,40 @@ class Learning2Fly(gym.Env):
         return self.obs, {}
     
     def _reward(self):
-        # intial parameters
-        Cp = 0.1 # position weight
-        Cv = .0 # velocity weight
-        Cq = 0 # orientation weight
-        Ca = .0 # action weight og .334, but just learns to fly out of frame
-        Cw = .0 # angular velocity weight 
-        Crs = 1 # reward for survival
-        Cab = 0.0 # action baseline
-
-        
-
-        CpC = 1.2 # position factor
-        Cplim = 20 # position limit
-
-        CvC = 1.4 # velocity factor
-        Cvlim = 1.5 # velocity limit
-
-        CaC = 1.4 # orientation factor
-        Calim = .5 # orientation limit
-
-        CrsC = .8 # reward for survival factor
-        Crslim = .1 # reward for survival limit
         pos   = self.obs[0:3]
         vel   = self.obs[3:6]
         q     = self.obs[6:10]
         qd    = self.obs[10:13]
 
         # curriculum
-        if self.global_step_counter > self.Nc == 0:
-            # print("Updating curriculum parameters")
-            if wandb.run is not None:
-                wandb.run.log({'Position Term':Cp,'Survival Reward':Crs})
+        # print("Global step counter: ", self.global_step_counter)
+        # print("Next curriculum update: ", self.Nc)
+        self.global_step_counter += 1
+        if self.global_step_counter > self.Nc:
             # updating the curriculum parameters
-            Cp = min(Cp*CpC, Cplim)
+            self.Cp = min(self.Cp*self.CpC, self.Cplim)
             # Cv = min(Cv*CvC, Cvlim)
             # Ca = min(Ca*CaC, Calim)
-            Crs = max(Crs*CrsC, Crslim)
-            print("\n\n\nCurriculum parameters updated\n\n\n")
+            self.Crs = max(self.Crs*self.CrsC, self.Crslim)
+            print("\n\n\nCurriculum parameters updated:")
+            print(f"Position Term: {self.Cp}, Survival Reward: {self.Crs}")
+            print("\n\n\n")
+            # print("Updating curriculum parameters")
+            if wandb.run is not None:
+                wandb.run.log({'Position Term':self.Cp,'Survival Reward':self.Crs})
+            
             self.Nc += self.Nc
 
         # in theory pos error max sqrt( .6)*2.5 = 1.94
         # vel error max sqrt(1000)*.005 = 0.158
         # qd error max sqrt(1000)*.00 = 0.
         # should roughly be between -2 and 2
-        r = - Cv*np.sum((vel)**2) \
-                - Ca*np.sum((np.array(self.action.motor_command)-Cab)**2) \
-                    -Cq*(1-q[0]**2)\
-                    - Cw*np.sum((qd)**2) \
-                        + Crs \
-                            -Cp*np.sum((pos)**2) 
+        r = - self.Cv*np.sum((vel)**2) \
+                - self.Ca*np.sum((np.array(self.action.motor_command)-self.Cab)**2) \
+                    -self.Cq*(1-q[0]**2)\
+                    - self.Cw*np.sum((qd)**2) \
+                        + self.Crs \
+                            -self.Cp*np.sum((pos)**2) 
         return r
     
     def _check_done(self):
