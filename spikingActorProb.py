@@ -21,7 +21,7 @@ from tianshou.utils.net.common import (
     ModuleType,
     ArgsType
 )
-from tianshou.utils.pickle import setstate
+# from tianshou.utils.pickle import setstate
 
 SIGMA_MIN = -20
 SIGMA_MAX = 2
@@ -197,8 +197,8 @@ class SpikingNet(NetBase[Any]):
         self.V: MLP | None = None
 
         input_dim = int(np.prod(state_shape))
-        if not rpm:
-            input_dim -= 4
+        # if not rpm:
+        #     input_dim -= 4
         action_dim = int(np.prod(action_shape)) * num_atoms
         if action_dim == 0:
             raise UserWarning("Action Dimension set to 0.")
@@ -273,7 +273,8 @@ class SpikingNet(NetBase[Any]):
             obs = torch.tensor(obs, device=self.device, dtype=torch.float32)
         logits = torch.zeros(obs.shape[0], self.output_dim, device=self.device)
 
-        obs_no_rpms = obs[:, :-4]
+        # obs_no_rpms = obs[:, :-4]
+        obs_no_rpms = obs 
         hidden_state = state
         for _ in range(self.repeat):
             last_logits, hidden_state = self.model(obs_no_rpms, hidden_state)

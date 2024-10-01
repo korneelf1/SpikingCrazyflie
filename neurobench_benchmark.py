@@ -15,12 +15,12 @@ from neurobench.examples.cartpole.processors import discrete_Actor_Critic
 from neurobench.examples.cartpole.agents import ActorCriticSNN_LIF_Smallest, ActorCritic_ANN_Smallest, ActorCriticSNN_LIF_Small, ActorCriticSNN_LIF_Smallest_pruned, ActorCritic_ANN
 
 import numpy as np
-
+from pprint import pprint
 
 env = Learning2Fly()
 
 from spikingActorProb import ActorProb, SpikingNet, SMLP
-
+from activity_based_pruning import ActivityBasedPruning
     
 state_shape = env.observation_space.shape or env.observation_space.n
 action_shape = env.action_space.shape or env.action_space.n
@@ -58,10 +58,46 @@ data_metrics = ["activation_sparsity", 'reward_score','synaptic_operations']
 
 model_snn = SNNTorchAgent(StochtoDeterm(actor))
 
-benchmark = Benchmark_Closed_Loop(model_snn, env, [], postprocessors, [static_metrics, data_metrics])
-results = benchmark.run(nr_interactions=10, max_length=500) # for risk, now min 20 interactions as risk is lowest 5 percentile
-print(results)
+pruner = ActivityBasedPruning()
 
+benchmark = Benchmark_Closed_Loop(model_snn, env, [], postprocessors, [static_metrics, data_metrics])
+results = benchmark.run(nr_interactions=50, max_length=500) # for risk, now min 20 interactions as risk is lowest 5 percentile
+
+pprint(results)
+
+####### Test pruned model
+print('\n\n\n After pruning \n\n\n')
+# model
+hidden_sizes = [256, 256]
+net_a = SpikingNet(state_shape=state_shape, hidden_sizes=hidden_sizes, action_shape=256, repeat=4)
+actor = ActorProb(
+    net_a,
+    action_shape,
+    unbounded=True,
+    conditioned_sigma=True,
+)
+
+# state dict to state_dict only actor. keys are included, actor. part is removed
+dict_policy = torch.load('stabilize/sac/policy_snn_actor_1.pth')
+dict_actor = {}
+for key in list(dict_policy.keys()):
+    if key.startswith('actor.'):
+        dict_actor[key[6:]] = dict_policy[key]
+
+actor.load_state_dict(dict_actor)
+# postprocessors
+postprocessors = [] # goes from probalities to actions
+
+static_metrics = ["model_size",]
+data_metrics = ['reward_score']
+
+model_snn = SNNTorchAgent(StochtoDeterm(actor))
+pruned_model = pruner.prune(model_snn, test_pruning=True, threshold=0.01, n_runs=20)
+# model_snn = SNNTorchAgent(StochtoDeterm(pruned_model))
+benchmark = Benchmark_Closed_Loop(model_snn, env, [], postprocessors, [static_metrics, data_metrics])
+results = benchmark.run(nr_interactions=20, max_length=500) # for risk, now min 20 interactions as risk is lowest 5 percentile
+
+pprint(results)
 
 
 
