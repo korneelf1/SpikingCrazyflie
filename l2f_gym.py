@@ -53,9 +53,9 @@ class Learning2Fly(gym.Env):
         self.state = self.next_state
 
         if self.rpm:
-            self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+            self.obs = np.concatenate([self.state.position, self.state.linear_velocity, self.state.orientation, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
         else:
-            self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity]).astype(np.float32)
+            self.obs = np.concatenate([self.state.position, self.state.linear_velocity, self.state.orientation, self.state.angular_velocity]).astype(np.float32)
         
         self.t += 1
 
@@ -74,19 +74,19 @@ class Learning2Fly(gym.Env):
         self.t = 0
         
         if self.rpm:
-            self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
+            self.obs = np.concatenate([self.state.position, self.state.linear_velocity, self.state.orientation, self.state.angular_velocity, self.state.rpm]).astype(np.float32)    
         else:
-            self.obs = np.concatenate([self.state.position, self.state.orientation, self.state.linear_velocity, self.state.angular_velocity]).astype(np.float32)
+            self.obs = np.concatenate([self.state.position, self.state.linear_velocity, self.state.orientation, self.state.angular_velocity]).astype(np.float32)
         return self.obs, {}
     
     def _reward(self):
         # intial parameters
-        Cp = 1 # position weight
+        Cp = .7 # position weight
         Cv = .0 # velocity weight
         Cq = 0 # orientation weight
         Ca = .0 # action weight og .334, but just learns to fly out of frame
         Cw = .0 # angular velocity weight 
-        Crs = 0 # reward for survival
+        Crs = 1 # reward for survival
         Cab = 0.0 # action baseline
 
         # curriculum parameters
@@ -109,13 +109,13 @@ class Learning2Fly(gym.Env):
         qd    = self.obs[10:13]
 
         # curriculum
-        if self.global_step_counter % Nc == 0:
-            print("Updating curriculum parameters")
-            # updating the curriculum parameters
-            Cp = min(Cp*CpC, Cplim)
-            # Cv = min(Cv*CvC, Cvlim)
-            # Ca = min(Ca*CaC, Calim)
-            Crs = max(Crs*CrsC, Crslim)
+        # if self.global_step_counter % Nc == 0:
+        #     print("Updating curriculum parameters")
+        #     # updating the curriculum parameters
+        #     Cp = min(Cp*CpC, Cplim)
+        #     # Cv = min(Cv*CvC, Cvlim)
+        #     # Ca = min(Ca*CaC, Calim)
+        #     Crs = max(Crs*CrsC, Crslim)
 
         # in theory pos error max sqrt( .6)*2.5 = 1.94
         # vel error max sqrt(1000)*.005 = 0.158
@@ -127,7 +127,7 @@ class Learning2Fly(gym.Env):
                     - Cw*np.sum((qd)**2) \
                         + Crs \
                             -Cp*np.sum((pos)**2) 
-        return 1
+        return r
     
     def _check_done(self):
         done = False

@@ -26,7 +26,7 @@ def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--buffer-size", type=int, default=1000000)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--hidden-sizes", type=int, nargs="*", default=[256, 256])
+    parser.add_argument("--hidden-sizes", type=int, nargs="*", default=[256, 128])
     parser.add_argument("--actor-lr", type=float, default=1e-3)
     parser.add_argument("--critic-lr", type=float, default=1e-3)
     parser.add_argument("--gamma", type=float, default=0.99)
@@ -121,7 +121,7 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     # model
-    net_a = SpikingNet(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device, action_shape=256, repeat=args.repeat_per_forward)
+    net_a = SpikingNet(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device, action_shape=128, repeat=args.repeat_per_forward)
     actor = ActorProb(
         net_a,
         args.action_shape,
