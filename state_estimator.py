@@ -10,10 +10,12 @@ from spikingActorProb import SMLP
 from tianshou.utils.net.common import MLP
 import snntorch as snn
 import wandb
-
+import numpy as np
 
 import matplotlib.pyplot as plt
-# plt.ion()
+import matplotlib
+matplotlib.use('Agg')  # For non-interactive environments
+
 
 import torch
 '''
@@ -54,10 +56,13 @@ def fast_sigmoid(slope=25):
 
 
 
-def gather_dataset(num_samples=1000, T_max=250):
+def gather_dataset(num_samples=1000, T_max=250, inputs:str='Full'):
     '''Uses a trained controller (ann_actor) to collect data from the environment. The data saved consists of the states.
     These states are then appended with IMU data and saved in a numpy array.
-    The labels consist of the velocities and orientations of the drone.'''
+    The labels consist of the velocities and orientations of the drone.
+    
+    inputs: str - "Full", "IMU" or "Stacked" to specify the input data saved to the dataset
+    '''
     env = Learning2Fly(imu=False,t_history=1,euler=True) # if euler states are pos, vel_body, orientation_euler, angular velocity
     print(env.observation_space)
     # actor = torch.load("ann_actor.pth")
@@ -109,10 +114,14 @@ def gather_dataset(num_samples=1000, T_max=250):
                     filled = True
     print(states.shape)
     
-    # stack a 2,250,16 with a 2,250,13 to get a 2,250,29
-    stacked = torch.cat((IMU_data, states), dim=2)
-    print(stacked.shape)
-    dataset = TensorDataset(stacked, actions)
+    if inputs == 'Full':
+        dataset = TensorDataset(states, actions)
+    elif inputs == 'IMU':
+        dataset = TensorDataset(IMU_data, actions)
+    else:
+        # stack a 2,250,16 with a 2,250,13 to get a 2,250,29
+        stacked = torch.cat((IMU_data, states), dim=2)
+        dataset = TensorDataset(stacked, actions)
 
     
     return dataset
@@ -305,33 +314,38 @@ class KnowledgeDistillation:
     def __init__(self, teacher, student):
         self.teacher = teacher
         self.student = student
-        self.alpha = 0.5
-        self.beta = 0.5
+
         self.criterion = torch.nn.MSELoss()
         self.optimizer = torch.optim.Adam(self.student.parameters(), lr=1e-3)
 
-    def train(self, dataset, epochs=10, warmup=0):
+    def train(self, dataset, epochs=10, warmup=0, sequence:bool = False, visualize=False):
         run = wandb.init(project='KnowledgeDistillation')
-        dataset_train = torch.load('dataset_with_actions.pth')
-        IMU_inputs = dataset_train.tensors[0][:,:,16:]
-        actions = dataset_train.tensors[1]
-        dataloader = DataLoader(dataset_train, batch_size=100, shuffle=True)
+        # dataset_train = torch.load('dataset_with_actions.pth')
+        # IMU_inputs = dataset_train.tensors[0][:,:,16:]
+        # actions = dataset_train.tensors[1]
+        dataloader = DataLoader(dataset, batch_size=100, shuffle=True)
 
         # self.teacher.eval()
         self.student.train()
         for epoch in tqdm(range(epochs), desc="Training"):
             losses = []
             # do test
-            if epoch % 10==0 and epoch>100:
-                self.student.model.update_slope(5+2*(epoch // 10))
+            # if epoch % 10==0 and epoch>100:
+            #     self.student.model.update_slope(5+2*(epoch // 10))
             for imu,true_states in dataloader:
-                IMU_inputs = imu[:,:,16:]
+                # IMU_inputs = imu[:,:,16:]
                 student_preds = torch.empty(true_states.shape)
                 self.student.reset()
-                for t in range(1, imu.shape[1]):
-                    y_pred_student = self.student.forward(imu[:,t,:])[0]
-                    student_preds[:,t] = y_pred_student
-                loss = self.criterion(student_preds[:,warmup:-1,:], true_states[:,warmup:-1,:])
+                if sequence:
+                    for t in range(1, imu.shape[1]):
+                        y_pred_student = self.student.forward(imu[:,t,:].cpu())[0]
+                        student_preds[:,t] = y_pred_student
+                    loss = self.criterion(student_preds[:,warmup:-1,:], true_states[:,warmup:-1,:])
+                else:
+                    imu_flat = imu.view(-1,1, imu.shape[-1])
+                    y_pred_student = self.student.forward(imu_flat)
+                    loss = self.criterion(y_pred_student, true_states.view(-1,1, y_pred_student.shape[-1]))
+
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
@@ -343,48 +357,56 @@ class KnowledgeDistillation:
                 # losses.append(loss.item())
             wandb.log({'loss test': torch.mean(torch.tensor(losses))})
             print(f"Epoch {epoch}, Loss: {torch.mean(torch.tensor(losses))}")
-                
-            # for imu,true_states in dataloader:
-            #     self.optimizer.zero_grad()
-            #     y_pred_teacher = self.teacher.forward(imu)
-            #     y_pred_student = self.student.forward(imu)
-            #     loss = self.criterion(y_pred_student[:,warmup:-1], y_pred_teacher[:,warmup:-1])
-            #     losses.append(loss.item())
-            #     loss.backward()
-            #     self.optimizer.step()
-            # wandb.log({'loss train': torch.mean(torch.tensor(losses))})
-            # print(f"Epoch {epoch}, Loss: {torch.mean(torch.tensor(losses))}")
-            # if epoch%25==0 or epoch == epochs-1:
-            #     # create one plot with the last model
-            #     self.student.plot_difference_prediction_true(y_pred_student[1,:], y_pred_teacher[1,:], epoch = epoch)    
+        
+        print("Finished training")
+        print("Visualizing...")
+        if visualize:
+            true_actions = true_states[0].cpu().detach().numpy()
+            predicted_actions = student_preds[0].cpu().detach().numpy()
+            t = np.array(range(true_actions.shape[0]))
+            fig, ax = plt.subplots(4, 1)
+            for i in range(4):
+                ax[i].plot(t,true_actions[:,i], c='g')
+                ax[i].plot(t,predicted_actions[:,i], c='r')
+            
+            # plt.show()
+            wandb.log({"img": [wandb.Image(fig, caption=f"Knowledge Distillation Performance epoch {epoch}")]})
+
+            
 if __name__ == "__main__":
     print("Gathering data")
-    # dataset = gather_dataset(num_samples=100, T_max=250)
-    # torch.save(dataset, "dataset_with_actions.pth")
-    dataset = torch.load("dataset_with_actions.pth")
+    # dataset = gather_dataset(num_samples=100, T_max=250, inputs='Full')
+    # torch.save(dataset, "dataset_with_full_states.pth")
+    dataset = torch.load("dataset_with_full_states.pth")
     from spikingActorProb import SMLP
     from tianshou.utils.net.common import MLP
     from torch import nn
+    import wandb
 
-    student = SMLP(29,256,[256,256], activation=snn.Leaky)
+    wandb.init(mode='disabled')
 
-    student.update_slope(25)
+    # student = SMLP(29,256,[256,256], activation=snn.Leaky)
 
-    student = MLP(29,output_dim=256,hidden_sizes=[256,256], activation=nn.Sigmoid)
+    # student.update_slope(25)
+
+    student = MLP(13,output_dim=256,hidden_sizes=[256,256], activation=nn.Tanh, flatten_input=False)
     class Wrapper(nn.Module):
         def __init__(self, model):
             super().__init__()
             self.model = model
-            self.linear = nn.Linear(256,4)
+            self.mu = nn.Linear(256,4)
+            self.sigma = nn.Linear(256,4)
         def forward(self, x):
-            x = self.model(x)[0]
-            return self.linear(x)
+            x = self.model(x)
+            return nn.Tanh()(self.mu(x))
         def reset(self):
             if hasattr(self.model, 'reset'):
                 self.model.reset()
+
     student_model = Wrapper(student)
     trainer = KnowledgeDistillation(None, student_model)
-    trainer.train(dataset, epochs=100, warmup=1)
+    trainer.train(dataset, epochs=100, warmup=1, visualize=True)
+
     # dataset = torch.load("dataset_with_actions.pth")
     # # print(data.tensors)
     # # dataset = TensorDataset(torch.load("dataset.pth"))
