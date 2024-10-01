@@ -24,15 +24,15 @@ from spikingActorProb import SpikingNet
 
 # wandb
 import wandb
-wandb.init(mode='disabled')
+# wandb.init(mode='disabled')
 args_wandb = {
-      'epoch': 2e2,
+      'epoch': 1,
       'step_per_epoch': 5e3,
       'step_per_collect': 1, # 2.5 s
       'update_per_step': 2,
       'test_num': 50,
       'update_per_step': 2,
-      'batch_size': 100,
+      'batch_size': 256,
       'wandb_project': 'FastPyDroneGym',
       'resume_id':1,
       'logger':'wandb',
@@ -45,11 +45,11 @@ args_wandb = {
       'masked':False,
       'logger': 'wandb',
       'drone': 'stock drone',
-      'buffer_size': 300000,
+      'buffer_size': 1000000,
       'collector_type': 'Collector',
       'reinit': True,
       'reward_function': 'reward_squared_fast_learning',
-      'slope': 5,
+      'slope': 2,
       'slope_schedule': False,
         'alpha': 0.0,
         'action_history': False,
@@ -67,8 +67,8 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--alpha", type=float, default=args_wandb['alpha'])
     parser.add_argument("--auto-alpha", default=False, action="store_true")
     parser.add_argument("--alpha-lr", type=float, default=3e-4)
-    parser.add_argument("--start-timesteps", type=int, default=10000)
-    parser.add_argument("--epoch", type=int, default=200)
+    parser.add_argument("--start-timesteps", type=int, default=100)
+    parser.add_argument("--epoch", type=int, default=250)
     parser.add_argument("--step-per-epoch", type=int, default=args_wandb['step_per_epoch'])
     parser.add_argument("--step-per-collect", type=int, default=args_wandb['step_per_collect'])
     parser.add_argument("--update-per-step", type=int, default=args_wandb['update_per_step'])
