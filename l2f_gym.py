@@ -14,6 +14,48 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 import wandb
+import math
+
+def power_distribution_force_torque(control, arm_length=0.046, thrust_to_torque=0.005964552, pwm_to_thrust_a=0.091492681, pwm_to_thrust_b=0.067673604):
+    # rescale control from -1 - 1 to  
+   
+    motor_forces = [0.0] * 4
+
+    arm = 0.707106781 * arm_length
+    roll_part = 0.25 / arm * control[0]/100
+    pitch_part = 0.25 / arm * control[1]/100
+    thrust_part = 0.25 * (control[2]+1)/2  # N (per rotor)
+    yaw_part = 0.25 * (control[3] / thrust_to_torque)/100
+
+    motor_forces[0] = thrust_part - roll_part - pitch_part - yaw_part
+    motor_forces[1] = thrust_part - roll_part + pitch_part + yaw_part
+    motor_forces[2] = thrust_part + roll_part + pitch_part - yaw_part
+    motor_forces[3] = thrust_part + roll_part - pitch_part + yaw_part
+
+    print(motor_forces)
+    action = np.zeros(4)
+    for motor_index in range(4):
+        motor_force = motor_forces[motor_index]
+        
+        if motor_force < 0.0:
+            motor_force = 0.0
+
+        motor_pwm = (-pwm_to_thrust_b + math.sqrt(pwm_to_thrust_b**2 + 4.0 * pwm_to_thrust_a * motor_force)) / (2.0 * pwm_to_thrust_a)
+        
+        # rescale to -1 - 1
+        # print(motor_pwm)
+        motor_pwm = 2 * (motor_pwm - 0.5)
+        # print(motor_pwm)
+        motor_pwm = max(-1, min(1, motor_pwm))
+        
+        action[motor_index] = motor_pwm
+    return action
+        # motor_thrust_uncapped['list'][motor_index] = motor_pwm * 65535  # UINT16_MAX in C
+
+# Example usage:
+# control = {'torqueX': 0, 'torqueY': 0, 'torqueZ': 0, 'thrustSi': 0}
+# motor_thrust_uncapped = {'list': [0] * 4}
+# power_distribution_force_torque(control, motor_thrust_uncapped, arm_length=0.1, thrust_to_torque=0.05, pwm_to_thrust_a=0.01, pwm_to_thrust_b=0.02)
 
 class Learning2Fly(gym.Env):
     def __init__(self, curriculum_terminal=False,seed=None,rpm=False, action_history=False) -> None:
@@ -84,7 +126,9 @@ class Learning2Fly(gym.Env):
         self.reset()
 
     def step(self, action):
+        # self.action.motor_command = power_distribution_force_torque(action.reshape((4,)))
         self.action.motor_command = action.reshape((4,))
+        
         step(self.device, self.env, self.params, self.state, self.action, self.next_state, self.rng)
         self.state = self.next_state
 
