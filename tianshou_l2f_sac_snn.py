@@ -33,7 +33,7 @@ args_wandb = {
       'test_num': 50,
       'update_per_step': 2,
       'batch_size': 256,
-      'wandb_project': 'FastPyDroneGym',
+      'Environment': 'Continuous Mountain Cart',
       'resume_id':1,
       'logger':'wandb',
       'algo_name': 'sac',
@@ -112,15 +112,16 @@ log_path = os.path.join(current_path,args_wandb['logdir'], args_wandb['task'], "
 from tianshou.utils import WandbLogger
 from torch.utils.tensorboard import SummaryWriter
 
-logger = WandbLogger(project="l2f",config=args_wandb)
+logger = WandbLogger(project="SSAC",config=args_wandb)
 writer = SummaryWriter(log_path)
 writer.add_text("args", str(args_wandb))
 logger.load(writer)
 import wandb
 # wandb.init(mode='disabled')
-
+import gymnasium as gym
 def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
-    env = Learning2Fly(action_history=args_wandb['action_history'])
+    env = gym.make("MountainCarContinuous-v0")
+    # env = Learning2Fly(action_history=args_wandb['action_history'])
     
     args.state_shape = env.observation_space.shape or env.observation_space.n
     args.action_shape = env.action_space.shape or env.action_space.n
