@@ -35,7 +35,7 @@ class IntegratorSpiker(torch.nn.Module):
         n_integrators = int(layer_size * integrator_ratio)
         n_spikers = layer_size - n_integrators
 
-        self.spike_grad = snn.surrogate.fast_sigmoid(5)
+        self.spike_grad = snn.surrogate.surrogate.fast_sigmoid(5)
 
         self.betas = torch.nn.Parameter(torch.rand(n_spikers))
         self.thresholds = torch.nn.Parameter(torch.rand(n_spikers))
@@ -52,7 +52,7 @@ class IntegratorSpiker(torch.nn.Module):
         self.reset()
         
     def set_slope(self, slope):
-        self.spike_grad = snn.surrogate.fast_sigmoid(slope)
+        self.spike_grad = snn.surrogate.surrogate.fast_sigmoid(slope)
         self.lif1.spikegrad = self.spike_grad
         self.lif_integrators.spikegrad = self.spike_grad
 
@@ -73,6 +73,38 @@ class IntegratorSpiker(torch.nn.Module):
 
         return x, [self.cur_1, self.cur_int]
 
+def fast_sigmoid_forward(ctx, input_, slope):
+    ctx.save_for_backward(input_)
+    ctx.slope = slope
+    out = (input_ > 0).float()
+    return out
+
+def fast_sigmoid_backward(ctx, grad_output):
+    (input_,) = ctx.saved_tensors
+    grad_input = grad_output.clone()
+    grad = grad_input / (ctx.slope * torch.abs(input_) + 1.0) ** 2
+    return grad, None
+
+class FastSigmoid(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input_, slope=25):
+        return fast_sigmoid_forward(ctx, input_, slope)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return fast_sigmoid_backward(ctx, grad_output)
+
+class FastSigmoidWrapper:
+    def __init__(self, slope=25):
+        self.slope = slope
+
+    def __call__(self, x):
+        return FastSigmoid.apply(x, self.slope)
+
+
+def fast_sigmoid(slope=25):
+    """Returns a callable object for the FastSigmoid function with a specific slope."""
+    return FastSigmoidWrapper(slope)
 
 class SMLP(nn.Module):
     """
@@ -96,6 +128,7 @@ class SMLP(nn.Module):
                  activation: ModuleType | Sequence[ModuleType] | None = snn.Leaky,
                  device: str | int | torch.device = "cpu",
                  add_out: bool = False,
+                 clip_betas: bool = False,
                  ) -> None:
         super().__init__()
         self.device = device
@@ -106,7 +139,7 @@ class SMLP(nn.Module):
         # Initialize surrogate gradient
         self._slope = 10
         self._n_backwards = 0
-        self.spike_grad1 = surrogate.fast_sigmoid(self._slope)  # passes default parameters from a closure
+        self.spike_grad1 = fast_sigmoid(self._slope)  # passes default parameters from a closure
         # spike_grad1 = scheduled_sigmoid(10)
 
         # create layers and spiking layers
@@ -134,7 +167,7 @@ class SMLP(nn.Module):
             self.vel_orient_layer = nn.Linear(hidden_sizes[0], 6, device=self.device)
             self.vel_orient_injection = torch.cat(torch.eye(6,requires_grad=False), torch.zeros(6,hidden_sizes[0]-6)).to(self.device)
 
-        self.hidden_layers = []
+        self.hidden_layers = nn.ModuleList()
         for i in range(len(hidden_sizes) - 1):
             self.hidden_layers.append(nn.Linear(hidden_sizes[i], hidden_sizes[i + 1], device=self.device))
 
@@ -171,6 +204,7 @@ class SMLP(nn.Module):
         else:
             self.run = wandb.run
 
+        # self.
         self.reset()
         self.update_slope(10)
 
@@ -188,12 +222,14 @@ class SMLP(nn.Module):
         Update the slope of the surrogate gradient.
         """
         print("Updating slope: ", slope)
-        self.spike_grad1 = surrogate.fast_sigmoid(slope)
+        self.spike_grad1 = fast_sigmoid(slope)
         self._slope = slope
         self.lif_in.spikegrad = self.spike_grad1
         for i in range(len(self.hidden_layers)//2):
             self.hidden_layers[2*i+1].spikegrad = self.spike_grad1
         self.lif_out.spikegrad = self.spike_grad1
+        if wandb.run is not None:
+            wandb.run.log({"Surrogate Slope": slope})
 
 
     def reset(self):

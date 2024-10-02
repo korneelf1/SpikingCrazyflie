@@ -318,16 +318,20 @@ class KnowledgeDistillation:
         self.criterion = torch.nn.MSELoss()
         self.optimizer = torch.optim.Adam(self.student.parameters(), lr=1e-3)
 
-    def train(self, dataset, epochs=10, warmup=0, sequence:bool = False, visualize=False):
-        run = wandb.init(project='KnowledgeDistillation')
+    def train(self, dataset,dataset_test=None, epochs=10, warmup=0, sequence:bool = False, visualize=False):
+        run = wandb.init(project='KnowledgeDistillation', config={'epochs': epochs, 'warmup': warmup, 'sequence': sequence,'surrogate_scheduling':False})
         # dataset_train = torch.load('dataset_with_actions.pth')
         # IMU_inputs = dataset_train.tensors[0][:,:,16:]
         # actions = dataset_train.tensors[1]
-        dataloader = DataLoader(dataset, batch_size=100, shuffle=True)
-
+        dataloader = DataLoader(dataset, batch_size=512, shuffle=True)
+        if dataset_test is not None:
+            dataloader_test = DataLoader(dataset_test, batch_size=512, shuffle=True)
         # self.teacher.eval()
         self.student.train()
+        loss_avg = 0
         for epoch in tqdm(range(epochs), desc="Training"):
+            if epoch%25==0 and epoch>300:
+                self.student.model.update_slope(5+3*((epoch-300) // 25))
             losses = []
             # do test
             # if epoch % 10==0 and epoch>100:
@@ -336,46 +340,62 @@ class KnowledgeDistillation:
                 # IMU_inputs = imu[:,:,16:]
                 student_preds = torch.empty(true_states.shape)
                 self.student.reset()
+                self.student.to_cuda()
                 if sequence:
                     for t in range(1, imu.shape[1]):
-                        y_pred_student = self.student.forward(imu[:,t,:].cpu())[0]
+                        y_pred_student = self.student.forward(imu[:,t,:])
                         student_preds[:,t] = y_pred_student
                     loss = self.criterion(student_preds[:,warmup:-1,:], true_states[:,warmup:-1,:])
                 else:
                     imu_flat = imu.view(-1,1, imu.shape[-1])
                     y_pred_student = self.student.forward(imu_flat)
                     loss = self.criterion(y_pred_student, true_states.view(-1,1, y_pred_student.shape[-1]))
-
+            
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
 
                 losses.append(loss.item())
+            wandb.log({'loss train': torch.mean(torch.tensor(losses))})
+            # print(f"Epoch {epoch}, Loss: {torch.mean(torch.tensor(losses))}")
+            if dataset_test is not None and epoch % 10==0:
+
+                losses = []
+                for imu,true_states in dataloader_test:
+                    student_preds = torch.empty(true_states.shape)
+                    self.student.reset()
+                    for t in range(1, imu.shape[1]):
+                        y_pred_student = self.student.forward(imu[:,t,:].cpu())
+                        student_preds[:,t] = y_pred_student
+                    loss = self.criterion(student_preds[:,warmup:-1,:], true_states[:,warmup:-1,:])
+                    losses.append(loss.item())
+                wandb.log({'loss test': torch.mean(torch.tensor(losses))})
+                # print(f"Epoch {epoch}, Loss: {torch.mean(torch.tensor(losses))}")
+                print("Visualizing...")
+                if visualize:
+                    true_actions = true_states[0].cpu().detach().numpy()
+                    predicted_actions = student_preds[0].cpu().detach().numpy()
+                    t = np.array(range(true_actions.shape[0]))
+                    fig, ax = plt.subplots(4, 1)
+                    for i in range(4):
+                        ax[i].plot(t,true_actions[:,i], c='g')
+                        ax[i].plot(t,predicted_actions[:,i], c='r')
+                    
+                    # plt.show()
+                    wandb.log({"img": [wandb.Image(fig, caption=f"Knowledge Distillation Performance epoch {epoch}")]})
                 # y_pred_teacher = self.teacher.forward(imu)
                 # y_pred_student = self.student.forward(imu)
                 # loss = self.criterion(y_pred_student[:,warmup:-1], y_pred_teacher[:,warmup:-1])
                 # losses.append(loss.item())
-            wandb.log({'loss test': torch.mean(torch.tensor(losses))})
-            print(f"Epoch {epoch}, Loss: {torch.mean(torch.tensor(losses))}")
+            
         
         print("Finished training")
-        print("Visualizing...")
-        if visualize:
-            true_actions = true_states[0].cpu().detach().numpy()
-            predicted_actions = student_preds[0].cpu().detach().numpy()
-            t = np.array(range(true_actions.shape[0]))
-            fig, ax = plt.subplots(4, 1)
-            for i in range(4):
-                ax[i].plot(t,true_actions[:,i], c='g')
-                ax[i].plot(t,predicted_actions[:,i], c='r')
-            
-            # plt.show()
-            wandb.log({"img": [wandb.Image(fig, caption=f"Knowledge Distillation Performance epoch {epoch}")]})
+        
 
             
 if __name__ == "__main__":
     print("Gathering data")
-    # dataset = gather_dataset(num_samples=100, T_max=250, inputs='Full')
+    # dataset = gather_dataset(num_samples=10000, T_max=350, inputs='Full')
     # torch.save(dataset, "dataset_with_full_states.pth")
     dataset = torch.load("dataset_with_full_states.pth")
     from spikingActorProb import SMLP
@@ -383,30 +403,39 @@ if __name__ == "__main__":
     from torch import nn
     import wandb
 
-    wandb.init(mode='disabled')
+    # reinit cuda
 
-    # student = SMLP(29,256,[256,256], activation=snn.Leaky)
+    wandb.init(mode='disabled')
+    # split dataset in test and train
+    dataset_train, dataset_test = torch.utils.data.random_split(dataset,[0.75,0.25])
+    student = SMLP(13,128,[256,128], activation=snn.Leaky)
 
     # student.update_slope(25)
 
-    student = MLP(13,output_dim=256,hidden_sizes=[256,256], activation=nn.Tanh, flatten_input=False)
+    # student = MLP(13,output_dim=256,hidden_sizes=[256,256], activation=nn.Tanh, flatten_input=False)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     class Wrapper(nn.Module):
         def __init__(self, model):
             super().__init__()
             self.model = model
-            self.mu = nn.Linear(256,4)
-            self.sigma = nn.Linear(256,4)
+            self.mu = nn.Linear(128,4)
+            self.sigma = nn.Linear(128,4)
         def forward(self, x):
             x = self.model(x)
+            if isinstance(x, tuple):
+                x = x[0]    #spiking
             return nn.Tanh()(self.mu(x))
         def reset(self):
             if hasattr(self.model, 'reset'):
                 self.model.reset()
-
+        def to_cuda(self):
+            return self.model.to(device)
+    
     student_model = Wrapper(student)
     trainer = KnowledgeDistillation(None, student_model)
-    trainer.train(dataset, epochs=100, warmup=1, visualize=True)
-
+    
+    trainer.train(dataset_train,dataset_test=dataset_test, epochs=500, warmup=50, sequence=True, visualize=True)
+    torch.save(student_model, "student_model_surrogate_scheduled.pth")
     # dataset = torch.load("dataset_with_actions.pth")
     # # print(data.tensors)
     # # dataset = TensorDataset(torch.load("dataset.pth"))
