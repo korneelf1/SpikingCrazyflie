@@ -323,10 +323,12 @@ class SpikingNet(NetBase[Any]):
         self.model.reset()
         if self.scheduled:
             self._n_reset += 1
-            self._epoch = self._n_reset%5e3
+            # print("n_reset: ", self._n_reset)
+            self._epoch = self._n_reset//20e3
+            # print(self._epoch)
             # now we have epoch -> use as scheduler
             epochs_before_update = 25
-            epoch_update_interval = 50
+            epoch_update_interval = 25
             # avoid constantly updating the surrogate gradient!
             if self._prev_epoch != self._epoch:
                 if self._epoch == 1:

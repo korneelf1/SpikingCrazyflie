@@ -49,7 +49,7 @@ args_wandb = {
       'reinit': True,
       'reward_function': 'reward_squared_fast_learning',
       'slope': 5,
-      'slope_schedule': False,
+      'slope_schedule': True,
         'alpha': 0.0,
         'action_history': False,
       }
