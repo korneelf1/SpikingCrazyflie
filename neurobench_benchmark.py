@@ -43,7 +43,8 @@ actor = ActorProb(
 )
 print(actor.state_dict().keys())
 # state dict to state_dict only actor. keys are included, actor. part is removed
-dict_policy = torch.load('stabilize/sac/policy_snn_actor_1.pth')
+dict_policy = torch.load('stabilize/sac/vague-voice-11.pth')
+# dict_policy = torch.load('stabilize/sac/policy_snn_actor_1.pth')
 dict_actor = {}
 for key in list(dict_policy.keys()):
     if key.startswith('actor.'):
@@ -61,7 +62,7 @@ model_snn = SNNTorchAgent(StochtoDeterm(actor))
 pruner = ActivityBasedPruning()
 
 benchmark = Benchmark_Closed_Loop(model_snn, env, [], postprocessors, [static_metrics, data_metrics])
-results = benchmark.run(nr_interactions=50, max_length=500) # for risk, now min 20 interactions as risk is lowest 5 percentile
+results = benchmark.run(nr_interactions=20, max_length=500) # for risk, now min 20 interactions as risk is lowest 5 percentile
 
 pprint(results)
 
