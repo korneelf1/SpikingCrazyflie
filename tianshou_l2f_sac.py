@@ -140,7 +140,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
         buffer = VectorReplayBuffer(args.buffer_size, len(train_envs))
     else:
         buffer = ReplayBuffer(args.buffer_size)
-    train_collector = Collector(policy, train_envs, buffer, exploration_noise=False)
+    train_collector = Collector(policy, train_envs, buffer, exploration_noise=True)
     test_collector = Collector(policy, test_envs)
     train_collector.reset()
     train_collector.collect(n_step=args.start_timesteps, random=True)
@@ -188,7 +188,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
       'collector_type': 'Collector',
       'reinit': True,
       'reward_function': 'same as vague voice or snowy spaceship',
-      'exploration_noise': False,
+      'exploration_noise': True,
       }
     wandb_args = {'description': str(input("Description: ")),}
     logger = WandbLogger(project="SSAC",config=args_wandb)
