@@ -22,7 +22,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--buffer-size", type=int, default=100000)
+    parser.add_argument("--buffer-size", type=int, default=1000000)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--hidden-sizes", type=int, nargs="*", default=[64, 64])
     parser.add_argument("--actor-lr", type=float, default=1e-3)

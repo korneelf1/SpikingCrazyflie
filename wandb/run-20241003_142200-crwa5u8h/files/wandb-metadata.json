@@ -1,0 +1,140 @@
+{
+    "os": "Linux-5.4.0-172-generic-x86_64-with-glibc2.31",
+    "python": "3.11.9",
+    "heartbeatAt": "2024-10-03T14:22:01.155596",
+    "startedAt": "2024-10-03T14:22:00.426106",
+    "docker": null,
+    "cuda": null,
+    "args": [],
+    "state": "running",
+    "program": "/home/korneel/reinforcement_learning/fastPyDroneSim_gym/tianshou_l2f_sac.py",
+    "codePathLocal": "tianshou_l2f_sac.py",
+    "codePath": "tianshou_l2f_sac.py",
+    "git": {
+        "remote": "https://github.com/korneelf1/fastPyDroneSim_gym.git",
+        "commit": "7dca5ea89be2a080711daff1e5289a4759b8272c"
+    },
+    "email": "korneel.vandenberghe@hotmail.be",
+    "root": "/home/korneel/reinforcement_learning/fastPyDroneSim_gym",
+    "host": "mavlab-godzilla-compute.lr.tudelft.nl",
+    "username": "korneel",
+    "executable": "/home/korneel/miniconda3/envs/thesis_korneel/bin/python",
+    "cpu_count": 8,
+    "cpu_count_logical": 16,
+    "cpu_freq": {
+        "current": 1592.5057499999998,
+        "min": 1200.0,
+        "max": 3200.0
+    },
+    "cpu_freq_per_core": [
+        {
+            "current": 1608.232,
+            "min": 1200.0,
+            "max": 3200.0
+        },
+        {
+            "current": 3193.989,
+            "min": 1200.0,
+            "max": 3200.0
+        },
+        {
+            "current": 1203.305,
+            "min": 1200.0,
+            "max": 3200.0
+        },
+        {
+            "current": 1199.204,
+            "min": 1200.0,
+            "max": 3200.0
+        },
+        {
+            "current": 1198.543,
+            "min": 1200.0,
+            "max": 3200.0
+        },
+        {
+            "current": 1200.381,
+            "min": 1200.0,
+            "max": 3200.0
+        },
+        {
+            "current": 1603.812,
+            "min": 1200.0,
+            "max": 3200.0
+        },
+        {
+            "current": 1198.762,
+            "min": 1200.0,
+            "max": 3200.0
+        },
+        {
+            "current": 1530.666,
+            "min": 1200.0,
+            "max": 3200.0
+        },
+        {
+            "current": 3193.401,
+            "min": 1200.0,
+            "max": 3200.0
+        },
+        {
+            "current": 1198.547,
+            "min": 1200.0,
+            "max": 3200.0
+        },
+        {
+            "current": 1198.884,
+            "min": 1200.0,
+            "max": 3200.0
+        },
+        {
+            "current": 1198.516,
+            "min": 1200.0,
+            "max": 3200.0
+        },
+        {
+            "current": 1199.18,
+            "min": 1200.0,
+            "max": 3200.0
+        },
+        {
+            "current": 2355.377,
+            "min": 1200.0,
+            "max": 3200.0
+        },
+        {
+            "current": 1199.293,
+            "min": 1200.0,
+            "max": 3200.0
+        }
+    ],
+    "disk": {
+        "/": {
+            "total": 879.1403541564941,
+            "used": 698.073356628418
+        }
+    },
+    "gpu": "NVIDIA GeForce GTX 1080 Ti",
+    "gpu_count": 4,
+    "gpu_devices": [
+        {
+            "name": "NVIDIA GeForce GTX 1080 Ti",
+            "memory_total": 11811160064
+        },
+        {
+            "name": "NVIDIA GeForce GTX 1080 Ti",
+            "memory_total": 11811160064
+        },
+        {
+            "name": "NVIDIA GeForce GTX 1080 Ti",
+            "memory_total": 11811160064
+        },
+        {
+            "name": "NVIDIA GeForce GTX 1080 Ti",
+            "memory_total": 11811160064
+        }
+    ],
+    "memory": {
+        "total": 31.301963806152344
+    }
+}
