@@ -322,7 +322,8 @@ class SpikingNet(NetBase[Any]):
         # print(self.scheduled)
         self.model.reset()
         if self.scheduled:
-            
+            self._n_reset += 1
+            self._epoch = self._n_reset%5e3
             # now we have epoch -> use as scheduler
             epochs_before_update = 25
             epoch_update_interval = 50
