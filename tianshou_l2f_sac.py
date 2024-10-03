@@ -22,21 +22,21 @@ from torch.utils.tensorboard import SummaryWriter
 
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--buffer-size", type=int, default=1000000)
+    parser.add_argument("--buffer-size", type=int, default=100000)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--hidden-sizes", type=int, nargs="*", default=[256, 256])
+    parser.add_argument("--hidden-sizes", type=int, nargs="*", default=[64, 64])
     parser.add_argument("--actor-lr", type=float, default=1e-3)
     parser.add_argument("--critic-lr", type=float, default=1e-3)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
-    parser.add_argument("--alpha", type=float, default=0)
+    parser.add_argument("--alpha", type=float, default=0.)
     parser.add_argument("--auto-alpha", default=False, action="store_true")
     parser.add_argument("--alpha-lr", type=float, default=3e-4)
     parser.add_argument("--start-timesteps", type=int, default=10000)
     parser.add_argument("--epoch", type=int, default=200)
-    parser.add_argument("--step-per-epoch", type=int, default=1.5e4)
+    parser.add_argument("--step-per-epoch", type=int, default=5e3)
     parser.add_argument("--step-per-collect", type=int, default=1)
-    parser.add_argument("--update-per-step", type=int, default=1)
+    parser.add_argument("--update-per-step", type=int, default=2)
     parser.add_argument("--n-step", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--training-num", type=int, default=12)
@@ -114,7 +114,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
         log_alpha = torch.zeros(1, requires_grad=True, device=args.device)
         alpha_optim = torch.optim.Adam([log_alpha], lr=args.alpha_lr)
         args.alpha = (target_entropy, log_alpha, alpha_optim)
-
+    
     policy: SACPolicy = SACPolicy(
         actor=actor,
         actor_optim=actor_optim,
@@ -140,7 +140,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
         buffer = VectorReplayBuffer(args.buffer_size, len(train_envs))
     else:
         buffer = ReplayBuffer(args.buffer_size)
-    train_collector = Collector(policy, train_envs, buffer, exploration_noise=True)
+    train_collector = Collector(policy, train_envs, buffer, exploration_noise=False)
     test_collector = Collector(policy, test_envs)
     train_collector.reset()
     train_collector.collect(n_step=args.start_timesteps, random=True)
@@ -172,7 +172,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
       'test_num': args.test_num,
       'update_per_step': args.update_per_step,
       'batch_size': args.batch_size,
-      'wandb_project': 'FastPyDroneGym',
+      'wandb_project': 'SSAC',
       'resume_id':1,
       'logger':'wandb',
       'algo_name': 'sac',
@@ -187,17 +187,21 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
       'buffer_size': 300000,
       'collector_type': 'Collector',
       'reinit': True,
-      'reward_function': 'reward_squared_fast_learning',
+      'reward_function': 'same as vague voice or snowy spaceship',
+      'exploration_noise': False,
       }
-
-    logger = WandbLogger(project="l2f",config=args_wandb)
+    wandb_args = {'description': str(input("Description: ")),}
+    logger = WandbLogger(project="SSAC",config=args_wandb)
     writer = SummaryWriter(log_path)
     writer.add_text("args", str(args_wandb))
     logger.load(writer)
 
-
+    log_name = logger.wandb_run.name
+    start_time = datetime.datetime.now()
     def save_best_fn(policy: BasePolicy) -> None:
-        torch.save(policy.state_dict(), os.path.join(log_path, "policy.pth"))
+        torch.save(policy.state_dict(), os.path.join(log_path,f"{log_name}policy_ANN_actor_Full_State_{str(start_time)}.pth"))
+
+
 
     if not args.watch:
         # trainer
