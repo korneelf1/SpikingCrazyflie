@@ -49,7 +49,7 @@ args_wandb = {
       'collector_type': 'Collector',
       'reinit': True,
       'reward_function': 'reward_squared_fast_learning',
-      'slope': 2,
+      'slope': 5,
       'slope_schedule': False,
         'alpha': 0.0,
         'action_history': False,
@@ -67,7 +67,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--alpha", type=float, default=args_wandb['alpha'])
     parser.add_argument("--auto-alpha", default=False, action="store_true")
     parser.add_argument("--alpha-lr", type=float, default=3e-4)
-    parser.add_argument("--start-timesteps", type=int, default=100)
+    parser.add_argument("--start-timesteps", type=int, default=10000)
     parser.add_argument("--epoch", type=int, default=250)
     parser.add_argument("--step-per-epoch", type=int, default=args_wandb['step_per_epoch'])
     parser.add_argument("--step-per-collect", type=int, default=args_wandb['step_per_collect'])
@@ -120,8 +120,8 @@ import wandb
 # wandb.init(mode='disabled')
 import gymnasium as gym
 def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
-    env = gym.make("MountainCarContinuous-v0")
-    # env = Learning2Fly(action_history=args_wandb['action_history'])
+    # env = gym.make("MountainCarContinuous-v0")
+    env = Learning2Fly(action_history=args_wandb['action_history'])
     
     args.state_shape = env.observation_space.shape or env.observation_space.n
     args.action_shape = env.action_space.shape or env.action_space.n
@@ -200,7 +200,7 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
         buffer = VectorReplayBuffer(args.buffer_size, len(train_envs))
     else:
         buffer = ReplayBuffer(args.buffer_size)
-    train_collector = Collector(policy, train_envs, buffer, exploration_noise=True)
+    train_collector = Collector(policy, train_envs, buffer, exploration_noise=False)
     test_collector = Collector(policy, test_envs)
     train_collector.reset()
     train_collector.collect(n_step=args.start_timesteps, random=True)
