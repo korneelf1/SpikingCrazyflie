@@ -327,7 +327,7 @@ class SpikingNet(NetBase[Any]):
             self._epoch = self._n_reset//20e3
             # print(self._epoch)
             # now we have epoch -> use as scheduler
-            epochs_before_update = 25
+            epochs_before_update = 50
             epoch_update_interval = 25
             # avoid constantly updating the surrogate gradient!
             if self._prev_epoch != self._epoch:
@@ -343,7 +343,7 @@ class SpikingNet(NetBase[Any]):
                         if wandb.run is not None:
                             # print('logging')
                             wandb.run.log({"surrogate fast sigmoid slope": self._slope})
-                        self._slope = min(self.slope_init+(self._epoch - epochs_before_update)/epoch_update_interval, 25)
+                        self._slope = min(self.slope_init+5*(self._epoch - epochs_before_update)/epoch_update_interval, 30)
                         # print("updating model, current slope: ", self._slope)
                         # create model with new slope
                         self.model.update_slope(self._slope)
