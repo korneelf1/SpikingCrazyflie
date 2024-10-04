@@ -18,6 +18,7 @@ from spikingActorProb import SpikingNet
 import torch
 import numpy as np
 import os
+import matplotlib.pyplot as plt
 
 
 env = Learning2Fly()
@@ -82,22 +83,44 @@ policy.eval()
 
 out = []
 obs_out = []
+actions = []
 obs = env.reset()[0]
 
 for i in range(1000):
     obs = torch.tensor(obs).float()
-    action = torch.tanh(policy.actor(obs)[0][0])
+    action = policy.actor(obs)[0][0]
+    actions.append(action.detach().numpy())
+    action = torch.tanh(action/50)
     obs, rewards,dones, _, info = env.step(action.detach().numpy())
     out.append((obs, rewards, dones, info))
     obs_out.append(obs)
     if dones:
-        env.reset()
+        obs = env.reset()[0]
 
 
 
 
 xs = out[0]
 dones = out[3]
+
+actions = np.array(actions).reshape(-1,4)
+# plot actions
+plt.figure()
+plt.subplot(411)
+plt.plot(actions[:,0],label='m1')
+plt.legend()
+plt.subplot(412)
+plt.plot(actions[:,1],label='m2')
+plt.legend()
+plt.subplot(413)
+plt.plot(actions[:,2],label='m3')
+plt.legend()
+plt.subplot(414)
+plt.plot(actions[:,3],label='m4')
+plt.legend()
+plt.show()
+
+
 
 xs = np.array(obs_out)
 pos = xs[:,:3]
@@ -111,7 +134,6 @@ omega = xs[:,10:13]
 # omega_norm = np.linalg.norm(omega,axis=1)
 
 # use matplotlib to visualize the norm of the 4 vectors of the 3 drones
-import matplotlib.pyplot as plt
 plt.figure()
 # plot x y z of positions
 plt.subplot(311)
@@ -125,6 +147,47 @@ plt.plot(pos[:,2],label='z')
 plt.legend()
 plt.show()
 
+# plot quaternions
+plt.figure()
+plt.subplot(411)
+plt.plot(quat[:,0],label='x')
+plt.legend()
+plt.subplot(412)
+plt.plot(quat[:,1],label='y')
+plt.legend()
+plt.subplot(413)
+plt.plot(quat[:,2],label='z')
+plt.legend()
+plt.subplot(414)
+plt.plot(quat[:,3],label='w')
+plt.legend()
+plt.show()
+
+# plot velocities
+plt.figure()
+plt.subplot(311)
+plt.plot(vel[:,0],label='x')
+plt.legend()
+plt.subplot(312)
+plt.plot(vel[:,1],label='y')
+plt.legend()
+plt.subplot(313)
+plt.plot(vel[:,2],label='z')
+plt.legend()
+plt.show()
+
+# plot angular velocities
+plt.figure()
+plt.subplot(311)
+plt.plot(omega[:,0],label='x')
+plt.legend()
+plt.subplot(312)
+plt.plot(omega[:,1],label='y')
+plt.legend()
+plt.subplot(313)
+plt.plot(omega[:,2],label='z')
+plt.legend()
+plt.show()
 
 # plt.figure()
 # plt.subplot(221)
