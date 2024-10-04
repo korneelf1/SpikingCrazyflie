@@ -227,7 +227,8 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
 
     start_time = datetime.datetime.now()
     def save_best_fn(policy: BasePolicy) -> None:
-        torch.save(policy.state_dict(), os.path.join(log_path,f"policy_snn_actor_Full_State_{str(start_time)}_slope_{str(policy.actor.preprocess._slope)}.pth"))
+        torch.save(policy.state_dict(), os.path.join(log_path,f"policy_snn_actor_Full_State_{str(start_time)}.pth"))
+        wandb.log_artifact(os.path.join(log_path,f"policy_snn_actor_Full_State_{str(start_time)}.pth"), name='SNN_128', type='model')
     print("Does policy have epoch attribute?")
     print(hasattr(policy.actor.preprocess, "epoch"))
     if not args.watch:
@@ -257,4 +258,5 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
 
 if __name__ == "__main__":
     test_sac(logger=logger)
-    # wandb.Artifact()
+    
+    wandb.finish()

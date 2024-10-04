@@ -198,6 +198,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
 
     def save_best_fn(policy: BasePolicy) -> None:
         torch.save(policy.state_dict(), os.path.join(log_path, "policy.pth"))
+        wandb.log_artifact(os.path.join(log_path, "policy.pth"), name='policy', type='model')
 
     if not args.watch:
         # trainer
@@ -227,3 +228,4 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
 
 if __name__ == "__main__":
     test_sac()
+    wandb.finish()
