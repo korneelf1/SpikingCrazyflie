@@ -100,11 +100,11 @@ class Learning2Fly(gym.Env):
 
         # Reward parameters
                 # intial parameters
-        self.Cp = 0.1 # position weight
-        self.Cv = 0.000 # velocity weight
+        self.Cp = 0.25 # position weight
+        self.Cv = 0.005 # velocity weight
         self.Cq = 0 # orientation weight
         self.Ca = .0 # action weight og .334, but just learns to fly out of frame
-        self.Cw = .0000 # angular velocity weight 
+        self.Cw = .0050 # angular velocity weight 
         self.Crs = 1 # reward for survival
         self.Cab = 0.0 # action baseline
 
