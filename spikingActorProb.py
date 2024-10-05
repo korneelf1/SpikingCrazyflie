@@ -328,8 +328,8 @@ class SpikingNet(NetBase[Any]):
             self._epoch = self._n_reset//20e3
             # print(self._epoch)
             # now we have epoch -> use as scheduler
-            epochs_before_update = 10
-            epoch_update_interval = 10
+            epochs_before_update = 50
+            epoch_update_interval = 30
             # avoid constantly updating the surrogate gradient!
             if self._prev_epoch != self._epoch:
                 if self._epoch == 1:
@@ -340,11 +340,11 @@ class SpikingNet(NetBase[Any]):
                             wandb.run.log({"surrogate fast sigmoid slope": self._slope})
 
                 if self._epoch > epochs_before_update:
-                    if self._epoch % epoch_update_interval == 0 and self._slope<30: # each epoch is 20e4 steps -> every 2 epochs # every 100 steps is 400 backwards -> 5e3 steps is 20e3 backwards every 9 epochs would be 18e4 backwards
+                    if self._epoch % epoch_update_interval == 0 and self._slope<10: # each epoch is 20e4 steps -> every 2 epochs # every 100 steps is 400 backwards -> 5e3 steps is 20e3 backwards every 9 epochs would be 18e4 backwards
                         if wandb.run is not None:
                             # print('logging')
                             wandb.run.log({"surrogate fast sigmoid slope": self._slope})
-                        self._slope = min(self.slope_init+1*(self._epoch - epochs_before_update)/epoch_update_interval, 30)
+                        self._slope = min(self.slope_init+1*(self._epoch - epochs_before_update)/epoch_update_interval, 10)
                         # print("updating model, current slope: ", self._slope)
                         # create model with new slope
                         self.model.update_slope(self._slope)
