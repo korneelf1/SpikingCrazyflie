@@ -131,6 +131,7 @@ class SMLP(nn.Module):
         x, self.cur_out = self.lif_out(x, self.cur_out)
         # self.cur_out = x
         self.hidden_states = [self.cur_in] + self.cur_lst + [self.cur_out]
+        x /= self.output_dim
         return x, self.hidden_states
 
     def __call__(self, *args: Any) -> Any:

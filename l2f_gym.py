@@ -148,7 +148,7 @@ class Learning2Fly(gym.Env):
 
         return self.obs, reward, done,done, {}
     
-    def reset(self,seed=None):
+    def reset(self,seed=None, options=None):
         sample_initial_parameters(self.device, self.env, self.params, self.rng)
 
         self.params.parameters.dynamics.mass *= 0.1

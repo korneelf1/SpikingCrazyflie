@@ -8,6 +8,7 @@ import pprint
 import numpy as np
 import torch
 
+from gsac import GSACPolicy
 from tianshou.data import Collector, CollectStats, ReplayBuffer, VectorReplayBuffer
 from tianshou.highlevel.logger import LoggerFactoryDefault
 from tianshou.policy import SACPolicy
@@ -17,32 +18,95 @@ from tianshou.utils.net.common import Net
 from tianshou.utils.net.continuous import ActorProb, Critic
 from tianshou.env import DummyVectorEnv
 from l2f_gym import Learning2Fly, SubprocVectorizedL2F, ShmemVectorizedL2F
-from tianshou.utils import WandbLogger
-from torch.utils.tensorboard import SummaryWriter
+
+# spiking neural network specific:
+from spiking_gym_wrapper import SpikingEnv
+from spikingActorProb import SpikingNet
+
+# wandb
+import wandb
+wandb.init(mode='disabled')
+
+import gymnasium as gym
+
+class StackedWrapper(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        self.last_action = None
+
+    def step(self, action):
+        obs, reward, done,trunc, info = self.env.step(action)
+        
+        # Store the last action taken
+        if self.last_action is None:
+            self.last_action = np.zeros(self.env.action_space.shape)  # Assuming discrete actions
+        self.last_action = action
+        
+        # Combine state and action
+        new_obs = [obs, self.last_action, reward.reshape(1,)]
+        return new_obs, reward, done,trunc, info
+
+    def reset(self, **kwargs):
+        self.last_action = None
+        obs, info = super().reset(**kwargs)
+        obs = [obs, np.zeros(self.env.action_space.shape),np.array(0).reshape(1,)]
+        return obs, info
+
+args_wandb = {
+      'epoch': 1,
+      'step_per_epoch': 5e3,
+      'step_per_collect': 1, # 2.5 s
+      'update_per_step': 2,
+      'test_num': 50,
+      'batch_size': 256,
+      'Environment': 'Continuous Mountain Cart',
+      'resume_id':1,
+      'logger':'wandb',
+      'algo_name': 'sac',
+      'task': 'stabilize',
+      'seed': int(3),
+      'logdir':'',
+      'spiking':False,
+      'recurrent':False,
+      'masked':False,
+      'logger': 'wandb',
+      'drone': 'stock drone',
+      'buffer_size': 1000000,
+      'collector_type': 'Collector',
+      'reinit': True,
+      'reward_function': 'reward_squared_fast_learning',
+      'slope': 5,
+      'slope_schedule': False,
+        'alpha': 0.0,
+        'action_history': False,
+      }
 
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--buffer-size", type=int, default=1000000)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--hidden-sizes", type=int, nargs="*", default=[64, 64])
+    parser.add_argument("--hidden-sizes", type=int, nargs="*", default=[128,128])
     parser.add_argument("--actor-lr", type=float, default=1e-3)
     parser.add_argument("--critic-lr", type=float, default=1e-3)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
-    parser.add_argument("--alpha", type=float, default=0.)
+    parser.add_argument("--alpha", type=float, default=args_wandb['alpha'])
     parser.add_argument("--auto-alpha", default=False, action="store_true")
     parser.add_argument("--alpha-lr", type=float, default=3e-4)
     parser.add_argument("--start-timesteps", type=int, default=10000)
-    parser.add_argument("--epoch", type=int, default=200)
-    parser.add_argument("--step-per-epoch", type=int, default=5e3)
-    parser.add_argument("--step-per-collect", type=int, default=1)
-    parser.add_argument("--update-per-step", type=int, default=2)
+    parser.add_argument("--epoch", type=int, default=250)
+    parser.add_argument("--step-per-epoch", type=int, default=args_wandb['step_per_epoch'])
+    parser.add_argument("--step-per-collect", type=int, default=args_wandb['step_per_collect'])
+    parser.add_argument("--update-per-step", type=int, default=args_wandb['update_per_step'])
+    parser.add_argument("--repeat-per-forward", type=int, default=4)
     parser.add_argument("--n-step", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--training-num", type=int, default=12)
-    parser.add_argument("--test-num", type=int, default=10)
+    parser.add_argument("--training-num", type=int, default=1)
+    parser.add_argument("--test-num", type=int, default=1)
     parser.add_argument("--logdir", type=str, default="log")
     parser.add_argument("--render", type=float, default=0.0)
+    parser.add_argument("--slope", type=float, default=args_wandb['slope'])
+    parser.add_argument("--slope_schedule", type=bool, default=args_wandb['slope_schedule'])
     parser.add_argument(
         "--device",
         type=str,
@@ -65,11 +129,29 @@ def get_args() -> argparse.Namespace:
     )
     return parser.parse_args()
 
+# log
+import datetime
+now = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
+# args['algo_name = "sac"
+current_path = os.path.dirname(os.path.abspath(__file__))
+log_path = os.path.join(current_path,args_wandb['logdir'], args_wandb['task'], "sac")
+from tianshou.utils import WandbLogger
+from torch.utils.tensorboard import SummaryWriter
 
-def test_sac(args: argparse.Namespace = get_args()) -> None:
-    env = Learning2Fly()
-    train_envs = DummyVectorEnv([lambda: Learning2Fly() for _ in range(args.training_num)])
-    test_envs = DummyVectorEnv([lambda: Learning2Fly() for _ in range(args.test_num)])
+logger = WandbLogger(project="SSAC",config=args_wandb)
+writer = SummaryWriter(log_path)
+writer.add_text("args", str(args_wandb))
+logger.load(writer)
+import wandb
+# wandb.init(mode='disabled')
+import gymnasium as gym
+def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
+    # env = gym.make("MountainCarContinuous-v0")
+    env = StackedWrapper(Learning2Fly(action_history=args_wandb['action_history']))
+    
+    train_envs = DummyVectorEnv([lambda: StackedWrapper(Learning2Fly()) for _ in range(args.training_num)])
+    test_envs = DummyVectorEnv([lambda: StackedWrapper(Learning2Fly()) for _ in range(args.test_num)])
+
 
     args.state_shape = env.observation_space.shape or env.observation_space.n
     args.action_shape = env.action_space.shape or env.action_space.n
@@ -81,7 +163,26 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     # model
-    net_a = Net(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device)
+    net_a = SpikingNet(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device, action_shape=128, repeat=1, slope=args.slope, slope_schedule=args.slope_schedule, reset_in_call=False)
+    ghost_actor = ActorProb(
+        net_a,
+        args.action_shape,
+        device=args.device,
+        unbounded=True,
+        conditioned_sigma=True,
+    ).to(args.device)
+    
+    logger.wandb_run.watch(ghost_actor)
+    ghost_actor_optim = torch.optim.Adam(ghost_actor.parameters(), lr=args.actor_lr)
+
+    ### Create actors and critics
+    net_a = Net(
+        state_shape=args.state_shape,
+        action_shape=args.action_shape,
+        hidden_sizes=args.hidden_sizes,
+        concat=False,
+        device=args.device,
+    )
     actor = ActorProb(
         net_a,
         args.action_shape,
@@ -89,6 +190,8 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
         unbounded=True,
         conditioned_sigma=True,
     ).to(args.device)
+
+    print(actor.parameters())
     actor_optim = torch.optim.Adam(actor.parameters(), lr=args.actor_lr)
     net_c1 = Net(
         state_shape=args.state_shape,
@@ -114,10 +217,14 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
         log_alpha = torch.zeros(1, requires_grad=True, device=args.device)
         alpha_optim = torch.optim.Adam([log_alpha], lr=args.alpha_lr)
         args.alpha = (target_entropy, log_alpha, alpha_optim)
-    
-    policy: SACPolicy = SACPolicy(
+
+    print("Does spiking network have attribute epoch?")
+    print(hasattr(actor.preprocess, "epoch"))
+    policy: GSACPolicy = GSACPolicy(
         actor=actor,
         actor_optim=actor_optim,
+        ghost_actor=ghost_actor,
+        ghost_actor_optim=ghost_actor_optim,
         critic=critic1,
         critic_optim=critic1_optim,
         critic2=critic2,
@@ -137,21 +244,21 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
     # collector
     buffer: VectorReplayBuffer | ReplayBuffer
     if args.training_num > 1:
-        buffer = VectorReplayBuffer(args.buffer_size, len(train_envs))
+        buffer = VectorReplayBuffer(args.buffer_size, len(train_envs),stack_num=80)
     else:
-        buffer = ReplayBuffer(args.buffer_size)
-    train_collector = Collector(policy, train_envs, buffer, exploration_noise=False)
+        buffer = ReplayBuffer(args.buffer_size, stack_num=80)
+    train_collector = Collector(policy, train_envs, buffer, exploration_noise=False,)
     test_collector = Collector(policy, test_envs)
-    train_collector.reset()
-    train_collector.collect(n_step=args.start_timesteps, random=True)
+    
+    # train_collector.collect( random=True)
 
-    # log
-    now = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
-    args.algo_name = "sac"
-    log_name = os.path.join(args.algo_name, str(args.seed), now)
-    log_path = os.path.join(args.logdir, log_name)
+    # # log
+    # now = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
+    # args.algo_name = "sac"
+    # log_name = os.path.join(args.algo_name, str(args.seed), now)
+    # log_path = os.path.join(args.logdir, log_name)
 
-    # logger
+    # # logger
     # logger_factory = LoggerFactoryDefault()
     # if args.logger == "wandb":
     #     logger_factory.logger_type = "wandb"
@@ -165,44 +272,12 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
     #     run_id=args.resume_id,
     #     config_dict=vars(args),
     # )
-    args_wandb = {
-      'epoch': args.epoch,
-      'step_per_epoch': args.step_per_epoch,
-      'step_per_collect': args.step_per_collect, # 2.5 s
-      'test_num': args.test_num,
-      'update_per_step': args.update_per_step,
-      'batch_size': args.batch_size,
-      'wandb_project': 'SSAC',
-      'resume_id':1,
-      'logger':'wandb',
-      'algo_name': 'sac',
-      'task': 'stabilize',
-      'seed': int(3),
-      'logdir':'',
-      'spiking':False,
-      'recurrent':False,
-      'masked':False,
-      'logger': 'wandb',
-      'drone': 'stock drone',
-      'buffer_size': 300000,
-      'collector_type': 'Collector',
-      'reinit': True,
-      'reward_function': 'same as vague voice or snowy spaceship',
-      'exploration_noise': True,
-      }
-    wandb_args = {'description': str(input("Description: ")),}
-    logger = WandbLogger(project="SSAC",config=args_wandb)
-    writer = SummaryWriter(log_path)
-    writer.add_text("args", str(args_wandb))
-    logger.load(writer)
 
-    log_name = logger.wandb_run.name
     start_time = datetime.datetime.now()
     def save_best_fn(policy: BasePolicy) -> None:
-        torch.save(policy.state_dict(), os.path.join(log_path,f"{log_name}policy_ANN_actor_Full_State_{str(start_time)}.pth"))
-
-
-
+        torch.save(policy.state_dict(), os.path.join(log_path,f"policy_snn_actor_Full_State_{str(start_time)}.pth"))
+    print("Does policy have epoch attribute?")
+    print(hasattr(policy.actor.preprocess, "epoch"))
     if not args.watch:
         # trainer
         result = OffpolicyTrainer(
@@ -218,7 +293,6 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
             logger=logger,
             update_per_step=args.update_per_step,
             test_in_train=False,
-            show_progress=True,
         ).run()
         pprint.pprint(result)
 
@@ -230,4 +304,5 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
 
 
 if __name__ == "__main__":
-    test_sac()
+    test_sac(logger=logger)
+    # wandb.Artifact()
