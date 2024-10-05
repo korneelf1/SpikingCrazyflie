@@ -10,7 +10,7 @@ import torch
 
 from gsac import GSACPolicy
 from tianshou.data import Collector, CollectStats, ReplayBuffer, VectorReplayBuffer
-from tianshou.highlevel.logger import LoggerFactoryDefault
+# from tianshou.highlevel.logger import LoggerFactoryDefault
 from tianshou.policy import SACPolicy
 from tianshou.policy.base import BasePolicy
 from tianshou.trainer import OffpolicyTrainer
@@ -136,12 +136,12 @@ now = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
 current_path = os.path.dirname(os.path.abspath(__file__))
 log_path = os.path.join(current_path,args_wandb['logdir'], args_wandb['task'], "sac")
 from tianshou.utils import WandbLogger
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 
-logger = WandbLogger(project="SSAC",config=args_wandb)
-writer = SummaryWriter(log_path)
-writer.add_text("args", str(args_wandb))
-logger.load(writer)
+# logger = WandbLogger(project="SSAC",config=args_wandb)
+# writer = SummaryWriter(log_path)
+# writer.add_text("args", str(args_wandb))
+# logger.load(writer)
 import wandb
 # wandb.init(mode='disabled')
 import gymnasium as gym
@@ -172,7 +172,7 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
         conditioned_sigma=True,
     ).to(args.device)
     
-    logger.wandb_run.watch(ghost_actor)
+    # logger.wandb_run.watch(ghost_actor)
     ghost_actor_optim = torch.optim.Adam(ghost_actor.parameters(), lr=args.actor_lr)
 
     ### Create actors and critics
@@ -304,5 +304,5 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
 
 
 if __name__ == "__main__":
-    test_sac(logger=logger)
+    test_sac(logger=None)
     # wandb.Artifact()

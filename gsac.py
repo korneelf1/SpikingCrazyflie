@@ -178,7 +178,7 @@ class GSACPolicy(SACPolicy[TSACTrainingStats], Generic[TSACTrainingStats]):  # t
         state: dict | Batch | np.ndarray | None = None,
         **kwargs: Any,
     ) -> DistLogProbBatchProtocol:
-        if len(batch.obs.shape )==2:
+        if len(batch.obs.shape )==2: # we are interacting with environment, so single timestep single output
             (loc_B, scale_B), hidden_BH = self.actor(torch.tensor(batch.obs[:,0][-1]).unsqueeze(-2), state=state, info=batch.info)
             dist = Independent(Normal(loc=loc_B, scale=scale_B), 1)
             if self.deterministic_eval and not self.is_within_training_step:
@@ -196,9 +196,28 @@ class GSACPolicy(SACPolicy[TSACTrainingStats], Generic[TSACTrainingStats]):  # t
                 dist=dist,
                 log_prob=log_prob,
             )
-        elif len(batch.obs.shape )==3:
+        elif len(batch.obs.shape )==3: # we are training on sequences
             T = batch.obs.shape[1]
-            raise NotImplementedError   
+            batch_size = batch.obs.shape[0]
+            # we can flatten over time for thhis one, cause should be a non-stateful actor anyways
+            (loc_B, scale_B), hidden_BH = self.actor(np.vstack(batch.obs.reshape(-1,3)[:,0]), state=state, info=batch.info) # should be a non-stateful network
+            dist = Independent(Normal(loc=loc_B, scale=scale_B), 1)
+            if self.deterministic_eval and not self.is_within_training_step:
+                act_B = dist.mode
+            else:
+                act_B = dist.rsample()
+            log_prob = dist.log_prob(act_B).unsqueeze(-1)
+
+            squashed_action = torch.tanh(act_B)
+            log_prob = correct_log_prob_gaussian_tanh(log_prob, squashed_action)
+            # reshape all of them into batch_size, T, -1
+            result = Batch(
+                logits=(loc_B.reshape(batch_size,T,-1), scale_B.reshape(batch_size,T,-1)),
+                act=squashed_action.reshape(batch_size,T,-1),
+                state=hidden_BH,
+                dist=dist,
+                log_prob=log_prob.reshape(batch_size,T,-1),
+            )
         return cast(DistLogProbBatchProtocol, result)
 
     def _target_q(self, buffer: ReplayBuffer, indices: np.ndarray) -> torch.Tensor:
@@ -206,12 +225,14 @@ class GSACPolicy(SACPolicy[TSACTrainingStats], Generic[TSACTrainingStats]):  # t
             obs=buffer[indices].obs_next,
             info=[None] * len(indices),
         )  # obs_next: s_{t+n}
+        # if len(obs_next_batch.obs.shape) ==3: # we have sequence, that we can flatten!
+        #     obs_next_result = self(obs_next_batch)
         obs_next_result = self(obs_next_batch)
         act_ = obs_next_result.act
         return (
             torch.min(
-                self.critic_old(obs_next_batch.obs, act_),
-                self.critic2_old(obs_next_batch.obs, act_),
+                self.critic_old(np.vstack(obs_next_batch.obs.reshape(-1,3)[:,0]), act_),
+                self.critic2_old(np.vstack(obs_next_batch.obs.reshape(-1,3)[:,0]), act_),
             )
             - self.alpha * obs_next_result.log_prob
         )
