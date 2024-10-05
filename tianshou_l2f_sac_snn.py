@@ -29,7 +29,7 @@ args_wandb = {
       'epoch': 1,
       'step_per_epoch': 5e3,
       'step_per_collect': 1, # 2.5 s
-      'update_per_step': 2,
+      'update_per_step': 1,
       'test_num': 50,
       'batch_size': 256,
       'Environment': 'Continuous Mountain Cart',
@@ -48,8 +48,8 @@ args_wandb = {
       'collector_type': 'Collector',
       'reinit': True,
       'reward_function': 'reward_squared_fast_learning',
-      'slope': 5,
-      'slope_schedule': True,
+      'slope': 2,
+      'slope_schedule': False,
         'alpha': 0.0,
         'action_history': False,
       }
