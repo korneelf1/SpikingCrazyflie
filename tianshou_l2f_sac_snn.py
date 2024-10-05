@@ -47,9 +47,9 @@ args_wandb = {
       'buffer_size': 1000000,
       'collector_type': 'Collector',
       'reinit': True,
-      'reward_function': 'reward_squared_fast_learning',
-      'slope': 2,
-      'slope_schedule': True,
+      'reward_function': 'classic experiment',
+      'slope': 5,
+      'slope_schedule': False,
         'alpha': 0.0,
         'action_history': False,
       }
