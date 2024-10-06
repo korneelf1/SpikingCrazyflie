@@ -22,7 +22,7 @@ INPUT_SIZE = 4
 OUTPUT_SIZE = 4
 HIDDEN_SIZE = 64
 
-N_SAMPLES = 100
+N_SAMPLES = 256
 
 import torch
 
@@ -86,7 +86,7 @@ def sigmoid_fn(slope=25):
     return inner
 
 class sigmoid_2(Module):
-    def __init__(self, slope=2):
+    def __init__(self, slope=20):
         super(sigmoid_2, self).__init__()
         self.slope = slope
 
@@ -94,21 +94,21 @@ class sigmoid_2(Module):
         return Sigmoid.apply(x, self.slope)
 
 class sigmoid_7(Module):
-    def __init__(self, slope=7):
+    def __init__(self, slope=15):
         super(sigmoid_7, self).__init__()
         self.slope = slope
 
     def forward(self, x):
         return Sigmoid.apply(x, self.slope)
 class sigmoid_12(Module):
-    def __init__(self, slope=12):
+    def __init__(self, slope=10):
         super(sigmoid_12, self).__init__()
         self.slope = slope
 
     def forward(self, x):
         return Sigmoid.apply(x, self.slope)
 class sigmoid_17(Module):
-    def __init__(self, slope=17):
+    def __init__(self, slope=5):
         super(sigmoid_17, self).__init__()
         self.slope = slope
 
@@ -289,9 +289,12 @@ def gradient_boxplot():
                 grads_17_stacked[j].flatten().numpy(), 
                 grads_noisy_stacked[j].flatten().numpy(),
                 grads_true_stacked[j].flatten().numpy()]
-        axs[j].boxplot(data)
+        axs[j].violinplot(data, showmeans=True, showextrema=True, showmedians=True)
         axs[j].set_title(f'Layer {j} Gradients')
-        axs[j].set_xticklabels(['2','7','12','17','noisy','true'])
+        axs[j].set_xticklabels(['2','7','12','17','noise on Parameters','true'])
+        # print the bias and variance of the gradients compared to ground truth (grads_true_stacked)
+        print(f'Layer {j} bias: {np.mean(data, axis=1)-grads_true_stacked[j].flatten().numpy()}')
+        print(f'Layer {j} variance: {np.var(data, axis=1)}')
         # make y axis of all subplots the same
         axs[j].set_ylim(-1,1)
 
@@ -400,7 +403,7 @@ def calculate_cosine_similarity():
     # calculate the cosine similarity between the gradients of the high slope model and the other models
 
 # calculate_sign_reversal_accross_layer()
-gradient_boxplot()
+# gradient_boxplot()
 calculate_cosine_similarity()
 
 plt.show()
