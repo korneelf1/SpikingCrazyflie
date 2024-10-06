@@ -78,7 +78,7 @@ class Learning2Fly(gym.Env):
         initialize_rng(self.device, self.rng, seed)
 
         # curriculum parameters
-        self.Nc = 5e8 # interval of application of curriculum, roughly 10 epochs
+        self.Nc = 10e4 # interval of application of curriculum, roughly 10 epochs
 
         self.rpm = rpm
         if action_history:
@@ -100,12 +100,12 @@ class Learning2Fly(gym.Env):
 
         # Reward parameters
                 # intial parameters
-        self.Cp = 0.2 # position weight
-        self.Cv = 0.0005 # velocity weight
+        self.Cp = 0.25 # position weight
+        self.Cv = 0.005 # velocity weight
         self.Cq = 0 # orientation weight
         self.Ca = .0 # action weight og .334, but just learns to fly out of frame
-        self.Cw = .00005 # angular velocity weight 
-        self.Crs = 1 # reward for survival
+        self.Cw = .005 # angular velocity weight 
+        self.Crs = 5 # reward for survival
         self.Cab = 0.0 # action baseline
 
         
@@ -113,8 +113,8 @@ class Learning2Fly(gym.Env):
         self.CpC = 1.2 # position factor
         self.Cplim = 20 # position limit
 
-        # CvC = 1.4 # velocity factor
-        # Cvlim = 1.5 # velocity limit
+        CvC = 1.4 # velocity factor
+        Cvlim = 1.5 # velocity limit
 
         # CaC = 1.4 # orientation factor
         # Calim = .5 # orientation limit
@@ -180,7 +180,8 @@ class Learning2Fly(gym.Env):
         if self.global_step_counter > self.Nc:
             # updating the curriculum parameters
             self.Cp = min(self.Cp*self.CpC, self.Cplim)
-            # Cv = min(Cv*CvC, Cvlim)
+            self.Cv = min(self.Cv*self.CvC, self.Cvlim)
+            self.Cqw = min(self.Cqw*self.CvC, self.Cvlim)
             # Ca = min(Ca*CaC, Calim)
             self.Crs = max(self.Crs*self.CrsC, self.Crslim)
             print("\n\n\nCurriculum parameters updated:")

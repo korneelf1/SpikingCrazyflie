@@ -49,7 +49,7 @@ args_wandb = {
       'reinit': True,
       'reward_function': 'reward_squared_fast_learning',
       'slope': 2,
-      'slope_schedule': False,
+      'slope_schedule': True,
         'alpha': 0.0,
         'action_history': False,
       }
@@ -85,7 +85,7 @@ def get_args() -> argparse.Namespace:
         type=str,
         default="cuda" if torch.cuda.is_available() else "cpu",
     )
-    parser.add_argument("--resume-path", type=str, default=None)
+    parser.add_argument("--resume-path", type=str, default='stabilize/sac/policy_snn_actor_Full_State_2024-10-04 22:08:29.010211.pth')
     parser.add_argument("--resume-id", type=str, default=None)
     parser.add_argument(
         "--logger",

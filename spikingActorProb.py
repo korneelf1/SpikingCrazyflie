@@ -344,7 +344,7 @@ class SpikingNet(NetBase[Any]):
                         if wandb.run is not None:
                             # print('logging')
                             wandb.run.log({"surrogate fast sigmoid slope": self._slope})
-                        self._slope = min(self.slope_init+5*(self._epoch - epochs_before_update)/epoch_update_interval, 30)
+                        self._slope = min(self.slope_init+1*(self._epoch - epochs_before_update)/epoch_update_interval, 30)
                         # print("updating model, current slope: ", self._slope)
                         # create model with new slope
                         self.model.update_slope(self._slope)
