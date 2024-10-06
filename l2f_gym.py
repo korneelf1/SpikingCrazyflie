@@ -58,7 +58,7 @@ def power_distribution_force_torque(control, arm_length=0.046, thrust_to_torque=
 # power_distribution_force_torque(control, motor_thrust_uncapped, arm_length=0.1, thrust_to_torque=0.05, pwm_to_thrust_a=0.01, pwm_to_thrust_b=0.02)
 
 class Learning2Fly(gym.Env):
-    def __init__(self, curriculum_terminal=False,seed=None,rpm=False, action_history=False) -> None:
+    def __init__(self, curriculum_terminal=False,seed=None,quat=False,rpm=False, action_history=False) -> None:
 
         super().__init__()
         # L2F initialization
@@ -81,6 +81,7 @@ class Learning2Fly(gym.Env):
         self.Nc = 10e4 # interval of application of curriculum, roughly 10 epochs
 
         self.rpm = rpm
+        self.quat = quat # whether to use quaternions or euler
         if action_history:
             action_history_len = 32
             self.action_history = helpers.NumpyDeque((1,4*action_history_len))
@@ -100,24 +101,24 @@ class Learning2Fly(gym.Env):
 
         # Reward parameters
                 # intial parameters
-        self.Cp = 0.25 # position weight
+        self.Cp = 0.5 # position weight
         self.Cv = 0.005 # velocity weight
-        self.Cq = 0 # orientation weight
-        self.Ca = .0 # action weight og .334, but just learns to fly out of frame
-        self.Cw = .005 # angular velocity weight 
-        self.Crs = 5 # reward for survival
-        self.Cab = 0.0 # action baseline
+        self.Cq = 0.005 # orientation weight
+        self.Ca = .1 # action weight og .334, but just learns to fly out of frame
+        self.Cw = .000 # angular velocity weight 
+        self.Crs = 2 # reward for survival
+        self.Cab = (0.334 -.5)*2# action baseline resaceled to -1 1 from 0 1
 
         
 
         self.CpC = 1.2 # position factor
         self.Cplim = 20 # position limit
 
-        CvC = 1.4 # velocity factor
-        Cvlim = 1.5 # velocity limit
+        self.CvC = 1.4 # velocity factor
+        self.Cvlim = 1.5 # velocity limit
 
-        # CaC = 1.4 # orientation factor
-        # Calim = .5 # orientation limit
+        self.CaC = 1.4 # orientation factor
+        self.Calim = .5 # orientation limit
 
         self.CrsC = .8 # reward for survival factor
         self.Crslim = .1 # reward for survival limit
