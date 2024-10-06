@@ -51,7 +51,7 @@ args_wandb = {
       'slope': 2,
       'slope_schedule': False,
         'alpha': 0.0,
-        'action_history': False,
+        'action_history': True,
       }
 
 def get_args() -> argparse.Namespace:
