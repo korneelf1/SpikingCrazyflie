@@ -6,7 +6,7 @@ from tianshou.utils.net.common import Net
 from tianshou.data import VectorReplayBuffer,HERVectorReplayBuffer,PrioritizedVectorReplayBuffer
 from tianshou.trainer import OffpolicyTrainer
 from tianshou.highlevel.logger import LoggerFactoryDefault
-from tianshou.utils import WandbLogger, MultipleLRSchedulers
+# from tianshou.utils import WandbLogger, MultipleLRSchedulers
 from tianshou.data.collector import Collector
 from tianshou.env import SubprocVectorEnv, DummyVectorEnv
 
@@ -76,16 +76,21 @@ def create_policy():
 
 
 
-policy = create_policy()
-policy.load_state_dict(torch.load('stabilize/sac/policy_snn_actor.pth'))
-policy.eval()
+# policy = create_policy()
+# policy.load_state_dict(torch.load('stabilize/sac/policy_snn_actor.pth'))
+# policy.eval()
+# load an sb3 policy
+import stable_baselines3 as sb3
 
+sb3_policy = sb3.SAC.load('SAC_l2f_IMU_vel_penalty_further.zip',map_location=torch.device('cpu'))
 out = []
-env.reset()
-
+obs = env.reset()[0]
+actions = []
 for i in range(1000):
-    action = policy(env.observation)
-    obs, rewards, dones, info = env.step(action)
+    # action = policy(env.observation)
+    action_sb3 = sb3_policy.predict(obs)
+    actions.append(action_sb3)
+    obs, rewards, dones,_, info = env.step(action_sb3)
     out.append((obs, rewards, dones, info))
     if dones:
         env.reset()

@@ -14,20 +14,46 @@ print(env.observation_space)
 
 model = sb3.SAC("MlpPolicy", env, verbose=1)
 
-model.learn(total_timesteps=3e6)
+model.learn(total_timesteps=1.5e6)
 
-model.save("SAC_l2f_IMU")
-model = sb3.SAC.load("SAC_l2f_IMU")
+model.save("SAC_l2f_attempt_to_easen_actions")
+model = sb3.SAC.load("SAC_l2f_attempt_to_easen_actions")
 
-obs = env.reset()
+env = Learning2Fly(t_history=1,imu=False, imu_only=False, euler=True)
+obs = env.reset()[0]
 obs_lst = []
+actions = []
 for i in range(1000):
     action, _states = model.predict(obs, deterministic=True)
-    obs, rewards, dones, info = env.step(action)
+    actions.append(action)
+    obs, rewards, dones,_, info = env.step(action)
     
     if dones:
-        obs = env.reset()
+        obs = env.reset()[0]
     obs_lst.append(obs)
+
+# plot the actions
+import matplotlib.pyplot as plt
+import numpy as np
+
+actions = np.array(actions)
+obs_lst = np.array(obs_lst)
+x = np.arange(actions.shape[0])
+plt.figure()
+plt.plot(x, actions[:,0],label='m1')
+plt.plot(x, actions[:,1],label='m2')
+plt.plot(x, actions[:,2],label='m3')
+plt.plot(x, actions[:,3],label='m4')
+plt.legend()
+plt.show()
+
+# plot angular accelerations
+plt.figure()
+plt.plot(x, obs_lst[:,10],label='x')
+plt.plot(x, obs_lst[:,11],label='y')
+plt.plot(x, obs_lst[:,12],label='z')
+plt.legend()
+plt.show()
 def mpl_render(observations, fps=30):
         '''Render function for gym: visualizes the simulation in a matplotlib animation window, not very flashy but reasonably useful for debugging'''
         import matplotlib.pyplot as plt

@@ -202,12 +202,12 @@ class Learning2Fly(gym.Env):
     def _reward(self):
         # intial parameters
         Cp = 0.10 # position weight
-        Cv = .00 # velocity weight
+        Cv = .01 # velocity weight
         Cq = 0 # orientation weight
-        Ca = .0 # action weight og .334, but just learns to fly out of frame
-        Cw = .00 # angular velocity weight 
+        Ca = .1 # action weight og .334, but just learns to fly out of frame
+        Cw = .0002 # angular velocity weight 
         Crs = 1 # reward for survival
-        Cab = 0.0 # action baseline
+        Cab = (0.334*2)-1 # action baseline
 
         # curriculum parameters
         Nc = 1e5 # interval of application of curriculum
