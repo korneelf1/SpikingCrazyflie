@@ -101,11 +101,11 @@ class Learning2Fly(gym.Env):
 
         # Reward parameters
                 # intial parameters
-        self.Cp = 0.5 # position weight
+        self.Cp = 0.1 # position weight
         self.Cv = 0.005 # velocity weight
-        self.Cq = 0.005 # orientation weight
-        self.Ca = .1 # action weight og .334, but just learns to fly out of frame
-        self.Cw = .000 # angular velocity weight 
+        self.Cq = 0.05 # orientation weight
+        self.Ca = .05 # action weight og .334, but just learns to fly out of frame
+        self.Cw = .0001 # angular velocity weight 
         self.Crs = 2 # reward for survival
         self.Cab = (0.334 -.5)*2# action baseline resaceled to -1 1 from 0 1
 
@@ -182,7 +182,7 @@ class Learning2Fly(gym.Env):
             # updating the curriculum parameters
             self.Cp = min(self.Cp*self.CpC, self.Cplim)
             self.Cv = min(self.Cv*self.CvC, self.Cvlim)
-            self.Cqw = min(self.Cqw*self.CvC, self.Cvlim)
+            self.Cq = min(self.Cq*self.CvC, self.Cvlim)
             # Ca = min(Ca*CaC, Calim)
             self.Crs = max(self.Crs*self.CrsC, self.Crslim)
             print("\n\n\nCurriculum parameters updated:")

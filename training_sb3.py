@@ -9,13 +9,13 @@ from l2f_gym import Learning2Fly
 env = Learning2Fly()
 env = Monitor(env)
 check_env(env)
-env = make_vec_env(lambda: Learning2Fly(), n_envs=12)
+env = make_vec_env(lambda: Learning2Fly(action_history=True), n_envs=12)
 
-model = sb3.DDPG("MlpPolicy", env, verbose=1)
+model = sb3.SAC("MlpPolicy", env, verbose=1)
 
 model.learn(total_timesteps=3e6)
 
-model.save("ddpg_l2f")
+model.save("sac_l2f")
 model = sb3.TD3.load("TD3_l2f")
 
 obs = env.reset()
