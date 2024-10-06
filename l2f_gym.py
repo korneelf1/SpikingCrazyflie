@@ -58,7 +58,7 @@ def power_distribution_force_torque(control, arm_length=0.046, thrust_to_torque=
 # power_distribution_force_torque(control, motor_thrust_uncapped, arm_length=0.1, thrust_to_torque=0.05, pwm_to_thrust_a=0.01, pwm_to_thrust_b=0.02)
 
 class Learning2Fly(gym.Env):
-    def __init__(self, curriculum_terminal=False,seed=None,rpm=False, action_history=False) -> None:
+    def __init__(self, curriculum_terminal=False,seed=None,rpm=False, action_history=True) -> None:
 
         super().__init__()
         # L2F initialization
@@ -104,7 +104,7 @@ class Learning2Fly(gym.Env):
         self.Cv = 0.01 # velocity weight
         self.Cq = 0.00 # orientation weight
         self.Ca = .1 # action weight og .334, but just learns to fly out of frame
-        self.Cw = .0002 # angular velocity weight 
+        self.Cw = .002 # angular velocity weight 
         self.Crs = 1 # reward for survival
         self.Cab = 2*.334-1 # action baseline
 
