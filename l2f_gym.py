@@ -78,7 +78,7 @@ class Learning2Fly(gym.Env):
         initialize_rng(self.device, self.rng, seed)
 
         # curriculum parameters
-        self.Nc = 5e5 # interval of application of curriculum, roughly 10 epochs
+        self.Nc = 5e7 # interval of application of curriculum, roughly 10 epochs
 
         self.rpm = rpm
         if action_history:
@@ -100,13 +100,13 @@ class Learning2Fly(gym.Env):
 
         # Reward parameters
                 # intial parameters
-        self.Cp = 0.25 # position weight
-        self.Cv = 0.0005 # velocity weight
+        self.Cp = 0.1 # position weight
+        self.Cv = 0.01 # velocity weight
         self.Cq = 0.00 # orientation weight
-        self.Ca = .0 # action weight og .334, but just learns to fly out of frame
-        self.Cw = .000050 # angular velocity weight 
+        self.Ca = .1 # action weight og .334, but just learns to fly out of frame
+        self.Cw = .0002 # angular velocity weight 
         self.Crs = 1 # reward for survival
-        self.Cab = 0.0 # action baseline
+        self.Cab = 2*.334-1 # action baseline
 
         
 
