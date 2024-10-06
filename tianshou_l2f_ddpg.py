@@ -24,7 +24,7 @@ def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--buffer-size", type=int, default=1000000)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--hidden-sizes", type=int, nargs="*", default=[256, 256])
+    parser.add_argument("--hidden-sizes", type=int, nargs="*", default=[64, 64])
     parser.add_argument("--actor-lr", type=float, default=1e-3)
     parser.add_argument("--critic-lr", type=float, default=1e-3)
     parser.add_argument("--gamma", type=float, default=0.99)
@@ -95,31 +95,6 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
     critic1 = Critic(net_c1, device=args.device).to(args.device)
     critic1_optim = torch.optim.Adam(critic1.parameters(), lr=args.critic_lr)
 
-
-
-    policy: DDPGPolicy = DDPGPolicy(
-        actor=actor,
-        actor_optim=actor_optim,
-        critic=critic1,
-        critic_optim=critic1_optim,
-        tau=args.tau,
-        gamma=args.gamma,
-        estimation_step=args.n_step,
-        action_space=env.action_space,
-    )
-
-    # load a previous policy
-    if args.resume_path:
-        policy.load_state_dict(torch.load(args.resume_path, map_location=args.device))
-        print("Loaded agent from: ", args.resume_path)
-
-    # collector
-    buffer: VectorReplayBuffer | ReplayBuffer
-    if args.training_num > 1:
-        buffer = VectorReplayBuffer(args.buffer_size, len(train_envs))
-    else:
-        buffer = ReplayBuffer(args.buffer_size)
-
     args_wandb = {
       'epoch': args.epoch,
       'step_per_epoch': args.step_per_epoch,
@@ -143,11 +118,37 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
       'collector_type': 'Collector',
       'reinit': True,
       'reward_function': 'reward_squared_fast_learning',
-      'exploration_noise': True,
+      'exploration_noise': None,
       'surrogate sigmoid': False,
       }
 
-    train_collector = Collector(policy, train_envs, buffer, exploration_noise=args_wandb['exploration_noise'])
+    policy: DDPGPolicy = DDPGPolicy(
+        actor=actor,
+        actor_optim=actor_optim,
+        critic=critic1,
+        critic_optim=critic1_optim,
+        tau=args.tau,
+        gamma=args.gamma,
+        estimation_step=args.n_step,
+        action_space=env.action_space,
+        exploration_noise=args_wandb['exploration_noise'],
+    )
+
+    # load a previous policy
+    if args.resume_path:
+        policy.load_state_dict(torch.load(args.resume_path, map_location=args.device))
+        print("Loaded agent from: ", args.resume_path)
+
+    # collector
+    buffer: VectorReplayBuffer | ReplayBuffer
+    if args.training_num > 1:
+        buffer = VectorReplayBuffer(args.buffer_size, len(train_envs))
+    else:
+        buffer = ReplayBuffer(args.buffer_size)
+
+
+
+    train_collector = Collector(policy, train_envs, buffer, exploration_noise=False)
     test_collector = Collector(policy, test_envs)
     train_collector.reset()
     train_collector.collect(n_step=args.start_timesteps, random=True)
