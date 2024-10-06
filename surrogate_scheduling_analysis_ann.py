@@ -1,3 +1,6 @@
+'''
+This file does the same as surrogate_scheduling_analysis.py, but for the ANN model.
+We create a custom sigmoid with an altered backward pass.'''
 """
 This file creates an SMLP model and performs a one gradient update with it,
 the gradient is tracked for different settings of surrogate gradient slope,
@@ -13,14 +16,117 @@ from matplotlib import cm
 from matplotlib.colors import ListedColormap, LinearSegmentedColormap
 from spikingActorProb import SMLP
 import seaborn as sb
-
+from tianshou.utils.net.common import MLP
+from torch.nn.modules import Module
 INPUT_SIZE = 4
 OUTPUT_SIZE = 4
 HIDDEN_SIZE = 64
 
 N_SAMPLES = 100
 
+import torch
 
+
+class Sigmoid(torch.autograd.Function):
+    """
+    Surrogate gradient of the Heaviside step function.
+
+    **Forward pass:** Heaviside step function shifted.
+
+        .. math::
+
+            S=\\begin{cases} 1 & \\text{if U ≥ U$_{\\rm thr}$} \\\\
+            0 & \\text{if U < U$_{\\rm thr}$}
+            \\end{cases}
+
+    **Backward pass:** Gradient of sigmoid function.
+
+        .. math::
+
+                S&≈\\frac{1}{1 + {\\rm exp}(-kU)} \\\\
+                \\frac{∂S}{∂U}&=\\frac{k
+                {\\rm exp}(-kU)}{[{\\rm exp}(-kU)+1]^2}
+
+    :math:`k` defaults to 25, and can be modified by calling \
+        ``surrogate.sigmoid(slope=25)``.
+
+
+    Adapted from:
+
+    *F. Zenke, S. Ganguli (2018) SuperSpike: Supervised Learning
+    in Multilayer Spiking
+    Neural Networks. Neural Computation, pp. 1514-1541.*"""
+    @staticmethod
+    def forward(ctx, input_, slope):
+        ctx.save_for_backward(input_)
+        ctx.slope = slope
+        out = torch.sigmoid(input_)
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        (input_,) = ctx.saved_tensors
+        grad_input = grad_output.clone()
+        grad = (
+            grad_input
+            * ctx.slope
+            * torch.exp(-ctx.slope * input_)
+            / ((torch.exp(-ctx.slope * input_) + 1) ** 2)
+        )
+        return grad, None
+
+
+def sigmoid_fn(slope=25):
+    """Sigmoid surrogate gradient enclosed with a parameterized slope."""
+    slope = 1/slope
+
+    def inner(x):
+        return Sigmoid.apply(x, slope)
+
+    return inner
+
+class sigmoid_2(Module):
+    def __init__(self, slope=2):
+        super(sigmoid_2, self).__init__()
+        self.slope = slope
+
+    def forward(self, x):
+        return Sigmoid.apply(x, self.slope)
+
+class sigmoid_7(Module):
+    def __init__(self, slope=7):
+        super(sigmoid_7, self).__init__()
+        self.slope = slope
+
+    def forward(self, x):
+        return Sigmoid.apply(x, self.slope)
+class sigmoid_12(Module):
+    def __init__(self, slope=12):
+        super(sigmoid_12, self).__init__()
+        self.slope = slope
+
+    def forward(self, x):
+        return Sigmoid.apply(x, self.slope)
+class sigmoid_17(Module):
+    def __init__(self, slope=17):
+        super(sigmoid_17, self).__init__()
+        self.slope = slope
+
+    def forward(self, x):
+        return Sigmoid.apply(x, self.slope)
+# class customSigmoid_2(customSigmoid):
+#     def __init__(self, b=1/2):
+#         super(customSigmoid_2, self).__init__(b)
+# class customSigmoid_7(customSigmoid):
+#     def __init__(self, b=1/7):
+#         super(customSigmoid_7, self).__init__(b)
+# class customSigmoid_12(customSigmoid):
+#     def __init__(self, b=1/12):
+#         super(customSigmoid_12, self).__init__(b)
+# class customSigmoid_17(customSigmoid):
+#     def __init__(self, b=1/17):
+#         super(customSigmoid_17, self).__init__(b)
+ 
 class Wrapper(nn.Module):
     '''
     Wraps SMLP model with one nn.Linear output of size 4,2 to be able to use nn.MSELoss
@@ -30,58 +136,61 @@ class Wrapper(nn.Module):
         self.model = model
         self.output = nn.Linear(HIDDEN_SIZE,OUTPUT_SIZE)
     def forward(self, x):
-        inp = x
-        x, hidden = self.model(inp, None)
+        x = self.model(x)
         output = x
-        for i in range(50):
-            x, hidden = self.model(inp, hidden)
-            output += x
-            
         return self.output(output)
+    
 # create a simple model with 3 hidden layers of size 4 each
-# create 5 models with slopes 2,7,12,17,22
-model_2 = Wrapper(SMLP(INPUT_SIZE,HIDDEN_SIZE, [HIDDEN_SIZE, HIDDEN_SIZE], slope=2))
-model_7 = Wrapper(SMLP(INPUT_SIZE,HIDDEN_SIZE, [HIDDEN_SIZE, HIDDEN_SIZE], slope=7))
-model_12 = Wrapper(SMLP(INPUT_SIZE,HIDDEN_SIZE, [HIDDEN_SIZE, HIDDEN_SIZE], slope=12))
-model_17 = Wrapper(SMLP(INPUT_SIZE,HIDDEN_SIZE, [HIDDEN_SIZE, HIDDEN_SIZE], slope=17))
-model_22 = Wrapper(SMLP(INPUT_SIZE,HIDDEN_SIZE, [HIDDEN_SIZE, HIDDEN_SIZE], slope=22))
+# create 5 models with slopes 2,7,12,17,true
+model_2 = Wrapper(MLP(INPUT_SIZE,HIDDEN_SIZE, [HIDDEN_SIZE, HIDDEN_SIZE],activation=sigmoid_2,flatten_input=False))
+model_7 = Wrapper(MLP(INPUT_SIZE,HIDDEN_SIZE, [HIDDEN_SIZE, HIDDEN_SIZE], activation=sigmoid_7,flatten_input=False))
+model_12 = Wrapper(MLP(INPUT_SIZE,HIDDEN_SIZE, [HIDDEN_SIZE, HIDDEN_SIZE], activation=sigmoid_12,flatten_input=False))
+model_17 = Wrapper(MLP(INPUT_SIZE,HIDDEN_SIZE, [HIDDEN_SIZE, HIDDEN_SIZE], activation=sigmoid_17,flatten_input=False))
+model_true = Wrapper(MLP(INPUT_SIZE,HIDDEN_SIZE, [HIDDEN_SIZE, HIDDEN_SIZE],flatten_input=False))
+model_noisy = Wrapper(MLP(INPUT_SIZE,HIDDEN_SIZE, [HIDDEN_SIZE, HIDDEN_SIZE],flatten_input=False))
+print("MAKE SURE TO CHANGE DEFAULT ACTIVATION TO SIGMOID IN MLP")
 
 # make the weights and biases the same for all models
 model_2_sate_dict = model_2.state_dict()
 model_7.load_state_dict(model_2_sate_dict)
 model_12.load_state_dict(model_2_sate_dict)
 model_17.load_state_dict(model_2_sate_dict)
-model_22.load_state_dict(model_2_sate_dict)
+model_true.load_state_dict(model_2_sate_dict)
+model_noisy.load_state_dict(model_2_sate_dict)
 
 # create a simple optimizer
 optimizer_2 = optim.Adam(model_2.parameters(), lr=1)
 optimizer_7 = optim.Adam(model_7.parameters(), lr=1)
 optimizer_12 = optim.Adam(model_12.parameters(), lr=1)
 optimizer_17 = optim.Adam(model_17.parameters(), lr=1)
-optimizer_22 = optim.Adam(model_22.parameters(), lr=1)
-
+optimizer_true = optim.Adam(model_true.parameters(), lr=1)
+optimizer_noisy = optim.Adam(model_noisy.parameters(), lr=1)
 # create a loss function
 loss_fn = nn.MSELoss()
 
+# create a sac loss function which is a sum of the mean squared error and the entropy of the output
+def sac_loss(output, target, entropy_weight=0.01):
+    mse = loss_fn(output, target)
+    entropy = -torch.mean(torch.sum(output*torch.log(output),dim=1))
+    return mse - entropy_weight*entropy
 # create a list to store the gradients
 grads_2 = []
 grads_7 = []
 grads_12 = []
 grads_17 = []
-grads_22 = []
+grads_noisy = []
+grads_true = []
 
 # create random inputs of INPUT_SIZE and labels of OUTPUT_SIZE
 inputs = torch.randn(N_SAMPLES,INPUT_SIZE)
 labels = torch.randn(N_SAMPLES,OUTPUT_SIZE)   
 
+def add_param_noise(model, std=0.01):
+    for param in model.parameters():
+        param.data += torch.randn_like(param.data)*std
+
 
 for i in range(N_SAMPLES):
-    model_2.model.reset()
-    model_7.model.reset()
-    model_12.model.reset()
-    model_17.model.reset()
-    model_22.model.reset()
-
     input = inputs[i]
     label = labels[i]
     # zero the gradients
@@ -89,34 +198,42 @@ for i in range(N_SAMPLES):
     optimizer_7.zero_grad()
     optimizer_12.zero_grad()
     optimizer_17.zero_grad()
-    optimizer_22.zero_grad()
+    optimizer_noisy.zero_grad()
+    optimizer_true.zero_grad()
+
+    # add noise to noisy model parameters
+    model_noisy.load_state_dict(model_2_sate_dict)
+    add_param_noise(model_noisy, std=0.05)
 
     # forward pass
     output_2 = model_2(input)
     output_7 = model_7(input)
     output_12 = model_12(input)
     output_17 = model_17(input)
-    output_22 = model_22(input)
+    output_noisy = model_noisy(input)
+    output_true = model_true(input)
 
     # assure all outputs are same
     assert torch.all(torch.eq(output_2, output_7))
     assert torch.all(torch.eq(output_2, output_12))
     assert torch.all(torch.eq(output_2, output_17))
-    assert torch.all(torch.eq(output_2, output_22))
+    assert torch.all(torch.eq(output_2, output_true))
 
     # calculate the loss
     loss_2 = loss_fn(output_2, label)
     loss_7 = loss_fn(output_7, label)
     loss_12 = loss_fn(output_12, label)
     loss_17 = loss_fn(output_17, label)
-    loss_22 = loss_fn(output_22, label)
+    loss_noisy = loss_fn(output_noisy, label)
+    loss_true = loss_fn(output_true, label)
 
     # backward pass
     loss_2.backward()
     loss_7.backward()
     loss_12.backward()
     loss_17.backward()
-    loss_22.backward()
+    loss_noisy.backward()
+    loss_true.backward()
 
     # store the gradients
     # for param in model_2.named_parameters():
@@ -127,19 +244,22 @@ for i in range(N_SAMPLES):
     grads_7.append([param[1].grad for param in model_7.named_parameters() if 'weight' in param[0]])
     grads_12.append([param[1].grad for param in model_12.named_parameters() if 'weight' in param[0]])
     grads_17.append([param[1].grad for param in model_17.named_parameters() if 'weight' in param[0]])
-    grads_22.append([param[1].grad for param in model_22.named_parameters() if 'weight' in param[0]])
+    grads_noisy.append([param[1].grad for param in model_noisy.named_parameters() if 'weight' in param[0]])
+    grads_true.append([param[1].grad for param in model_true.named_parameters() if 'weight' in param[0]])
 
 grads_2_stacked = [torch.stack(layer) for layer in zip(*grads_2)]
 grads_7_stacked = [torch.stack(layer) for layer in zip(*grads_7)]
 grads_12_stacked = [torch.stack(layer) for layer in zip(*grads_12)]
 grads_17_stacked = [torch.stack(layer) for layer in zip(*grads_17)]
-grads_22_stacked = [torch.stack(layer) for layer in zip(*grads_22)]
+grads_noisy_stacked = [torch.stack(layer) for layer in zip(*grads_noisy)]
+grads_true_stacked = [torch.stack(layer) for layer in zip(*grads_true)]
 
 all_grads = [grads_2_stacked, 
             grads_7_stacked, 
             grads_12_stacked, 
             grads_17_stacked, 
-            grads_22_stacked]
+            grads_noisy_stacked,
+            grads_true_stacked]
 
 
 def gradient_heatmap():
@@ -167,10 +287,11 @@ def gradient_boxplot():
                 grads_7_stacked[j].flatten().numpy(), 
                 grads_12_stacked[j].flatten().numpy(), 
                 grads_17_stacked[j].flatten().numpy(), 
-                grads_22_stacked[j].flatten().numpy()]
+                grads_noisy_stacked[j].flatten().numpy(),
+                grads_true_stacked[j].flatten().numpy()]
         axs[j].boxplot(data)
         axs[j].set_title(f'Layer {j} Gradients')
-        axs[j].set_xticklabels(['2','7','12','17','22'])
+        axs[j].set_xticklabels(['2','7','12','17','noisy','true'])
         # make y axis of all subplots the same
         axs[j].set_ylim(-1,1)
 
@@ -256,7 +377,6 @@ def calculate_cosine_similarity():
             grad = grad.detach().numpy().reshape(N_SAMPLES,-1)
             grad_high_slope = all_grads[-1][j].detach().numpy().reshape(N_SAMPLES,-1)
             # calculate the cosine similarity between the gradients of the high slope model and the other models
-            
             cos_sim = np.sum(grad * grad_high_slope, axis=1)/(np.linalg.norm(grad,axis=1)*np.linalg.norm(grad_high_slope, axis=1))
             data.append(cos_sim)
         data_models.append(data)
@@ -280,5 +400,7 @@ def calculate_cosine_similarity():
     # calculate the cosine similarity between the gradients of the high slope model and the other models
 
 # calculate_sign_reversal_accross_layer()
+gradient_boxplot()
 calculate_cosine_similarity()
+
 plt.show()
