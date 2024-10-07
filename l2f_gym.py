@@ -208,10 +208,10 @@ class Learning2Fly(gym.Env):
         return self.obs, {}
     
     def _reward(self):
-        pos   = self.state.position
-        vel   = self.state.linear_velocity
-        q     = self.state.orientation
-        qd    = self.state.angular_velocity
+        pos   = np.array(self.state.position)
+        vel   = np.array(self.state.linear_velocity)
+        q     = np.array(self.state.orientation)
+        qd    = np.array(self.state.angular_velocity)
 
         self.global_step_counter += 1
         if self.global_step_counter > self.Nc:
