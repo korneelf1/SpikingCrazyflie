@@ -80,6 +80,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--render", type=float, default=0.0)
     parser.add_argument("--slope", type=float, default=args_wandb['slope'])
     parser.add_argument("--slope_schedule", type=bool, default=args_wandb['slope_schedule'])
+    parser.add_argument("--stack-number", type=bool, default=args_wandb['stack_number'])
     parser.add_argument(
         "--device",
         type=str,
