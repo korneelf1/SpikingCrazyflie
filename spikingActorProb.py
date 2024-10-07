@@ -297,12 +297,16 @@ class SpikingNet(NetBase[Any]):
         :param obs:
         :param state: unused and returned as is
         :param info: unused
+
+        for now assume that if self.repeat=1, we are using no action history and observation is thus of shape 18!
         """
         if len(obs.shape) == 1:
             obs = obs.unsqueeze(0)
+
         assert len(obs.shape) == 2 # (batch size, obs size) AKA not a sequence
         if self.reset_in_call:
             self.reset()
+        
         if isinstance(obs, np.ndarray):
             obs = torch.tensor(obs, device=self.device, dtype=torch.float32)
         logits = torch.zeros(obs.shape[0], self.output_dim, device=self.device)
@@ -329,7 +333,7 @@ class SpikingNet(NetBase[Any]):
             # print(self._epoch)
             # now we have epoch -> use as scheduler
             epochs_before_update = 50
-            epoch_update_interval = 30
+            epoch_update_interval = 15
             # avoid constantly updating the surrogate gradient!
             if self._prev_epoch != self._epoch:
                 if self._epoch == 1:

@@ -99,7 +99,7 @@ class Learning2Fly(gym.Env):
         initialize_rng(self.device, self.rng, seed)
 
         # curriculum parameters
-        self.Nc = 5e7 # interval of application of curriculum, roughly 10 epochs
+        self.Nc = 1e5 # interval of application of curriculum, roughly 10 epochs
         self.obs_mat = quaternions_to_obs_matrices
         self.rpm = rpm
         if action_history:
@@ -132,26 +132,18 @@ class Learning2Fly(gym.Env):
         self.Ca = .005 # action weight og .334, but just learns to fly out of frame
         self.Cw = .00 # angular velocity weight 
         self.Crs = 2 # reward for survival
-        self.Cab = 2*.334-1 # action baseline
+        self.Cab = .334 # action baseline
 
         
 
-        self.CpC = 1.5 # position factor
+        self.CpC = 1.2 # position factor
         self.Cplim = 20 # position limit
 
-        self.CvC = 2 # velocity factor
+        self.CvC = 1.4 # velocity factor
         self.Cvlim = .5 # velocity limit
 
-        self.CqC 
-
-
-
-        CaC = 2# orientation factor
-        Calim = .5 # orientation limit
-
-        self.CrsC = .9 # reward for survival factor
-        self.Crslim = .5 # reward for survival limit
-
+        self.Cac = 1.4  # action factor
+        self.Calim = .5 # action limit
 
         self.reset()
 
@@ -216,20 +208,17 @@ class Learning2Fly(gym.Env):
         return self.obs, {}
     
     def _reward(self):
-        pos   = self.obs[0:3]
-        vel   = self.obs[3:6]
-        q     = self.obs[6:10]
-        qd    = self.obs[10:13]
+        pos   = self.state.position
+        vel   = self.state.linear_velocity
+        q     = self.state.orientation
+        qd    = self.state.angular_velocity
 
-        # curriculum
-        # print("Global step counter: ", self.global_step_counter)
-        # print("Next curriculum update: ", self.Nc)
         self.global_step_counter += 1
         if self.global_step_counter > self.Nc:
             # updating the curriculum parameters
             self.Cp = min(self.Cp*self.CpC, self.Cplim)
             self.Cv = min(self.Cv*self.CvC, self.Cvlim)
-            # Ca = min(Ca*CaC, Calim)
+            self.Ca = min(self.Ca*self.CaC, self.Calim)
             # self.Crs = max(self.Crs*self.CrsC, self.Crslim)
             print("\n\n\nCurriculum parameters updated:")
             print(f"Position Term: {self.Cp}, Survival Reward: {self.Crs}")
@@ -240,10 +229,7 @@ class Learning2Fly(gym.Env):
             
             self.Nc += self.Nc
 
-        # in theory pos error max sqrt( .6)*2.5 = 1.94
-        # vel error max sqrt(1000)*.005 = 0.158
-        # qd error max sqrt(1000)*.00 = 0.
-        # should roughly be between -2 and 2
+        
         r = - self.Cv*np.sum((vel)**2) \
                 - self.Ca*np.sum((np.array(self.action.motor_command)-self.Cab)**2) \
                     -self.Cq*(1-q[0]**2)\
@@ -268,7 +254,7 @@ class Learning2Fly(gym.Env):
             xy_terminal = np.sum((np.abs(self.obs[0:2])>pos_limit*xy_softening))
             pos_threshold = z_terminal + xy_terminal
         else:
-            pos_threshold = np.sum((np.abs(self.obs[0:3])>1.5))
+            pos_threshold = np.sum((np.abs(self.obs[0:3])>.6))
 
         velocity_threshold = np.sum((np.abs(self.obs[3:6]) > 1000))
         angular_threshold  = np.sum((np.abs(self.obs[10:13]) > 1000))

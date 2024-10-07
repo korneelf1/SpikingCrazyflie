@@ -24,7 +24,7 @@ from spikingActorProb import SpikingNet
 
 # wandb
 import wandb
-# wandb.init(mode='disabled')
+wandb.init(mode='disabled')
 args_wandb = {
       'epoch': 1,
       'step_per_epoch': 5e3,
@@ -32,7 +32,7 @@ args_wandb = {
       'update_per_step': 2,
       'test_num': 50,
       'batch_size': 256,
-      'Environment': 'Continuous Mountain Cart',
+      'Environment': 'L2F',
       'resume_id':1,
       'logger':'wandb',
       'algo_name': 'sac',
@@ -47,11 +47,12 @@ args_wandb = {
       'buffer_size': 1000000,
       'collector_type': 'Collector',
       'reinit': True,
-      'reward_function': 'classic experiment, .1,.01,.01,.1,.005,1,.334*2-1',
+      'reward_function': 'surrogate slope scheduling, alpha=0.0 symmetric observations with action history',
       'slope': 2,
-      'slope_schedule': False,
+      'slope_schedule': True,
         'alpha': 0.0,
         'action_history': True,
+        'stack_number': 1,
       }
 
 def get_args() -> argparse.Namespace:
@@ -121,7 +122,7 @@ import wandb
 import gymnasium as gym
 def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
     # env = gym.make("MountainCarContinuous-v0")
-    env = Learning2Fly(action_history=args_wandb['action_history'])
+    env = Learning2Fly()
     
     args.state_shape = env.observation_space.shape or env.observation_space.n
     args.action_shape = env.action_space.shape or env.action_space.n
@@ -133,7 +134,10 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     # model
-    net_a = SpikingNet(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device, action_shape=128, repeat=args.repeat_per_forward, slope=args.slope, slope_schedule=args.slope_schedule, reset_in_call=True)
+    if args_wandb['stack_number'] == 1:
+        net_a = SpikingNet(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device, action_shape=128, repeat=args.repeat_per_forward, slope=args.slope, slope_schedule=args.slope_schedule, reset_in_call=True)
+    else:
+        net_a = SpikingNet(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device, action_shape=128, repeat=1, slope=args.slope, slope_schedule=args.slope_schedule, reset_in_call=True)
     actor = ActorProb(
         net_a,
         args.action_shape,
@@ -146,7 +150,6 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
     test_envs = DummyVectorEnv([lambda: Learning2Fly() for _ in range(args.test_num)])
     
     logger.wandb_run.watch(actor)
-    print(actor.parameters())
     actor_optim = torch.optim.Adam(actor.parameters(), lr=args.actor_lr)
     net_c1 = Net(
         state_shape=args.state_shape,
@@ -197,9 +200,9 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
     # collector
     buffer: VectorReplayBuffer | ReplayBuffer
     if args.training_num > 1:
-        buffer = VectorReplayBuffer(args.buffer_size, len(train_envs))
+        buffer = VectorReplayBuffer(args.buffer_size, len(train_envs), stack_num=args.stack_number)
     else:
-        buffer = ReplayBuffer(args.buffer_size)
+        buffer = ReplayBuffer(args.buffer_size, stack_num=args.stack_number)
     train_collector = Collector(policy, train_envs, buffer, exploration_noise=False)
     test_collector = Collector(policy, test_envs)
     train_collector.reset()
