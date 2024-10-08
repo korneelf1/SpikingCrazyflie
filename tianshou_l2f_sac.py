@@ -199,9 +199,8 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
     log_name = logger.wandb_run.name
     start_time = datetime.datetime.now()
     def save_best_fn(policy: BasePolicy) -> None:
-        torch.save(policy.state_dict(), os.path.join(log_path,f"{log_name}policy_ANN_actor_Full_State_{str(start_time)}.pth"))
-
-
+        torch.save(policy.state_dict(), os.path.join(log_path, "policy.pth"))
+        logger.wandb_run.log_artifact(os.path.join(log_path, "policy.pth"), name='policy', type='model')
 
     if not args.watch:
         # trainer
@@ -230,4 +229,6 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
 
 
 if __name__ == "__main__":
+    import wandb
     test_sac()
+    wandb.run.finish()

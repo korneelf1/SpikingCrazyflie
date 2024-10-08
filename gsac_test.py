@@ -43,14 +43,14 @@ class StackedWrapper(gym.Wrapper):
         self.last_action = action
         
         # Combine state and action
-        new_obs = [obs, self.last_action, reward.reshape(1,)]
+        new_obs = [obs, self.last_action, reward.reshape(1,),np.array(done).reshape(1,)]
         return new_obs, reward, done,trunc, info
 
     def reset(self, **kwargs):
         self.last_action = None
         obs, info = super().reset(**kwargs)
-        obs = [obs, np.zeros(self.env.action_space.shape),np.array(0).reshape(1,)]
-        return obs, info
+        new_obs = [obs, np.zeros((4,)), np.array(0), np.array(True)] # by setting true avoid update on this?
+        return new_obs, info
 
 args_wandb = {
       'epoch': 1,
@@ -78,7 +78,7 @@ args_wandb = {
       'slope': 5,
       'slope_schedule': False,
         'alpha': 0.0,
-        'action_history': False,
+        'action_history': True,
       }
 
 def get_args() -> argparse.Namespace:
@@ -164,7 +164,7 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
     torch.manual_seed(args.seed)
     # model
     net_a = SpikingNet(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device, action_shape=128, repeat=1, slope=args.slope, slope_schedule=args.slope_schedule, reset_in_call=False)
-    ghost_actor = ActorProb(
+    actor = ActorProb(
         net_a,
         args.action_shape,
         device=args.device,
@@ -173,26 +173,26 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
     ).to(args.device)
     
     # logger.wandb_run.watch(ghost_actor)
-    ghost_actor_optim = torch.optim.Adam(ghost_actor.parameters(), lr=args.actor_lr)
+    actor_optim = torch.optim.Adam(actor.parameters(), lr=args.actor_lr)
 
     ### Create actors and critics
-    net_a = Net(
-        state_shape=args.state_shape,
-        action_shape=args.action_shape,
-        hidden_sizes=args.hidden_sizes,
-        concat=False,
-        device=args.device,
-    )
-    actor = ActorProb(
-        net_a,
-        args.action_shape,
-        device=args.device,
-        unbounded=True,
-        conditioned_sigma=True,
-    ).to(args.device)
+    # net_a = Net(
+    #     state_shape=args.state_shape,
+    #     action_shape=args.action_shape,
+    #     hidden_sizes=args.hidden_sizes,
+    #     concat=False,
+    #     device=args.device,
+    # )
+    # actor = ActorProb(
+    #     net_a,
+    #     args.action_shape,
+    #     device=args.device,
+    #     unbounded=True,
+    #     conditioned_sigma=True,
+    # ).to(args.device)
 
     print(actor.parameters())
-    actor_optim = torch.optim.Adam(actor.parameters(), lr=args.actor_lr)
+    # actor_optim = torch.optim.Adam(actor.parameters(), lr=args.actor_lr)
     net_c1 = Net(
         state_shape=args.state_shape,
         action_shape=args.action_shape,
@@ -220,11 +220,26 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
 
     print("Does spiking network have attribute epoch?")
     print(hasattr(actor.preprocess, "epoch"))
-    policy: GSACPolicy = GSACPolicy(
+    # policy: GSACPolicy = GSACPolicy(
+    #     actor=actor,
+    #     actor_optim=actor_optim,
+    #     ghost_actor=ghost_actor,
+    #     ghost_actor_optim=ghost_actor_optim,
+    #     critic=critic1,
+    #     critic_optim=critic1_optim,
+    #     critic2=critic2,
+    #     critic2_optim=critic2_optim,
+    #     tau=args.tau,
+    #     gamma=args.gamma,
+    #     alpha=args.alpha,
+    #     estimation_step=args.n_step,
+    #     action_space=env.action_space,
+    # )
+    from rsac import RSACPolicy
+    policy: RSACPolicy = RSACPolicy(
         actor=actor,
         actor_optim=actor_optim,
-        ghost_actor=ghost_actor,
-        ghost_actor_optim=ghost_actor_optim,
+        actor_warmup=40,
         critic=critic1,
         critic_optim=critic1_optim,
         critic2=critic2,
@@ -235,7 +250,6 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
         estimation_step=args.n_step,
         action_space=env.action_space,
     )
-
     # load a previous policy
     if args.resume_path:
         policy.load_state_dict(torch.load(args.resume_path, map_location=args.device))
@@ -246,7 +260,7 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
     if args.training_num > 1:
         buffer = VectorReplayBuffer(args.buffer_size, len(train_envs),stack_num=80)
     else:
-        buffer = ReplayBuffer(args.buffer_size, stack_num=80)
+        buffer = ReplayBuffer(args.buffer_size, stack_num=80, )
     train_collector = Collector(policy, train_envs, buffer, exploration_noise=False,)
     test_collector = Collector(policy, test_envs)
     

@@ -15,7 +15,28 @@ logger = logging.getLogger(__name__)
 
 import wandb
 import math
+def observe_rotation_matrix(state):
+    # Extract the quaternion components from the state matrix
+    qw = state[0]
+    qx = state[1]
+    qy = state[2]
+    qz = state[3]
 
+    # Initialize the observation matrix (assuming 18 columns, and 1 row for now)
+    observation = np.zeros((9))
+
+    # Compute the 3x3 rotation matrix from the quaternion
+    observation[0] = 1 - 2 * qy * qy - 2 * qz * qz
+    observation[1] = 2 * qx * qy - 2 * qw * qz
+    observation[2] = 2 * qx * qz + 2 * qw * qy
+    observation[3] = 2 * qx * qy + 2 * qw * qz
+    observation[4] = 1 - 2 * qx * qx - 2 * qz * qz
+    observation[5] = 2 * qy * qz - 2 * qw * qx
+    observation[6] = 2 * qx * qz - 2 * qw * qy
+    observation[7] = 2 * qy * qz + 2 * qw * qx
+    observation[8] = 1 - 2 * qx * qx - 2 * qy * qy
+
+    return observation
 def power_distribution_force_torque(control, arm_length=0.046, thrust_to_torque=0.005964552, pwm_to_thrust_a=0.091492681, pwm_to_thrust_b=0.067673604):
     # rescale control from -1 - 1 to  
    
@@ -58,7 +79,7 @@ def power_distribution_force_torque(control, arm_length=0.046, thrust_to_torque=
 # power_distribution_force_torque(control, motor_thrust_uncapped, arm_length=0.1, thrust_to_torque=0.05, pwm_to_thrust_a=0.01, pwm_to_thrust_b=0.02)
 
 class Learning2Fly(gym.Env):
-    def __init__(self, curriculum_terminal=False,seed=None,rpm=False, action_history=False) -> None:
+    def __init__(self, curriculum_terminal=False,seed=None,rpm=False, action_history=True, quaternions_to_obs_matrices=True) -> None:
 
         super().__init__()
         # L2F initialization
@@ -78,15 +99,20 @@ class Learning2Fly(gym.Env):
         initialize_rng(self.device, self.rng, seed)
 
         # curriculum parameters
-        self.Nc = 5e8 # interval of application of curriculum, roughly 10 epochs
-
+        self.Nc = 1e5 # interval of application of curriculum, roughly 10 epochs
+        self.obs_mat = quaternions_to_obs_matrices
         self.rpm = rpm
         if action_history:
             action_history_len = 32
             self.action_history = helpers.NumpyDeque((1,4*action_history_len))
-            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(17+4*32,))
+            if self.obs_mat:
+                self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(18+4*32,))
+            else:
+                self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(17+4*32,))
         elif rpm:
             self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(17,))
+        elif quaternions_to_obs_matrices:
+            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(18,))
         else:
             self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(13,))
         
@@ -100,28 +126,24 @@ class Learning2Fly(gym.Env):
 
         # Reward parameters
                 # intial parameters
-        self.Cp = 0.1 # position weight
-        self.Cv = .0 # velocity weight
-        self.Cq = 0 # orientation weight
-        self.Ca = .0 # action weight og .334, but just learns to fly out of frame
-        self.Cw = .0 # angular velocity weight 
-        self.Crs = 1 # reward for survival
-        self.Cab = 0.0 # action baseline
+        self.Cp = 2.5 # position weight
+        self.Cv = .005 # velocity weight
+        self.Cq = 2.5 # orientation weight
+        self.Ca = .005 # action weight og .334, but just learns to fly out of frame
+        self.Cw = .00 # angular velocity weight 
+        self.Crs = 2 # reward for survival
+        self.Cab = .334 # action baseline
 
         
 
         self.CpC = 1.2 # position factor
         self.Cplim = 20 # position limit
 
-        # CvC = 1.4 # velocity factor
-        # Cvlim = 1.5 # velocity limit
+        self.CvC = 1.4 # velocity factor
+        self.Cvlim = .5 # velocity limit
 
-        # CaC = 1.4 # orientation factor
-        # Calim = .5 # orientation limit
-
-        self.CrsC = .8 # reward for survival factor
-        self.Crslim = .1 # reward for survival limit
-
+        self.Cac = 1.4  # action factor
+        self.Calim = .5 # action limit
 
         self.reset()
 
@@ -134,9 +156,17 @@ class Learning2Fly(gym.Env):
 
         if hasattr(self, 'action_history'):
             self.action_history.append(np.array(self.action.motor_command).reshape(1,4))
-            self.obs = np.concatenate([self.state.position,  self.state.linear_velocity, self.state.orientation, self.state.angular_velocity, self.state.rpm, self.action_history.array.flatten()]).astype(np.float32)
+            if self.obs_mat:
+                self.obs = np.concatenate([self.state.position, observe_rotation_matrix(self.state.orientation),  self.state.linear_velocity, self.state.angular_velocity, (self.action_history.array.flatten()+1)/2]).astype(np.float32)
+            else:
+        
+                self.obs = np.concatenate([self.state.position,  self.state.linear_velocity, self.state.orientation, self.state.angular_velocity, self.state.rpm, self.action_history.array.flatten()]).astype(np.float32)
         elif self.rpm:
+            print("RPM")
             self.obs = np.concatenate([self.state.position,  self.state.linear_velocity, self.state.orientation, self.state.angular_velocity, self.state.rpm]).astype(np.float32)   
+        elif self.obs_mat:
+            print("Obs Mat")
+            self.obs = np.concatenate([self.state.position, observe_rotation_matrix(self.state.orientation),  self.state.linear_velocity, self.state.angular_velocity]).astype(np.float32)
         else:
             self.obs = np.concatenate([self.state.position,  self.state.linear_velocity, self.state.orientation, self.state.angular_velocity]).astype(np.float32)
          
@@ -159,30 +189,37 @@ class Learning2Fly(gym.Env):
         if hasattr(self, 'action_history'):
             self.action_history.reset()
             self.action_history.append(np.array(self.action.motor_command).reshape(1,4))
-            self.obs = np.concatenate([self.state.position,  self.state.linear_velocity, self.state.orientation, self.state.angular_velocity, self.state.rpm, self.action_history.array.flatten()]).astype(np.float32)
+            if self.obs_mat:
+                # print("Obs Mat+action history")
+                self.obs = np.concatenate([self.state.position, observe_rotation_matrix(self.state.orientation),  self.state.linear_velocity, self.state.angular_velocity,( self.action_history.array.flatten()+1)/2]).astype(np.float32)
+            else:
+        
+                self.obs = np.concatenate([self.state.position,  self.state.linear_velocity, self.state.orientation, self.state.angular_velocity, self.state.rpm, self.action_history.array.flatten()]).astype(np.float32)
         elif self.rpm:
+            print("RPM")
             self.obs = np.concatenate([self.state.position,  self.state.linear_velocity, self.state.orientation, self.state.angular_velocity, self.state.rpm]).astype(np.float32)   
+        elif self.obs_mat:
+            print("Obs Mat")
+            self.obs = np.concatenate([self.state.position, observe_rotation_matrix(self.state.orientation),  self.state.linear_velocity, self.state.angular_velocity]).astype(np.float32)
         else:
+            print("Normal")
             self.obs = np.concatenate([self.state.position,  self.state.linear_velocity, self.state.orientation, self.state.angular_velocity]).astype(np.float32)
 
         return self.obs, {}
     
     def _reward(self):
-        pos   = self.obs[0:3]
-        vel   = self.obs[3:6]
-        q     = self.obs[6:10]
-        qd    = self.obs[10:13]
+        pos   = np.array(self.state.position)
+        vel   = np.array(self.state.linear_velocity)
+        q     = np.array(self.state.orientation)
+        qd    = np.array(self.state.angular_velocity)
 
-        # curriculum
-        # print("Global step counter: ", self.global_step_counter)
-        # print("Next curriculum update: ", self.Nc)
         self.global_step_counter += 1
         if self.global_step_counter > self.Nc:
             # updating the curriculum parameters
             self.Cp = min(self.Cp*self.CpC, self.Cplim)
-            # Cv = min(Cv*CvC, Cvlim)
-            # Ca = min(Ca*CaC, Calim)
-            self.Crs = max(self.Crs*self.CrsC, self.Crslim)
+            self.Cv = min(self.Cv*self.CvC, self.Cvlim)
+            self.Ca = min(self.Ca*self.CaC, self.Calim)
+            # self.Crs = max(self.Crs*self.CrsC, self.Crslim)
             print("\n\n\nCurriculum parameters updated:")
             print(f"Position Term: {self.Cp}, Survival Reward: {self.Crs}")
             print("\n\n\n")
@@ -192,10 +229,7 @@ class Learning2Fly(gym.Env):
             
             self.Nc += self.Nc
 
-        # in theory pos error max sqrt( .6)*2.5 = 1.94
-        # vel error max sqrt(1000)*.005 = 0.158
-        # qd error max sqrt(1000)*.00 = 0.
-        # should roughly be between -2 and 2
+        
         r = - self.Cv*np.sum((vel)**2) \
                 - self.Ca*np.sum((np.array(self.action.motor_command)-self.Cab)**2) \
                     -self.Cq*(1-q[0]**2)\
@@ -220,7 +254,7 @@ class Learning2Fly(gym.Env):
             xy_terminal = np.sum((np.abs(self.obs[0:2])>pos_limit*xy_softening))
             pos_threshold = z_terminal + xy_terminal
         else:
-            pos_threshold = np.sum((np.abs(self.obs[0:3])>1.5))
+            pos_threshold = np.sum((np.abs(self.obs[0:3])>.6))
 
         velocity_threshold = np.sum((np.abs(self.obs[3:6]) > 1000))
         angular_threshold  = np.sum((np.abs(self.obs[10:13]) > 1000))

@@ -110,6 +110,7 @@ class SMLP(nn.Module):
             self.cur_lst.append(self.hidden_layers[2*i+1].init_leaky())
         self.hidden_states = self.cur_lst
         self.cur_out = self.lif_out.init_leaky()
+        return self.cur_lst + [self.cur_out]
 
     def forward(self, x: torch.Tensor, hidden_states: list) -> torch.Tensor:
         '''
@@ -131,7 +132,6 @@ class SMLP(nn.Module):
         x, self.cur_out = self.lif_out(x, self.cur_out)
         # self.cur_out = x
         self.hidden_states = [self.cur_in] + self.cur_lst + [self.cur_out]
-        x /= self.output_dim
         return x, self.hidden_states
 
     def __call__(self, *args: Any) -> Any:
@@ -297,12 +297,16 @@ class SpikingNet(NetBase[Any]):
         :param obs:
         :param state: unused and returned as is
         :param info: unused
+
+        for now assume that if self.repeat=1, we are using no action history and observation is thus of shape 18!
         """
         if len(obs.shape) == 1:
             obs = obs.unsqueeze(0)
+
         assert len(obs.shape) == 2 # (batch size, obs size) AKA not a sequence
         if self.reset_in_call:
             self.reset()
+        
         if isinstance(obs, np.ndarray):
             obs = torch.tensor(obs, device=self.device, dtype=torch.float32)
         logits = torch.zeros(obs.shape[0], self.output_dim, device=self.device)
@@ -321,13 +325,15 @@ class SpikingNet(NetBase[Any]):
 
     def reset(self):
         # print(self.scheduled)
-        self.model.reset()
+        states = self.model.reset()
         if self.scheduled:
             self._n_reset += 1
-            self._epoch = self._n_reset%5e3
+            # print("n_reset: ", self._n_reset)
+            self._epoch = self._n_reset//20e3
+            # print(self._epoch)
             # now we have epoch -> use as scheduler
-            epochs_before_update = 25
-            epoch_update_interval = 50
+            epochs_before_update = 50
+            epoch_update_interval = 15
             # avoid constantly updating the surrogate gradient!
             if self._prev_epoch != self._epoch:
                 if self._epoch == 1:
@@ -338,11 +344,11 @@ class SpikingNet(NetBase[Any]):
                             wandb.run.log({"surrogate fast sigmoid slope": self._slope})
 
                 if self._epoch > epochs_before_update:
-                    if self._epoch % epoch_update_interval == 0 and self._slope<30: # each epoch is 20e4 steps -> every 2 epochs # every 100 steps is 400 backwards -> 5e3 steps is 20e3 backwards every 9 epochs would be 18e4 backwards
+                    if self._epoch % epoch_update_interval == 0 and self._slope<10: # each epoch is 20e4 steps -> every 2 epochs # every 100 steps is 400 backwards -> 5e3 steps is 20e3 backwards every 9 epochs would be 18e4 backwards
                         if wandb.run is not None:
                             # print('logging')
                             wandb.run.log({"surrogate fast sigmoid slope": self._slope})
-                        self._slope = min(self.slope_init+(self._epoch - epochs_before_update)/epoch_update_interval, 25)
+                        self._slope = min(self.slope_init+1*(self._epoch - epochs_before_update)/epoch_update_interval, 10)
                         # print("updating model, current slope: ", self._slope)
                         # create model with new slope
                         self.model.update_slope(self._slope)
@@ -352,7 +358,7 @@ class SpikingNet(NetBase[Any]):
                 
                 # set previous epoch to current epoch
                 self._prev_epoch = self._epoch
-            
+        return states
 
             # # print(self._epoch)
             # self._n_reset += 1

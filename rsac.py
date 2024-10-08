@@ -1,4 +1,3 @@
-# implement ghost version of SAC
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Generic, Literal, Self, TypeVar, cast
@@ -15,14 +14,12 @@ from tianshou.data.types import (
     RolloutBatchProtocol,
 )
 from tianshou.exploration import BaseNoise
-from tianshou.policy import DDPGPolicy, SACPolicy
+from tianshou.policy import DDPGPolicy
 from tianshou.policy.base import TLearningRateScheduler, TrainingStats
 from tianshou.utils.conversion import to_optional_float
 from tianshou.utils.net.continuous import ActorProb
 from tianshou.utils.optim import clone_optimizer
-import torch.nn.functional as F
 
-from tianshou.data import to_torch_as
 
 def correct_log_prob_gaussian_tanh(
     log_prob: torch.Tensor,
@@ -42,26 +39,23 @@ def correct_log_prob_gaussian_tanh(
 
 
 @dataclass(kw_only=True)
-class GSACTrainingStats(TrainingStats):
+class SACTrainingStats(TrainingStats):
     actor_loss: float
-    ghost_actor_loss: float
     critic1_loss: float
     critic2_loss: float
     alpha: float | None = None
     alpha_loss: float | None = None
 
 
-TSACTrainingStats = TypeVar("TSACTrainingStats", bound=GSACTrainingStats)
+TSACTrainingStats = TypeVar("TSACTrainingStats", bound=SACTrainingStats)
 
 
 # TODO: the type ignore here is needed b/c the hierarchy is actually broken! Should reconsider the inheritance structure.
-class GSACPolicy(SACPolicy[TSACTrainingStats], Generic[TSACTrainingStats]):  # type: ignore[type-var]
+class RSACPolicy(DDPGPolicy[TSACTrainingStats], Generic[TSACTrainingStats]):  # type: ignore[type-var]
     """Implementation of Soft Actor-Critic. arXiv:1812.05905.
 
     :param actor: the actor network following the rules (s -> dist_input_BD)
     :param actor_optim: the optimizer for actor network.
-    :param ghost_actor: ghost actor network that is trained on the actions performed by the online network optionally with different input
-    :param ghost_actor_optim: the optimizer for the ghost actor
     :param critic: the first critic network. (s, a -> Q(s, a))
     :param critic_optim: the optimizer for the first critic network.
     :param action_space: Env's action space. Should be gym.spaces.Box.
@@ -103,15 +97,12 @@ class GSACPolicy(SACPolicy[TSACTrainingStats], Generic[TSACTrainingStats]):  # t
         *,
         actor: torch.nn.Module | ActorProb,
         actor_optim: torch.optim.Optimizer,
-        ghost_actor: torch.nn.Module | ActorProb,
-        ghost_actor_optim: torch.optim.Optimizer,
+        actor_warmup: int = 40,
         critic: torch.nn.Module,
         critic_optim: torch.optim.Optimizer,
         action_space: gym.Space,
         critic2: torch.nn.Module | None = None,
         critic2_optim: torch.optim.Optimizer | None = None,
-        # ghost_critic: torch.nn.Module,
-        # ghost_critic_optim: torch.optim.Optimizer,
         tau: float = 0.005,
         gamma: float = 0.99,
         alpha: float | tuple[float, torch.Tensor, torch.optim.Optimizer] = 0.2,
@@ -128,58 +119,82 @@ class GSACPolicy(SACPolicy[TSACTrainingStats], Generic[TSACTrainingStats]):  # t
             actor_optim=actor_optim,
             critic=critic,
             critic_optim=critic_optim,
-            critic2_optim=critic2_optim,
             action_space=action_space,
-            critic2=critic2,
             tau=tau,
             gamma=gamma,
-            alpha=alpha,
-            estimation_step=estimation_step,
             exploration_noise=exploration_noise,
-            deterministic_eval=deterministic_eval,
+            estimation_step=estimation_step,
             action_scaling=action_scaling,
             action_bound_method=action_bound_method,
             observation_space=observation_space,
             lr_scheduler=lr_scheduler,
+        )
+        critic2 = critic2 or deepcopy(critic)
+        critic2_optim = critic2_optim or clone_optimizer(critic_optim, critic2.parameters())
+        self.critic2, self.critic2_old = critic2, deepcopy(critic2)
+        self.critic2_old.eval()
+        self.critic2_optim = critic2_optim
+        self.deterministic_eval = deterministic_eval
+        self.warmup = actor_warmup
+
+        self.alpha: float | torch.Tensor
+        self._is_auto_alpha = not isinstance(alpha, float)
+        if self._is_auto_alpha:
+            # TODO: why doesn't mypy understand that this must be a tuple?
+            alpha = cast(tuple[float, torch.Tensor, torch.optim.Optimizer], alpha)
+            if alpha[1].shape != torch.Size([1]):
+                raise ValueError(
+                    f"Expected log_alpha to have shape torch.Size([1]), "
+                    f"but got {alpha[1].shape} instead.",
+                )
+            if not alpha[1].requires_grad:
+                raise ValueError("Expected log_alpha to require gradient, but it doesn't.")
+
+            self.target_entropy, self.log_alpha, self.alpha_optim = alpha
+            self.alpha = self.log_alpha.detach().exp()
+        else:
+            alpha = cast(
+                float,
+                alpha,
+            )  # can we convert alpha to a constant tensor here? then mypy wouldn't complain
+            self.alpha = alpha
+
+        # TODO or not TODO: add to BasePolicy?
+        self._check_field_validity()
+
+    def _check_field_validity(self) -> None:
+        if not isinstance(self.action_space, gym.spaces.Box):
+            raise ValueError(
+                f"rSACPolicy only supports gym.spaces.Box, but got {self.action_space=}."
+                f"Please use DiscreteSACPolicy for discrete action spaces.",
             )
-        ghost_actor = ghost_actor or deepcopy(ghost_actor)
-        ghost_actor_optim = ghost_actor_optim or clone_optimizer(ghost_actor_optim, ghost_actor.parameters())
-        self.ghost_actor = ghost_actor
-        # # self.ghost_actor, self.ghost_actor_old = ghost_actor, deepcopy(ghost_actor)
-        # self.ghost_actor_old.eval()
-        self.ghost_actor_optim = ghost_actor_optim
 
-        # ghost_critic = ghost_critic or deepcopy(ghost_critic)
-        # ghost_critic_optim = ghost_critic_optim or clone_optimizer(ghost_critic_optim, ghost_critic.parameters())
-        # self.ghost_critic, self.ghost_critic_old = ghost_critic, deepcopy(ghost_critic)
-        # self.ghost_critic_old.eval()
-        # self.ghost_critic_optim = ghost_critic_optim
-
+    @property
+    def is_auto_alpha(self) -> bool:
+        return self._is_auto_alpha
 
     def train(self, mode: bool = True) -> Self:
         self.training = mode
         self.actor.train(mode)
-        self.ghost_actor.train(mode)
         self.critic.train(mode)
         self.critic2.train(mode)
-        # self.ghost_critic.train(mode)
         return self
 
     def sync_weight(self) -> None:
         self.soft_update(self.critic_old, self.critic, self.tau)
         self.soft_update(self.critic2_old, self.critic2, self.tau)
-        # self.soft_update(self.ghost_critic_old, self.ghost_critic, self.tau)
-        
 
     # TODO: violates Liskov substitution principle
     def forward(  # type: ignore
         self,
-        batch: ObsBatchProtocol,
+        batch: ObsBatchProtocol | dict, # add dict for self recurency
         state: dict | Batch | np.ndarray | None = None,
         **kwargs: Any,
     ) -> DistLogProbBatchProtocol:
-        if len(batch.obs.shape )==2: # we are interacting with environment, so single timestep single output
-            (loc_B, scale_B), hidden_BH = self.actor(torch.tensor(batch.obs[:,0][-1]).unsqueeze(-2), state=state, info=batch.info)
+        # if len(batch.obs.shape)>2:
+        #     print("That's a bit odd, init? Obs shape: ", batch.obs.shape)
+        if len(batch.obs.shape) == 2:
+            (loc_B, scale_B), hidden_BH = self.actor(np.vstack(batch.obs.reshape(-1,4)[:,0]), state=state, info=batch.info)
             dist = Independent(Normal(loc=loc_B, scale=scale_B), 1)
             if self.deterministic_eval and not self.is_within_training_step:
                 act_B = dist.mode
@@ -196,29 +211,21 @@ class GSACPolicy(SACPolicy[TSACTrainingStats], Generic[TSACTrainingStats]):  # t
                 dist=dist,
                 log_prob=log_prob,
             )
-        elif len(batch.obs.shape )==3: # we are training on sequences
+        else:
+            assert self.actor.preprocess.reset_in_call==False, "Actor should not reset in call when training on sequences!."
+            state = self.actor.preprocess.reset()
+            outputs = []
             T = batch.obs.shape[1]
-            batch_size = batch.obs.shape[0]
-            # we can flatten over time for thhis one, cause should be a non-stateful actor anyways
-            (loc_B, scale_B), hidden_BH = self.actor(np.vstack(batch.obs.reshape(-1,4)[:,0]), state=state, info=batch.info) # should be a non-stateful network
-            dist = Independent(Normal(loc=loc_B, scale=scale_B), 1)
-            if self.deterministic_eval and not self.is_within_training_step:
-                act_B = dist.mode
-            else:
-                act_B = dist.rsample()
-            log_prob = dist.log_prob(act_B).unsqueeze(-1)
+            for t in range(batch.obs.shape[1]):
+                if t<self.warmup:
+                    _, state = self.actor(batch.obs[:,t], state=state, info=batch.info)
+                else:
+                    result = self({'obs': batch.obs[:,t], 'info': {}}, state=state)
+                    state = result.state
+                    outputs.append(result)
 
-            squashed_action = torch.tanh(act_B)
-            log_prob = correct_log_prob_gaussian_tanh(log_prob, squashed_action)
-            # reshape all of them into batch_size, T, -1
-            result = Batch(
-                logits=(loc_B.reshape(batch_size,T,-1), scale_B.reshape(batch_size,T,-1)),
-                act=squashed_action.reshape(batch_size,T,-1),
-                state=hidden_BH,
-                dist=dist,
-                log_prob=log_prob.reshape(batch_size,T,-1),
-            )
-        
+                t+=1
+            result = self(batch, state=state, **kwargs)
         return cast(DistLogProbBatchProtocol, result)
 
     def _target_q(self, buffer: ReplayBuffer, indices: np.ndarray) -> torch.Tensor:
@@ -226,21 +233,23 @@ class GSACPolicy(SACPolicy[TSACTrainingStats], Generic[TSACTrainingStats]):  # t
             obs=buffer[indices].obs_next,
             info=[None] * len(indices),
         )  # obs_next: s_{t+n}
-        # if len(obs_next_batch.obs.shape) ==3: # we have sequence, that we can flatten!
-        #     obs_next_result = self(obs_next_batch)
         obs_next_result = self(obs_next_batch)
         act_ = obs_next_result.act
         return (
             torch.min(
-                self.critic_old(np.vstack(obs_next_batch.obs.reshape(-1,3)[:,0]), act_),
-                self.critic2_old(np.vstack(obs_next_batch.obs.reshape(-1,3)[:,0]), act_),
+                self.critic_old(obs_next_batch.obs, act_),
+                self.critic2_old(obs_next_batch.obs, act_),
             )
             - self.alpha * obs_next_result.log_prob
         )
 
     def learn(self, batch: RolloutBatchProtocol, *args: Any, **kwargs: Any) -> TSACTrainingStats:  # type: ignore
+        assert len(batch.obs.shape) == 3, f"Expected 3D obs (Batch, T, Feature), got {batch.obs.shape=}"
+        assert batch.obs.shape[1]>self.warmup, f"Expected at least {self.warmup} steps for warmup, got {batch.obs.shape[1]} steps."
+        
+
         # critic 1&2
-        td1, critic1_loss = self._mse_optimizer(batch, self.critic, self.critic_optim)
+        td1, critic1_loss = self._mse_optimizer(batch, self.critic, self.critic_optim) # can be calculated on ALL timesteps :) no recurrency
         td2, critic2_loss = self._mse_optimizer(batch, self.critic2, self.critic2_optim)
         batch.weight = (td1 + td2) / 2.0  # prio-buffer
 
@@ -257,16 +266,6 @@ class GSACPolicy(SACPolicy[TSACTrainingStats], Generic[TSACTrainingStats]):  # t
         self.actor_optim.step()
         alpha_loss = None
 
-        # ghost actor (use offline td3 + BC loss)
-        act = self(batch, eps=0.0).act
-        q_value = self.critic(batch.obs, act)
-        lmbda = self.alpha / q_value.abs().mean().detach()
-        ghost_actor_loss = -lmbda * q_value.mean()*.5 + F.mse_loss(act, to_torch_as(batch.act, act))
-        self.ghost_actor_optim.zero_grad()
-        ghost_actor_loss.backward()
-        self._last = ghost_actor_loss.item()
-        self.ghost_actor_optim.step()
-
         if self.is_auto_alpha:
             log_prob = obs_result.log_prob.detach() + self.target_entropy
             # please take a look at issue #258 if you'd like to change this line
@@ -278,17 +277,10 @@ class GSACPolicy(SACPolicy[TSACTrainingStats], Generic[TSACTrainingStats]):  # t
 
         self.sync_weight()
 
-        return GSACTrainingStats(  # type: ignore[return-value]
+        return SACTrainingStats(  # type: ignore[return-value]
             actor_loss=actor_loss.item(),
-            ghost_actor_loss=ghost_actor_loss.item(),
             critic1_loss=critic1_loss.item(),
             critic2_loss=critic2_loss.item(),
             alpha=to_optional_float(self.alpha),
             alpha_loss=to_optional_float(alpha_loss),
         )
-
-
-
-'''
-Current state: can run forward if not batch of len 80, gotta find out how to do that
-'''
