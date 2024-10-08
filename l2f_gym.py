@@ -79,7 +79,7 @@ def power_distribution_force_torque(control, arm_length=0.046, thrust_to_torque=
 # power_distribution_force_torque(control, motor_thrust_uncapped, arm_length=0.1, thrust_to_torque=0.05, pwm_to_thrust_a=0.01, pwm_to_thrust_b=0.02)
 
 class Learning2Fly(gym.Env):
-    def __init__(self, fast_learning=False,seed=None,rpm=False, action_history=True, quaternions_to_obs_matrices=True) -> None:
+    def __init__(self, fast_learning=True,seed=None,rpm=False, action_history=True, quaternions_to_obs_matrices=True) -> None:
 
         super().__init__()
         # L2F initialization
@@ -257,7 +257,7 @@ class Learning2Fly(gym.Env):
         q     = np.array(self.state.orientation)
         qd    = np.array(self.state.angular_velocity)
 
-        pos_lim = .5 if self.fast_learning else 1.5        
+        pos_lim = 1 if self.fast_learning else 1.5        
         # if self.curriculum_terminal:
         #     pos_limit = 1.5
         #     pos_min = 0.6
@@ -270,7 +270,7 @@ class Learning2Fly(gym.Env):
         #     xy_terminal = np.sum((np.abs(self.obs[0:2])>pos_limit*xy_softening))
         #     pos_threshold = z_terminal + xy_terminal
         # else:
-        pos_threshold = np.sum((np.abs(pos)>1.5))
+        pos_threshold = np.sum((np.abs(pos)>pos_lim))
 
         velocity_threshold = np.sum((np.abs(vel) > 1000))
         angular_threshold  = np.sum((np.abs(qd) > 1000))

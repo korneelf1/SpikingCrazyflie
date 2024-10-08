@@ -43,6 +43,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--test-num", type=int, default=10)
     parser.add_argument("--logdir", type=str, default="log")
     parser.add_argument("--render", type=float, default=0.0)
+    parser.add_argument("--repeat-per-forward", type=int, default=4)
     parser.add_argument(
         "--device",
         type=str,
@@ -87,7 +88,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
 
     if args.spiking:
         args.hidden_sizes = [128]
-        net_a = SpikingNet(state_shape=args.state_shape, hidden_sizes=[args.hidden_sizes], action_shape=256, repeat=args.repeat_per_forward, slope=args.slope, slope_schedule=args.slope_schedule, reset_in_call=True)
+        net_a = SpikingNet(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, action_shape=256, repeat=args.repeat_per_forward, slope=args.slope, slope_schedule=args.slope_schedule, reset_in_call=True)
     else: # model
         net_a = Net(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device)
     actor = Actor(net_a, args.action_shape, device=args.device,).to(args.device)
@@ -197,7 +198,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
     exploration_noise = str(args.exploration_noise)
     if args.spiking:
         exploration_noise = "spiking_" + exploration_noise
-        
+
     print("Exploration noise:", exploration_noise)
     def save_best_fn(policy: BasePolicy) -> None:
         torch.save(policy.state_dict(), os.path.join(log_path, f"policy_ddpg_{exploration_noise}_{timestamp}.pth"))
