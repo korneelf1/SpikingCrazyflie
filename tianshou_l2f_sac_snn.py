@@ -24,7 +24,7 @@ from spikingActorProb import SpikingNet
 
 # wandb
 import wandb
-wandb.init(mode='disabled')
+# wandb.init(mode='disabled')
 args_wandb = {
       'epoch': 1,
       'step_per_epoch': 5e3,
@@ -48,7 +48,7 @@ args_wandb = {
       'collector_type': 'Collector',
       'reinit': True,
       'reward_function': 'surrogate slope scheduling, alpha=0.0 symmetric observations with action history',
-      'slope': 2,
+      'slope': 5,
       'slope_schedule': True,
         'alpha': 0.0,
         'action_history': True,
