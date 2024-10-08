@@ -21,6 +21,8 @@ from torch.nn.modules import Module
 INPUT_SIZE = 4
 OUTPUT_SIZE = 4
 HIDDEN_SIZE = 64
+N_LAYERS = 10
+HIDDEN_LAYER_LST = [HIDDEN_SIZE]*(N_LAYERS - 1)
 
 N_SAMPLES = 256
 
@@ -142,14 +144,16 @@ class Wrapper(nn.Module):
     
 # create a simple model with 3 hidden layers of size 4 each
 # create 5 models with slopes 2,7,12,17,true
-model_2 = Wrapper(MLP(INPUT_SIZE,HIDDEN_SIZE, [HIDDEN_SIZE, HIDDEN_SIZE],activation=sigmoid_2,flatten_input=False))
-model_7 = Wrapper(MLP(INPUT_SIZE,HIDDEN_SIZE, [HIDDEN_SIZE, HIDDEN_SIZE], activation=sigmoid_7,flatten_input=False))
-model_12 = Wrapper(MLP(INPUT_SIZE,HIDDEN_SIZE, [HIDDEN_SIZE, HIDDEN_SIZE], activation=sigmoid_12,flatten_input=False))
-model_17 = Wrapper(MLP(INPUT_SIZE,HIDDEN_SIZE, [HIDDEN_SIZE, HIDDEN_SIZE], activation=sigmoid_17,flatten_input=False))
-model_true = Wrapper(MLP(INPUT_SIZE,HIDDEN_SIZE, [HIDDEN_SIZE, HIDDEN_SIZE],flatten_input=False))
-model_noisy = Wrapper(MLP(INPUT_SIZE,HIDDEN_SIZE, [HIDDEN_SIZE, HIDDEN_SIZE],flatten_input=False))
+# by having action size 0 and 3 hidden layers, we enforce an activation layer before the output!
+model_2 = Wrapper(MLP(INPUT_SIZE,0, HIDDEN_LAYER_LST,activation=sigmoid_2,flatten_input=False))
+model_7 = Wrapper(MLP(INPUT_SIZE,0, HIDDEN_LAYER_LST, activation=sigmoid_7,flatten_input=False))
+model_12 = Wrapper(MLP(INPUT_SIZE,0, HIDDEN_LAYER_LST, activation=sigmoid_12,flatten_input=False))
+model_17 = Wrapper(MLP(INPUT_SIZE,0, HIDDEN_LAYER_LST, activation=sigmoid_17,flatten_input=False))
+model_true = Wrapper(MLP(INPUT_SIZE,0, HIDDEN_LAYER_LST,flatten_input=False))
+model_label_noise = Wrapper(MLP(INPUT_SIZE,0, HIDDEN_LAYER_LST,flatten_input=False))
+model_noisy = Wrapper(MLP(INPUT_SIZE,0, HIDDEN_LAYER_LST,flatten_input=False))
 print("MAKE SURE TO CHANGE DEFAULT ACTIVATION TO SIGMOID IN MLP")
-
+print(model_2)
 # make the weights and biases the same for all models
 model_2_sate_dict = model_2.state_dict()
 model_7.load_state_dict(model_2_sate_dict)
@@ -266,7 +270,7 @@ def gradient_heatmap():
     vmin = -0.01
     vmax = 0.01
 
-    fig, axs = plt.subplots(nrows=len(all_grads), ncols=4)
+    fig, axs = plt.subplots(nrows=len(all_grads), ncols=N_LAYERS)
     for i, grads in enumerate(all_grads):
         for j, grad in enumerate(grads):
             grad = grad.detach().numpy().sum(axis=0)/N_SAMPLES
@@ -281,8 +285,8 @@ def gradient_heatmap():
 
 def gradient_boxplot():
     # create a boxplot of the gradients for each layer
-    fig, axs = plt.subplots(nrows=1, ncols=4)
-    for j in range(4):
+    fig, axs = plt.subplots(nrows=1, ncols=N_LAYERS)
+    for j in range(N_LAYERS):
         data = [grads_2_stacked[j].flatten().numpy(), 
                 grads_7_stacked[j].flatten().numpy(), 
                 grads_12_stacked[j].flatten().numpy(), 
@@ -300,8 +304,8 @@ def gradient_boxplot():
 
 def calculate_sign_reversal_accross_batch():
     # calculate sign reversal
-    fig, axs = plt.subplots(nrows=len(all_grads), ncols=4)
-    fig_boxplot, axs_boxplot = plt.subplots(nrows=1, ncols=4) # for boxplot
+    fig, axs = plt.subplots(nrows=len(all_grads), ncols=N_LAYERS)
+    fig_boxplot, axs_boxplot = plt.subplots(nrows=1, ncols=N_LAYERS) # for boxplot
 
     for i, grads in enumerate(all_grads):
         for j, grad in enumerate(grads):
@@ -338,7 +342,7 @@ def calculate_sign_reversal_accross_batch():
     # calculate the cosine similarity between the gradients of the high slope model and the other models
 
 def calculate_sign_reversal_accross_layer():
-    fig_boxplot, axs_boxplot = plt.subplots(nrows=1, ncols=4) # for boxplot
+    fig_boxplot, axs_boxplot = plt.subplots(nrows=1, ncols=N_LAYERS) # for boxplot
     data_models = []
     for i, grads in enumerate(all_grads):
         data = []
@@ -360,7 +364,7 @@ def calculate_sign_reversal_accross_layer():
             data_accross_batch = signs.reshape(N_SAMPLES,-1).sum(axis=-1)/(N_ELS) # probability of sign reversal for each weight
             data.append(data_accross_batch)
         data_models.append(data)
-    for j in range(4):
+    for j in range(N_LAYERS):
         # gather data for layer j for each model
         data_accross_batch = [model[j] for model in data_models]
         # # add to boxplot
@@ -369,10 +373,10 @@ def calculate_sign_reversal_accross_layer():
                 showmedians=True)
         axs_boxplot[j].set_title(f'Layer {j} Sign Reversal Probability')
 
-        plt.title("Sign Reversal Probability For Each Layer (1-4)")
+        plt.title("Sign Reversal Probability For Each Layer (1-N_LAYERS)")
  
 def calculate_cosine_similarity():
-    fig, axs = plt.subplots(nrows=1, ncols=4)
+    fig, axs = plt.subplots(nrows=1, ncols=N_LAYERS)
     data_models = []
     for i, grads in enumerate(all_grads):
         data = []
@@ -383,17 +387,21 @@ def calculate_cosine_similarity():
             cos_sim = np.sum(grad * grad_high_slope, axis=1)/(np.linalg.norm(grad,axis=1)*np.linalg.norm(grad_high_slope, axis=1))
             data.append(cos_sim)
         data_models.append(data)
-    for j in range(4):
+    for j in range(N_LAYERS):
         # gather data for layer j for each model
         data_accross_batch = [model[j] for model in data_models]
         # # add to boxplot
+        # color code eacht model
+        # axs[j].violinplot(data_accross_batch,
+        #         showmeans=False,
+        #         showmedians=True)
         axs[j].violinplot(data_accross_batch,
                 showmeans=False,
                 showmedians=True)
         axs[j].set_title(f'Layer {j} Cosine Similarity')
         # share y axis
         axs[j].set_ylim(-1,1)
-        plt.title("Cosine Similarity For Each Layer (1-4)")
+        plt.title("Cosine Similarity For Each Layer (1-N_LAYERS)")
 
 
             # draw this in subplot on ax[i], column j

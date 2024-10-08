@@ -45,7 +45,7 @@ model_7 = Wrapper(SMLP(INPUT_SIZE,HIDDEN_SIZE, [HIDDEN_SIZE, HIDDEN_SIZE], slope
 model_12 = Wrapper(SMLP(INPUT_SIZE,HIDDEN_SIZE, [HIDDEN_SIZE, HIDDEN_SIZE], slope=12))
 model_17 = Wrapper(SMLP(INPUT_SIZE,HIDDEN_SIZE, [HIDDEN_SIZE, HIDDEN_SIZE], slope=17))
 model_22 = Wrapper(SMLP(INPUT_SIZE,HIDDEN_SIZE, [HIDDEN_SIZE, HIDDEN_SIZE], slope=22))
-
+print(model_2)
 # make the weights and biases the same for all models
 model_2_sate_dict = model_2.state_dict()
 model_7.load_state_dict(model_2_sate_dict)
@@ -256,7 +256,7 @@ def calculate_cosine_similarity():
             grad = grad.detach().numpy().reshape(N_SAMPLES,-1)
             grad_high_slope = all_grads[-1][j].detach().numpy().reshape(N_SAMPLES,-1)
             # calculate the cosine similarity between the gradients of the high slope model and the other models
-            
+
             cos_sim = np.sum(grad * grad_high_slope, axis=1)/(np.linalg.norm(grad,axis=1)*np.linalg.norm(grad_high_slope, axis=1))
             data.append(cos_sim)
         data_models.append(data)
