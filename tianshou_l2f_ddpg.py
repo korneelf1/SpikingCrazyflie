@@ -157,7 +157,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
 
     # log
     now = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
-    args.algo_name = "sac"
+    args.algo_name = "ddpg"
     log_name = os.path.join(args.algo_name, str(args.seed), now)
     log_path = os.path.join(args.logdir, log_name)
 
@@ -184,6 +184,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
 
     timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
     exploration_noise = str(args.exploration_noise)
+    print("Exploration noise:", exploration_noise)
     def save_best_fn(policy: BasePolicy) -> None:
         torch.save(policy.state_dict(), os.path.join(log_path, f"policy_ddpg_{exploration_noise}_{timestamp}.pth"))
         logger.wandb_run.log_artifact(os.path.join(log_path, f"policy_ddpg_{exploration_noise}_{timestamp}.pth"), name='policy', type='model')
