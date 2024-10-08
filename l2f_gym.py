@@ -79,7 +79,7 @@ def power_distribution_force_torque(control, arm_length=0.046, thrust_to_torque=
 # power_distribution_force_torque(control, motor_thrust_uncapped, arm_length=0.1, thrust_to_torque=0.05, pwm_to_thrust_a=0.01, pwm_to_thrust_b=0.02)
 
 class Learning2Fly(gym.Env):
-    def __init__(self, curriculum_terminal=False,seed=None,rpm=False, action_history=True, quaternions_to_obs_matrices=True) -> None:
+    def __init__(self, fast_learning=False,seed=None,rpm=False, action_history=True, quaternions_to_obs_matrices=True) -> None:
 
         super().__init__()
         # L2F initialization
@@ -99,7 +99,7 @@ class Learning2Fly(gym.Env):
         initialize_rng(self.device, self.rng, seed)
 
         # curriculum parameters
-        self.Nc = 1e5 # interval of application of curriculum, roughly 10 epochs
+        self.Nc = 7e5 # interval of application of curriculum, roughly 10 epochs
         self.obs_mat = quaternions_to_obs_matrices
         self.rpm = rpm
         if action_history:
@@ -122,17 +122,28 @@ class Learning2Fly(gym.Env):
         
         self.global_step_counter = 0   
         self.t = 0
-        self.curriculum_terminal = curriculum_terminal # if True, the environment will use soft terminal conditions initially
+        self.fast_learning = fast_learning # if True, the environment will use soft terminal conditions initially
 
-        # Reward parameters
-                # intial parameters
-        self.Cp = 2.5 # position weight
-        self.Cv = .005 # velocity weight
-        self.Cq = 2.5 # orientation weight
-        self.Ca = .005 # action weight og .334, but just learns to fly out of frame
-        self.Cw = .00 # angular velocity weight 
-        self.Crs = 2 # reward for survival
-        self.Cab = .334 # action baseline
+        if not self.fast_learning:
+            # Reward parameters
+                    # intial parameters
+            self.Cp = .1 # position weight
+            self.Cv = .01 # velocity weight
+            self.Cq = .01 # orientation weight
+            self.Ca = .1 # action weight og .334, but just learns to fly out of frame
+            self.Cw = .00 # angular velocity weight 
+            self.Crs = 1 # reward for survival
+            self.Cab = 2*.334-1 # action baseline
+        else:
+            # Reward parameters
+            self.Cp = .1
+            self.Cv = .0# velocity weight
+            self.Cq = .0 # orientation weight
+            self.Ca = .0 # action weight og .334, but just learns to fly out of frame
+            self.Cw = .00 # angular velocity weight 
+            self.Crs = 1 # reward for survival
+            self.Cab = 2*.334-1 # action baseline
+
 
         
 
@@ -241,23 +252,28 @@ class Learning2Fly(gym.Env):
     def _check_done(self):
         done = False
 
-        
-        if self.curriculum_terminal:
-            pos_limit = 1.5
-            pos_min = 0.6
-            factor = 1/1.5
-            xy_softening = 10 # to first train hover
-            if self.global_step_counter%2e4==0:
-                pos_limit = max(pos_min, pos_limit*factor)
-                xy_softening = max(1,xy_softening*factor)
-            z_terminal = self.obs[3]>pos_limit
-            xy_terminal = np.sum((np.abs(self.obs[0:2])>pos_limit*xy_softening))
-            pos_threshold = z_terminal + xy_terminal
-        else:
-            pos_threshold = np.sum((np.abs(self.obs[0:3])>.6))
+        pos   = np.array(self.state.position)
+        vel   = np.array(self.state.linear_velocity)
+        q     = np.array(self.state.orientation)
+        qd    = np.array(self.state.angular_velocity)
 
-        velocity_threshold = np.sum((np.abs(self.obs[3:6]) > 1000))
-        angular_threshold  = np.sum((np.abs(self.obs[10:13]) > 1000))
+        pos_lim = .5 if self.fast_learning else 1.5        
+        # if self.curriculum_terminal:
+        #     pos_limit = 1.5
+        #     pos_min = 0.6
+        #     factor = 1/1.5
+        #     xy_softening = 10 # to first train hover
+        #     if self.global_step_counter%2e4==0:
+        #         pos_limit = max(pos_min, pos_limit*factor)
+        #         xy_softening = max(1,xy_softening*factor)
+        #     z_terminal = self.obs[3]>pos_limit
+        #     xy_terminal = np.sum((np.abs(self.obs[0:2])>pos_limit*xy_softening))
+        #     pos_threshold = z_terminal + xy_terminal
+        # else:
+        pos_threshold = np.sum((np.abs(pos)>1.5))
+
+        velocity_threshold = np.sum((np.abs(vel) > 1000))
+        angular_threshold  = np.sum((np.abs(qd) > 1000))
         time_threshold = self.t>500
 
         if np.any(np.isnan(self.obs)):

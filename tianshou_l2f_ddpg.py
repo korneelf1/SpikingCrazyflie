@@ -56,6 +56,7 @@ def get_args() -> argparse.Namespace:
         choices=["tensorboard", "wandb"],
     )
     parser.add_argument("--wandb-project", type=str, default="l2f")
+    parser.add_argument("--exploration-noise", type=str, default="default")
     parser.add_argument(
         "--watch",
         default=False,
@@ -119,9 +120,10 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
       'reinit': True,
       'reward_function': 'reward_squared_fast_learning',
       'exploration_noise': None,
-      'surrogate sigmoid': False,
+      'surrogate sigmoid': args.exploration_noise,
       }
-
+    if args.exploration_noise == 'None':
+        args.exploration_noise = None
     policy: DDPGPolicy = DDPGPolicy(
         actor=actor,
         actor_optim=actor_optim,
@@ -131,7 +133,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
         gamma=args.gamma,
         estimation_step=args.n_step,
         action_space=env.action_space,
-        exploration_noise=args_wandb['exploration_noise'],
+        exploration_noise=args.exploration_noise,
     )
 
     # load a previous policy
@@ -148,7 +150,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
 
 
 
-    train_collector = Collector(policy, train_envs, buffer, exploration_noise=False)
+    train_collector = Collector(policy, train_envs, buffer)
     test_collector = Collector(policy, test_envs)
     train_collector.reset()
     train_collector.collect(n_step=args.start_timesteps, random=True)
@@ -180,9 +182,11 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
     logger.load(writer)
 
 
+    timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
+    exploration_noise = str(args.exploration_noise)
     def save_best_fn(policy: BasePolicy) -> None:
-        torch.save(policy.state_dict(), os.path.join(log_path, "policy_ddpg.pth"))
-        logger.wandb_run.log_artifact(os.path.join(log_path, "policy_ddpg.pth"), name='policy', type='model')
+        torch.save(policy.state_dict(), os.path.join(log_path, f"policy_ddpg_{exploration_noise}_{timestamp}.pth"))
+        logger.wandb_run.log_artifact(os.path.join(log_path, f"policy_ddpg_{exploration_noise}_{timestamp}.pth"), name='policy', type='model')
 
     if not args.watch:
         # trainer
@@ -199,7 +203,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
             logger=logger,
             update_per_step=args.update_per_step,
             test_in_train=False,
-            show_progress=True,
+            show_progress=False,
         ).run()
         pprint.pprint(result)
 
