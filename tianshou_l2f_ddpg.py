@@ -19,6 +19,7 @@ from tianshou.env import DummyVectorEnv
 from l2f_gym import Learning2Fly, SubprocVectorizedL2F, ShmemVectorizedL2F
 from tianshou.utils import WandbLogger
 from torch.utils.tensorboard import SummaryWriter
+from spikingActorProb import SpikingNet
 
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -57,6 +58,9 @@ def get_args() -> argparse.Namespace:
     )
     parser.add_argument("--wandb-project", type=str, default="l2f")
     parser.add_argument("--exploration-noise", type=str, default="default")
+    parser.add_argument("--spiking", type=bool, default=False)
+    parser.add_argument("--slope", type=float, default=2)
+    parser.add_argument("--slope-schedule", type=bool, default=True)
     parser.add_argument(
         "--watch",
         default=False,
@@ -80,8 +84,12 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
     # seed
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    # model
-    net_a = Net(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device)
+
+    if args.spiking:
+        args.hidden_sizes = [128]
+        net_a = SpikingNet(state_shape=args.state_shape, hidden_sizes=[args.hidden_sizes], action_shape=256, repeat=args.repeat_per_forward, slope=args.slope, slope_schedule=args.slope_schedule, reset_in_call=True)
+    else: # model
+        net_a = Net(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device)
     actor = Actor(net_a, args.action_shape, device=args.device,).to(args.device)
 
     actor_optim = torch.optim.Adam(actor.parameters(), lr=args.actor_lr)
@@ -110,7 +118,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
       'task': 'stabilize',
       'seed': int(3),
       'logdir':'',
-      'spiking':False,
+      'spiking':args.spiking,
       'recurrent':False,
       'masked':False,
       'logger': 'wandb',
@@ -119,9 +127,12 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
       'collector_type': 'Collector',
       'reinit': True,
       'reward_function': 'reward_squared_fast_learning',
-      'exploration_noise': None,
+      'exploration_noise': args.exploration_noise,
       'surrogate sigmoid': args.exploration_noise,
+      'slope': args.slope,
+      'slope_schedule': args.slope_schedule
       }
+    
     if args.exploration_noise == 'None':
         args.exploration_noise = None
     policy: DDPGPolicy = DDPGPolicy(
@@ -184,6 +195,9 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
 
     timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
     exploration_noise = str(args.exploration_noise)
+    if args.spiking:
+        exploration_noise = "spiking_" + exploration_noise
+        
     print("Exploration noise:", exploration_noise)
     def save_best_fn(policy: BasePolicy) -> None:
         torch.save(policy.state_dict(), os.path.join(log_path, f"policy_ddpg_{exploration_noise}_{timestamp}.pth"))
