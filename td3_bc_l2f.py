@@ -93,7 +93,7 @@ class CustomBuffer():
     def sample(self, idx):
         return self.data[idx]
 
-def gather_buffer(model, name='l2f_controller_buffer', size = 10000, step_len = 501):
+def gather_buffer(model, name='l2f_controller_buffer', size = 1000, step_len = 501):
     buffer = ReplayBuffer(size=size)
     n_rollouts = size 
     for _ in tqdm(range(n_rollouts), desc="Gathering buffer"):
@@ -108,13 +108,14 @@ def gather_buffer(model, name='l2f_controller_buffer', size = 10000, step_len = 
             dones_lst = []
             obs_next_lst = []
 
-            obs = env.reset()[0] 
+            returns = []
+            obs = env.reset()[0]
             partial_rollout = False # assume full rollout unless dones before end of range
             for i in range(step_len):
 
                 obs = torch.tensor(obs)
                 action = model(obs)
-                obs_lst.append(obs)
+                obs_lst.append(obs.numpy())
                 obs, rewards, dones,_, info = env.step(action.detach().numpy()) 
 
                 obs_next_lst.append(obs)
@@ -128,6 +129,7 @@ def gather_buffer(model, name='l2f_controller_buffer', size = 10000, step_len = 
                     print("Crashed at step", i)
                     partial_rollout = True
         
+    
         obs_stack = np.hstack((np.array(obs_lst), np.array(action_lst), np.array(rewards_lst).reshape(-1,1), np.array(dones_lst).reshape(-1,1)))
         # add the rollout to the buffer
         buffer.add(Batch({'obs':obs_stack,'act':np.array(action_lst[-1]),'rew':np.array(rewards_lst[-1]),'terminated': np.array(dones_lst[-1]).reshape(-1,1),'truncated': np.array(dones_lst)[-1].reshape(-1,1)}))
@@ -213,6 +215,10 @@ class TD3BCPolicy(TD3Policy):
         )
         self._alpha = alpha
 
+
+    def compute_returns(self,batch):
+        '''Compute returns from rewards using discounted rewards:
+        '''
     def learn(self, batch, **kwargs: Any) -> Dict[str, float]:
         # create batch from first observations
         observations = batch.obs[:, :146]
@@ -457,8 +463,8 @@ def test_td3_bc(buffer) -> None:
 
 
 if __name__ == "__main__":
-    # buffer = gather_buffer(model)
-    # print("Buffer size: ", len(buffer))
+    buffer = gather_buffer(model)
+    print("Buffer size: ", len(buffer))
 
 
     import h5py
