@@ -174,7 +174,7 @@ class Learning2Fly(gym.Env):
     def reset(self,seed=None):
         sample_initial_parameters(self.device, self.env, self.params, self.rng)
 
-        self.params.parameters.dynamics.mass *= 0.1
+        # self.params.parameters.dynamics.mass *= 0.1
         sample_initial_state(self.device, self.env, self.params, self.state, self.rng)
 
         observe(self.device, self.env, self.params, self.state, self.observation, self.rng)
@@ -225,7 +225,7 @@ class Learning2Fly(gym.Env):
         q     = np.array(self.state.orientation)
         qd    = np.array(self.state.angular_velocity)
 
-        pos_lim = 1.5 if self.fast_learning else .6        
+        pos_lim = 15 if self.fast_learning else .6        
         # if self.curriculum_terminal:
         #     pos_limit = 1.5
         #     pos_min = 0.6
@@ -242,11 +242,18 @@ class Learning2Fly(gym.Env):
 
         velocity_threshold = np.sum((np.abs(vel) > 1000))
         angular_threshold  = np.sum((np.abs(qd) > 1000))
-        time_threshold = self.t>500
+        time_threshold = self.t>1000
 
         if np.any(np.isnan(self.obs)):
             done = True
         elif pos_threshold or velocity_threshold or angular_threshold or time_threshold:
+            # print what caused the termination
+            if pos_threshold:
+                print("Position threshold reached")
+            if velocity_threshold:
+                print("Velocity threshold reached")
+            if angular_threshold:
+                print("Angular velocity threshold reached")
             done = True
             
 
