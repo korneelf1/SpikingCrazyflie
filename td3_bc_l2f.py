@@ -93,7 +93,7 @@ class CustomBuffer():
     def sample(self, idx):
         return self.data[idx]
 
-def gather_buffer(model, name='l2f_controller_buffer', size = 1000, step_len = 501):
+def gather_buffer(model, name='l2f_controller_buffer_short', size = 10, step_len = 501):
     buffer = ReplayBuffer(size=size)
     n_rollouts = size 
     for _ in tqdm(range(n_rollouts), desc="Gathering buffer"):
@@ -134,7 +134,7 @@ def gather_buffer(model, name='l2f_controller_buffer', size = 1000, step_len = 5
         # add the rollout to the buffer
         buffer.add(Batch({'obs':obs_stack,'act':np.array(action_lst[-1]),'rew':np.array(rewards_lst[-1]),'terminated': np.array(dones_lst[-1]).reshape(-1,1),'truncated': np.array(dones_lst)[-1].reshape(-1,1)}))
         # buffer.add(Batch({'obs':obs_stack}))
-    buffer.save_hdf5(f"{name}.pkl")
+    buffer.save_hdf5(f"{name}.hdf5")
     return buffer
 
 from typing import Any, Dict, Optional
@@ -153,8 +153,8 @@ class TD3BCPolicy(TD3Policy):
     :param torch.nn.Module actor: the actor network following the rules in
         :class:`~tianshou.policy.BasePolicy`. (s -> logits)
     :param torch.optim.Optimizer actor_optim: the optimizer for actor network.
-    :param torch.nn.Module critic1: the first critic network. (s, a -> Q(s, a))
-    :param torch.optim.Optimizer critic1_optim: the optimizer for the first
+    :param torch.nn.Module critic: the first critic network. (s, a -> Q(s, a))
+    :param torch.optim.Optimizer critic_optim: the optimizer for the first
         critic network.
     :param torch.nn.Module critic2: the second critic network. (s, a -> Q(s, a))
     :param torch.optim.Optimizer critic2_optim: the optimizer for the second
@@ -193,8 +193,8 @@ class TD3BCPolicy(TD3Policy):
         self,
         actor: torch.nn.Module,
         actor_optim: torch.optim.Optimizer,
-        critic1: torch.nn.Module,
-        critic1_optim: torch.optim.Optimizer,
+        critic: torch.nn.Module,
+        critic_optim: torch.optim.Optimizer,
         critic2: torch.nn.Module,
         critic2_optim: torch.optim.Optimizer,
         tau: float = 0.005,
@@ -209,23 +209,49 @@ class TD3BCPolicy(TD3Policy):
         **kwargs: Any,
     ) -> None:
         super().__init__(
-            actor, actor_optim, critic1, critic1_optim, critic2, critic2_optim, tau,
-            gamma, exploration_noise, policy_noise, update_actor_freq, noise_clip,
-            reward_normalization, estimation_step, **kwargs
+            actor = actor,
+            actor_optim = actor_optim,
+            critic = critic,
+            critic_optim = critic_optim,
+            critic2 = critic2,
+            critic2_optim = critic2_optim,
+            tau = tau,
+            gamma = gamma,
+            exploration_noise = exploration_noise,
+            policy_noise = policy_noise,
+            update_actor_freq = update_actor_freq,
+            noise_clip = noise_clip,
+            estimation_step = estimation_step,
+            **kwargs
+
         )
         self._alpha = alpha
 
 
     def compute_returns(self,batch):
         '''Compute returns from rewards using discounted rewards:
+        R_t = r_t + gamma * r_{t+1} + gamma^2 * r_{t+2} + ... + gamma^{T-t} * r_T
         '''
-    def learn(self, batch, **kwargs: Any) -> Dict[str, float]:
+        gamma = self.gamma
+        rewards = batch.rew
+        dones = batch.done
+        returns = np.zeros_like(rewards)
+        running_returns = 0
+        for t in reversed(range(len(rewards))):
+            running_returns = rewards[t] + gamma * running_returns * (1 - dones[t])
+            returns[t] = running_returns
+        return returns
+
+    def learn(self, batch, independent=True, **kwargs: Any) -> Dict[str, float]:
         # create batch from first observations
-        observations = batch.obs[:, :146]
-        actions = batch.obs[:, 146:150]
-        rewards = batch.obs[:, 150]
-        terminated = batch.obs[:, 151]
-        observations_next = np.vstack((batch.obs_next[1:, :146], np.zeros((1, 146))))
+        batch_size = batch.obs.shape[0]
+        observations = batch.obs[:,:, :146]
+        actions = batch.obs[:,:, 146:150]
+        rewards = batch.obs[:,:, 150]
+        terminated = batch.obs[:,:, 151]
+        observations_next = np.hstack((batch.obs[:,1:, :146], np.zeros((batch_size,1, 146))))
+
+        # compute returns
         # modified batch
         batch = Batch(
             obs=observations,
@@ -233,12 +259,14 @@ class TD3BCPolicy(TD3Policy):
             rew=rewards,
             done=terminated,
             obs_next=observations_next,
+            returns=None
         )
-        
+        compute_returns = self.compute_returns(batch)
+        batch.returns = compute_returns
         # critic 1&2
-        batch = RolloutBatchProtocol(**batch)
-        td1, critic1_loss = self._mse_optimizer(
-            batch, self.critic1, self.critic1_optim
+        # batch = RolloutBatchProtocol(**batch)
+        td1, critic_loss = self._mse_optimizer(
+            batch, self.critic, self.critic_optim
         )
         td2, critic2_loss = self._mse_optimizer(
             batch, self.critic2, self.critic2_optim
@@ -248,7 +276,7 @@ class TD3BCPolicy(TD3Policy):
         # actor
         if self._cnt % self._freq == 0:
             act = self(batch, eps=0.0).act
-            q_value = self.critic1(batch.obs, act)
+            q_value = self.critic(batch.obs, act)
             lmbda = self._alpha / q_value.abs().mean().detach()
             actor_loss = -lmbda * q_value.mean() + F.mse_loss(
                 act, to_torch_as(batch.act, act)
@@ -261,7 +289,7 @@ class TD3BCPolicy(TD3Policy):
         self._cnt += 1
         return {
             "loss/actor": self._last,
-            "loss/critic1": critic1_loss.item(),
+            "loss/critic": critic_loss.item(),
             "loss/critic2": critic2_loss.item(),
         }
 
@@ -286,7 +314,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--update-actor-freq", type=int, default=2)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--norm-obs", type=int, default=1)
+    parser.add_argument("--norm-obs", type=int, default=0)
 
     parser.add_argument("--eval-freq", type=int, default=1)
     parser.add_argument("--test-num", type=int, default=10)
@@ -318,7 +346,7 @@ def get_args() -> argparse.Namespace:
 
 def test_td3_bc(buffer) -> None:
     args = get_args()
-    env = gym.make(args.task)
+    env = Learning2Fly()
     space_info = SpaceInfo.from_env(env)
     args.state_shape = space_info.observation_info.obs_shape
     args.action_shape = space_info.action_info.action_shape
@@ -333,15 +361,14 @@ def test_td3_bc(buffer) -> None:
     args.action_dim = space_info.action_info.action_dim
     print("Max_action", args.max_action)
 
-    test_envs: BaseVectorEnv
-    test_envs = SubprocVectorEnv([lambda: gym.make(args.task) for _ in range(args.test_num)])
+    test_envs = Learning2Fly()
     if args.norm_obs:
         test_envs = VectorEnvNormObs(test_envs, update_obs_rms=False)
 
     # seed
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    test_envs.seed(args.seed)
+    # test_envs.seed(args.seed)
 
     # model
     # actor network
@@ -373,16 +400,16 @@ def test_td3_bc(buffer) -> None:
         concat=True,
         device=args.device,
     )
-    critic1 = Critic(net_c1, device=args.device).to(args.device)
-    critic1_optim = torch.optim.Adam(critic1.parameters(), lr=args.critic_lr)
-    critic2 = Critic(net_c2, device=args.device).to(args.device)
+    critic = Critic(net_c1, device=args.device, flatten_input=False).to(args.device)
+    critic_optim = torch.optim.Adam(critic.parameters(), lr=args.critic_lr)
+    critic2 = Critic(net_c2, device=args.device, flatten_input=False).to(args.device)
     critic2_optim = torch.optim.Adam(critic2.parameters(), lr=args.critic_lr)
 
     policy: TD3BCPolicy = TD3BCPolicy(
         actor=actor,
         actor_optim=actor_optim,
-        critic=critic1,
-        critic_optim=critic1_optim,
+        critic=critic,
+        critic_optim=critic_optim,
         critic2=critic2,
         critic2_optim=critic2_optim,
         tau=args.tau,
@@ -450,7 +477,11 @@ def test_td3_bc(buffer) -> None:
             batch_size=args.batch_size,
             save_best_fn=save_best_fn,
             logger=logger,
-        ).run()
+        )
+
+        for i in range(1, 1 + args.epoch):
+            batch = replay_buffer.sample(args.batch_size)[0]
+            policy.learn(batch, )
         pprint.pprint(result)
     else:
         watch()
@@ -463,13 +494,13 @@ def test_td3_bc(buffer) -> None:
 
 
 if __name__ == "__main__":
-    buffer = gather_buffer(model)
-    print("Buffer size: ", len(buffer))
+    # buffer = gather_buffer(model)
+    # print("Buffer size: ", len(buffer))
 
 
-    import h5py
+    # import h5py
     
-    replay_buffer = ReplayBuffer.load_hdf5('l2f_controller_buffer.hdf5')
+    replay_buffer = ReplayBuffer.load_hdf5('l2f_controller_buffer_short.hdf5')
     print("Buffer size: ", len(replay_buffer))
     test_td3_bc(replay_buffer)
 
