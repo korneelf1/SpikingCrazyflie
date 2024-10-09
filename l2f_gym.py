@@ -99,7 +99,7 @@ class Learning2Fly(gym.Env):
         initialize_rng(self.device, self.rng, seed)
 
         # curriculum parameters
-        self.Nc = 1e0 # interval of application of curriculum, roughly 10 epochs
+        self.Nc = 1e5 # interval of application of curriculum, roughly 10 epochs
 
         sample_initial_parameters(self.device, self.env, self.params, self.rng)
 
