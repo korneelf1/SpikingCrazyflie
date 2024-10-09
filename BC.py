@@ -15,7 +15,7 @@ class BC:
         self.loss_fn = torch.nn.MSELoss()
         self.device= device
 
-    def test(self, n_episodes=20):
+    def test(self, n_episodes=20,viz=False):
         avg_rew = 0
         avg_len = 0
         for episode in range(n_episodes):
@@ -34,6 +34,18 @@ class BC:
             avg_rew+= total_rew
             avg_len+= t
             print("Flying for: ",t)
+            # plot the actions
+        if viz:
+            import matplotlib.pyplot as plt
+            import numpy as np
+            actions = np.stack(actions)
+            plt.subplots(4,1,figsize=(10,10))
+            for i in range(4):
+                plt.subplot(4,1,i+1)
+                plt.plot(actions[:,i])
+                plt.ylabel(f"Action {i}")
+            plt.show()
+
         wandb.log({'test reward': avg_rew/n_episodes,'test len': avg_len/n_episodes})
 
 
@@ -70,7 +82,7 @@ class BC:
                 self.best_epoch_loss = np.mean(losses)
                 torch.save(self.model.state_dict(), "model_bc.pth")
             if n%10==0:
-                self.test()
+                self.test(viz=True)
                 
         
     
@@ -107,7 +119,7 @@ if __name__ == "__main__":
     wandb.init(mode="disabled")
 
     # prepare the data
-    buffer = ReplayBuffer.load_hdf5('l2f_controller_buffer.hdf5')
+    buffer = ReplayBuffer.load_hdf5('l2f_controller_buffer_short.hdf5')
     
     env = Learning2Fly()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
