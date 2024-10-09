@@ -157,7 +157,7 @@ class Learning2Fly(gym.Env):
     def step(self, action):
         # self.action.motor_command = power_distribution_force_torque(action.reshape((4,)))
         self.action.motor_command = action.reshape((4,))
-        
+        # print(self.action.motor_command)
         step(self.device, self.env, self.params, self.state, self.action, self.next_state, self.rng)
         self.state = self.next_state
 
@@ -168,7 +168,7 @@ class Learning2Fly(gym.Env):
         done = self._check_done()
         # print("Step: ", self.t, "Done: ", done)
         reward = self._reward()
-
+        # print(self.obs)
         return self.obs, reward, done,done, {}
     
     def reset(self,seed=None):
@@ -211,7 +211,7 @@ class Learning2Fly(gym.Env):
 
         r = - self.Cv*np.sum((vel)**2) \
                 - self.Ca*np.sum((np.array(self.action.motor_command)-self.Cab)**2) \
-                    -self.Cq*2*np.acos(1-q[3]**2)\
+                    -self.Cq*2*np.arccos(1-q[3]**2)\
                     - self.Cw*np.sum((qd)**2) \
                         + self.Crs \
                             -self.Cp*np.sum((pos)**2) 
@@ -225,7 +225,7 @@ class Learning2Fly(gym.Env):
         q     = np.array(self.state.orientation)
         qd    = np.array(self.state.angular_velocity)
 
-        pos_lim = .6 if self.fast_learning else 1.5        
+        pos_lim = 1.5 if self.fast_learning else .6        
         # if self.curriculum_terminal:
         #     pos_limit = 1.5
         #     pos_min = 0.6
