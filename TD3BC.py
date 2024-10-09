@@ -5,8 +5,8 @@ from tianshou.data import ReplayBuffer
 import matplotlib.pyplot as plt
 
 from tqdm import tqdm
-class BC:
-    def __init__(self, env, model, optimizer, buffer, batch_size=256, warmup=50, device='cpu'):
+class TD3BC:
+    def __init__(self, env, model, optimizer,critic1, critic1_optimizer, critic2, critic2_optimizer, buffer, batch_size=256, warmup=50, device='cpu'):
         self.env = env
         self.model = model
         self.optimizer = optimizer
