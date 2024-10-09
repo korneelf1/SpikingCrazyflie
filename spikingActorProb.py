@@ -313,6 +313,7 @@ class SpikingNet(NetBase[Any]):
 
         hidden_state = state
         for _ in range(self.repeat):
+            
             last_logits, hidden_state = self.model(obs, hidden_state)
 
             logits += last_logits

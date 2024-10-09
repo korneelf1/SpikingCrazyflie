@@ -2,6 +2,8 @@
 import numpy as np
 import torch
 from tianshou.data import ReplayBuffer
+import matplotlib.pyplot as plt
+
 from tqdm import tqdm
 class BC:
     def __init__(self, env, model, optimizer, buffer, batch_size=256, warmup=50, device='cpu'):
@@ -15,7 +17,7 @@ class BC:
         self.loss_fn = torch.nn.MSELoss()
         self.device= device
 
-    def test(self, n_episodes=20,viz=False):
+    def test(self, n_episodes=20,viz=True):
         avg_rew = 0
         avg_len = 0
         for episode in range(n_episodes):
@@ -25,9 +27,9 @@ class BC:
             t = 0
             actions = []
             while not done:
-                obs = torch.tensor(obs[:18])
+                obs = torch.tensor(obs[:18],device=self.device)
                 action = torch.nn.Tanh()(self.model(obs)[0][0])
-                actions.append(action)
+                actions.append(action.detach().cpu())
                 obs, rew, done, done, info = self.env.step(np.array(action.detach().cpu()))
                 t+=1
                 total_rew+= rew
@@ -36,15 +38,14 @@ class BC:
             print("Flying for: ",t)
             # plot the actions
         if viz:
-            import matplotlib.pyplot as plt
-            import numpy as np
-            actions = np.stack(actions)
-            plt.subplots(4,1,figsize=(10,10))
+            actions = np.vstack(actions)
+            fig, axs = plt.subplots(4,1,figsize=(10,10))
             for i in range(4):
                 plt.subplot(4,1,i+1)
                 plt.plot(actions[:,i])
                 plt.ylabel(f"Action {i}")
-            plt.show()
+            # plt.show()
+            wandb.log({"img": [wandb.Image(fig, caption=f"BC Learning")]})
 
         wandb.log({'test reward': avg_rew/n_episodes,'test len': avg_len/n_episodes})
 
@@ -58,15 +59,16 @@ class BC:
             for _ in range(int(len(self.buffer)//self.batch_size*.7)):
                 self.model.preprocess.reset()
                 batch = self.buffer.sample(self.batch_size)[0]
-                observations = torch.tensor(batch.obs[:,:, :18]).to(self.device)
+                observations = torch.tensor(batch.obs[:,:, :18],dtype=torch.float32).to(self.device)
                 actions = torch.tensor(batch.obs[:,:, 146:150]).to(torch.float32).to(self.device)
 
                 self.optimizer.zero_grad()
                 outputs = []
+                hidden = None
                 # print(self.model.device)
                 for t in range(observations.shape[1]):
-
-                    output = torch.nn.Tanh()(self.model(observations[:, t])[0][0]) # actor
+                    (mu,simga),hidden = self.model(observations[:, t], hidden)
+                    output = torch.nn.Tanh()(mu) # actor
                     outputs.append(output)
 
                 outputs = torch.stack(outputs, dim=1).to(torch.float32)
@@ -119,12 +121,12 @@ if __name__ == "__main__":
     wandb.init(mode="disabled")
 
     # prepare the data
-    buffer = ReplayBuffer.load_hdf5('l2f_controller_buffer_short.hdf5')
+    buffer = ReplayBuffer.load_hdf5('l2f_controller_buffer.hdf5')
     
     env = Learning2Fly()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print('Device in use:',device)
-    spiking_module = SpikingNet(state_shape=18, action_shape=128, hidden_sizes=[128], device=device, reset_in_call=False, repeat=0).to(device)
+    spiking_module = SpikingNet(state_shape=18, action_shape=128, hidden_sizes=[128], device=device, reset_in_call=False, repeat=1).to(device)
     model = ActorProb(spiking_module, 4, device=device)
     print(model)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
