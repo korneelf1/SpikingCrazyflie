@@ -17,19 +17,24 @@ obs = env.reset()[0]
 
 obs_lst = []
 action_lst = []
-
+action_range_01 = True
+rew_total = 0
 for i in range(1000):
     obs = torch.tensor(obs)
     action = model(obs)
+    if action_range_01:
+        action = (action + 1) / 2
     # print(action)
     obs, rewards, dones,_, info = env.step(action.detach().numpy()) 
-    
+    rew_total += rewards
+    # print(rewards)
     if dones:
         
         obs = env.reset()[0]
         print("Crashed at step", i)
     obs_lst.append(obs)
     action_lst.append(action.detach().numpy())
+print("Total reward:", rew_total)
 # plot the actions
 import matplotlib.pyplot as plt
 import numpy as np
