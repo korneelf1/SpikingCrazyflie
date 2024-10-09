@@ -128,10 +128,10 @@ class Learning2Fly(gym.Env):
             self.Cab = 2*.334-1 # action baseline
         else:
             # Reward parameters
-            self.Cp = .1
-            self.Cv = .0# velocity weight
-            self.Cq = .0 # orientation weight
-            self.Ca = .0 # action weight og .334, but just learns to fly out of frame
+            self.Cp = 1.0
+            self.Cv = .0005# velocity weight
+            self.Cq = .25 # orientation weight
+            self.Ca = .01 # action weight og .334, but just learns to fly out of frame
             self.Cw = .00 # angular velocity weight 
             self.Crs = 1 # reward for survival
             self.Cab = 2*.334-1 # action baseline
@@ -206,10 +206,12 @@ class Learning2Fly(gym.Env):
             
             self.Nc += self.Nc
 
-        
+        # 2*math::acos(device.math, 1-math::abs(device.math, state.orientation[3])) in python:
+        # orient_penalty = 2*np.acos(1-q[3]**2)
+
         r = - self.Cv*np.sum((vel)**2) \
                 - self.Ca*np.sum((np.array(self.action.motor_command)-self.Cab)**2) \
-                    -self.Cq*(1-q[0]**2)\
+                    -self.Cq*2*np.acos(1-q[3]**2)\
                     - self.Cw*np.sum((qd)**2) \
                         + self.Crs \
                             -self.Cp*np.sum((pos)**2) 
