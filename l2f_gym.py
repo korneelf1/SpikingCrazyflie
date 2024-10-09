@@ -1,4 +1,4 @@
-from l2f import Rng, Device, Environment, Parameters, State, Observation, Action,initialize_environment,step,initialize_rng,parameters_to_json,sample_initial_parameters,initial_state, sample_initial_state
+from l2f import Rng, Device, Environment, Parameters, State, Observation, Action,initialize_environment,step,initialize_rng,parameters_to_json,sample_initial_parameters,initial_state, sample_initial_state, observe
 import gymnasium as gym
 import numpy as np
 
@@ -100,25 +100,17 @@ class Learning2Fly(gym.Env):
 
         # curriculum parameters
         self.Nc = 7e5 # interval of application of curriculum, roughly 10 epochs
-        self.obs_mat = quaternions_to_obs_matrices
-        self.rpm = rpm
-        if action_history:
-            action_history_len = 32
-            self.action_history = helpers.NumpyDeque((1,4*action_history_len))
-            if self.obs_mat:
-                self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(18+4*32,))
-            else:
-                self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(17+4*32,))
-        elif rpm:
-            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(17,))
-        elif quaternions_to_obs_matrices:
-            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(18,))
-        else:
-            self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(13,))
-        
+
+        sample_initial_parameters(self.device, self.env, self.params, self.rng)
+
+        self.params.parameters.dynamics.mass *= 0.1
+        sample_initial_state(self.device, self.env, self.params, self.state, self.rng)
+
+        observe(self.device, self.env, self.params, self.state, self.observation, self.rng)
+
         # Gym initialization
         self.action_space = gym.spaces.Box(low=-1, high=1, shape=(4,))
-
+        self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(len(self.observation.observation),))
         
         self.global_step_counter = 0   
         self.t = 0
@@ -144,9 +136,7 @@ class Learning2Fly(gym.Env):
             self.Crs = 1 # reward for survival
             self.Cab = 2*.334-1 # action baseline
 
-
-        
-
+        # Curriculum parameters
         self.CpC = 1.2 # position factor
         self.Cplim = 20 # position limit
 
@@ -156,7 +146,13 @@ class Learning2Fly(gym.Env):
         self.Cac = 1.4  # action factor
         self.Calim = .5 # action limit
 
+
+        # reset environmnet
         self.reset()
+
+    @property
+    def obs(self):
+        return np.array(self.observation.observation,dtype=np.float32)
 
     def step(self, action):
         # self.action.motor_command = power_distribution_force_torque(action.reshape((4,)))
@@ -165,22 +161,8 @@ class Learning2Fly(gym.Env):
         step(self.device, self.env, self.params, self.state, self.action, self.next_state, self.rng)
         self.state = self.next_state
 
-        if hasattr(self, 'action_history'):
-            self.action_history.append(np.array(self.action.motor_command).reshape(1,4))
-            if self.obs_mat:
-                self.obs = np.concatenate([self.state.position, observe_rotation_matrix(self.state.orientation),  self.state.linear_velocity, self.state.angular_velocity, (self.action_history.array.flatten()+1)/2]).astype(np.float32)
-            else:
-        
-                self.obs = np.concatenate([self.state.position,  self.state.linear_velocity, self.state.orientation, self.state.angular_velocity, self.state.rpm, self.action_history.array.flatten()]).astype(np.float32)
-        elif self.rpm:
-            print("RPM")
-            self.obs = np.concatenate([self.state.position,  self.state.linear_velocity, self.state.orientation, self.state.angular_velocity, self.state.rpm]).astype(np.float32)   
-        elif self.obs_mat:
-            print("Obs Mat")
-            self.obs = np.concatenate([self.state.position, observe_rotation_matrix(self.state.orientation),  self.state.linear_velocity, self.state.angular_velocity]).astype(np.float32)
-        else:
-            self.obs = np.concatenate([self.state.position,  self.state.linear_velocity, self.state.orientation, self.state.angular_velocity]).astype(np.float32)
-         
+        observe(self.device, self.env, self.params, self.state, self.observation, self.rng)
+
         self.t += 1
 
         done = self._check_done()
@@ -195,26 +177,10 @@ class Learning2Fly(gym.Env):
         self.params.parameters.dynamics.mass *= 0.1
         sample_initial_state(self.device, self.env, self.params, self.state, self.rng)
 
+        observe(self.device, self.env, self.params, self.state, self.observation, self.rng)
         # self.global_step_counter += self.t
         self.t = 0
-        if hasattr(self, 'action_history'):
-            self.action_history.reset()
-            self.action_history.append(np.array(self.action.motor_command).reshape(1,4))
-            if self.obs_mat:
-                # print("Obs Mat+action history")
-                self.obs = np.concatenate([self.state.position, observe_rotation_matrix(self.state.orientation),  self.state.linear_velocity, self.state.angular_velocity,( self.action_history.array.flatten()+1)/2]).astype(np.float32)
-            else:
-        
-                self.obs = np.concatenate([self.state.position,  self.state.linear_velocity, self.state.orientation, self.state.angular_velocity, self.state.rpm, self.action_history.array.flatten()]).astype(np.float32)
-        elif self.rpm:
-            print("RPM")
-            self.obs = np.concatenate([self.state.position,  self.state.linear_velocity, self.state.orientation, self.state.angular_velocity, self.state.rpm]).astype(np.float32)   
-        elif self.obs_mat:
-            print("Obs Mat")
-            self.obs = np.concatenate([self.state.position, observe_rotation_matrix(self.state.orientation),  self.state.linear_velocity, self.state.angular_velocity]).astype(np.float32)
-        else:
-            print("Normal")
-            self.obs = np.concatenate([self.state.position,  self.state.linear_velocity, self.state.orientation, self.state.angular_velocity]).astype(np.float32)
+
 
         return self.obs, {}
     
@@ -257,7 +223,7 @@ class Learning2Fly(gym.Env):
         q     = np.array(self.state.orientation)
         qd    = np.array(self.state.angular_velocity)
 
-        pos_lim = 1 if self.fast_learning else 1.5        
+        pos_lim = .6 if self.fast_learning else 1.5        
         # if self.curriculum_terminal:
         #     pos_limit = 1.5
         #     pos_min = 0.6
