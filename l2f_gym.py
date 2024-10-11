@@ -120,9 +120,9 @@ class Learning2Fly(gym.Env):
             # Reward parameters
                     # intial parameters
             self.Cp = .1 # position weight
-            self.Cv = .01 # velocity weight
-            self.Cq = .01 # orientation weight
-            self.Ca = .1 # action weight og .334, but just learns to fly out of frame
+            self.Cv = .0 # velocity weight
+            self.Cq = .0 # orientation weight
+            self.Ca = .0 # action weight og .334, but just learns to fly out of frame
             self.Cw = .00 # angular velocity weight 
             self.Crs = 1 # reward for survival
             self.Cab = 2*.334-1 # action baseline
@@ -225,7 +225,7 @@ class Learning2Fly(gym.Env):
 
         velocity_threshold = np.sum((np.abs(vel) > 1000))
         angular_threshold  = np.sum((np.abs(qd) > 1000))
-        time_threshold = self.t>1000
+        time_threshold = self.t>500
 
         if np.any(np.isnan(self.obs)):
             done = True

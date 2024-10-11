@@ -16,7 +16,7 @@ from tianshou.trainer import OffpolicyTrainer
 from tianshou.utils.net.common import Net
 from tianshou.utils.net.continuous import ActorProb, Critic
 from tianshou.env import DummyVectorEnv
-from l2f_gym import Learning2Fly, SubprocVectorizedL2F, ShmemVectorizedL2F
+from l2f_gym import Learning2Fly
 
 # spiking neural network specific:
 from spiking_gym_wrapper import SpikingEnv
@@ -48,8 +48,8 @@ args_wandb = {
       'collector_type': 'Collector',
       'reinit': True,
       'reward_function': 'surrogate slope scheduling, alpha=0.0 symmetric observations with action history',
-      'slope': 5,
-      'slope_schedule': True,
+      'slope': 2,
+      'slope_schedule': False,
         'alpha': 0.0,
         'action_history': True,
         'stack_number': 1,
@@ -59,7 +59,7 @@ def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--buffer-size", type=int, default=1000000)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--hidden-sizes", type=int, nargs="*", default=[128,128])
+    parser.add_argument("--hidden-sizes", type=int, nargs="*", default=[128])
     parser.add_argument("--actor-lr", type=float, default=1e-3)
     parser.add_argument("--critic-lr", type=float, default=1e-3)
     parser.add_argument("--gamma", type=float, default=0.99)
@@ -68,7 +68,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--auto-alpha", default=False, action="store_true")
     parser.add_argument("--alpha-lr", type=float, default=3e-4)
     parser.add_argument("--start-timesteps", type=int, default=10000)
-    parser.add_argument("--epoch", type=int, default=250)
+    parser.add_argument("--epoch", type=int, default=100)
     parser.add_argument("--step-per-epoch", type=int, default=args_wandb['step_per_epoch'])
     parser.add_argument("--step-per-collect", type=int, default=args_wandb['step_per_collect'])
     parser.add_argument("--update-per-step", type=int, default=args_wandb['update_per_step'])
@@ -113,7 +113,7 @@ log_path = os.path.join(current_path,args_wandb['logdir'], args_wandb['task'], "
 from tianshou.utils import WandbLogger
 from torch.utils.tensorboard import SummaryWriter
 
-logger = WandbLogger(project="SSAC",config=args_wandb)
+logger = WandbLogger(project="thesis_graphs_fast_learning",config=args_wandb)
 writer = SummaryWriter(log_path)
 writer.add_text("args", str(args_wandb))
 logger.load(writer)
@@ -121,6 +121,7 @@ import wandb
 # wandb.init(mode='disabled')
 import gymnasium as gym
 def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
+    wandb.define_metric('*', step_metric='global_step')
     # env = gym.make("MountainCarContinuous-v0")
     env = Learning2Fly()
     
@@ -131,6 +132,7 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
     print("Actions shape:", args.action_shape)
     print("Action range:", np.min(env.action_space.low), np.max(env.action_space.high))
     # seed
+    pprint.pprint(args_wandb)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     # model
