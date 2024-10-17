@@ -79,7 +79,7 @@ def power_distribution_force_torque(control, arm_length=0.046, thrust_to_torque=
 # power_distribution_force_torque(control, motor_thrust_uncapped, arm_length=0.1, thrust_to_torque=0.05, pwm_to_thrust_a=0.01, pwm_to_thrust_b=0.02)
 
 class Learning2Fly(gym.Env):
-    def __init__(self, fast_learning=True,seed=None) -> None:
+    def __init__(self, fast_learning=True,seed=None, manual_curriculum=True) -> None:
 
         super().__init__()
         # L2F initialization
@@ -98,12 +98,12 @@ class Learning2Fly(gym.Env):
         # print("Environment initialized with seed: ", seed)
         initialize_rng(self.device, self.rng, seed)
 
+        self.manual_curriculum = manual_curriculum
         # curriculum parameters
-        self.Nc = 1e5 # interval of application of curriculum, roughly 10 epochs
+        self.Nc = 1e4 # interval of application of curriculum, roughly 10 epochs
 
         sample_initial_parameters(self.device, self.env, self.params, self.rng)
 
-        self.params.parameters.dynamics.mass *= 0.1
         sample_initial_state(self.device, self.env, self.params, self.state, self.rng)
 
         observe(self.device, self.env, self.params, self.state, self.observation, self.rng)
@@ -116,7 +116,8 @@ class Learning2Fly(gym.Env):
         self.t = 0
         self.fast_learning = fast_learning # if True, the environment will use soft terminal conditions initially
 
-        if not self.fast_learning:
+        if self.fast_learning:
+            print("Fast learning mode")
             # Reward parameters
                     # intial parameters
             self.Cp = .1 # position weight
@@ -138,7 +139,7 @@ class Learning2Fly(gym.Env):
 
         # Curriculum parameters
         self.CpC = 1.2 # position factor
-        self.Cplim = 20 # position limit
+        self.Cplim = 5 # position limit
 
         self.CvC = 1.4 # velocity factor
         self.Cvlim = .5 # velocity limit
@@ -180,37 +181,57 @@ class Learning2Fly(gym.Env):
         self.t = 0
         return self.obs, {}
     
-    def _reward(self):
-        pos   = np.array(self.state.position)
-        vel   = np.array(self.state.linear_velocity)
-        q     = np.array(self.state.orientation)
-        qd    = np.array(self.state.angular_velocity)
+    def _reward(self, obs=None, action=None):
+        if obs is None:
+            pos   = np.array(self.state.position)
+            vel   = np.array(self.state.linear_velocity)
+            q     = np.array(self.state.orientation)
+            qd    = np.array(self.state.angular_velocity)
+            action = self.action.motor_command
+        else:
+            pos   = np.array(obs[:,0:3])
+            vel   = np.array(obs[:,12:15])
+            q     = np.array(obs[:,3:12])
+            qd    = np.array(obs[:,15:18])
+            action = action
+
 
         self.global_step_counter += 1
-        if self.global_step_counter > self.Nc:
+        
+        if self.global_step_counter > self.Nc and not self.manual_curriculum:
             # updating the curriculum parameters
-            self.Cp = min(self.Cp*self.CpC, self.Cplim)
-            self.Cv = min(self.Cv*self.CvC, self.Cvlim)
-            self.Ca = min(self.Ca*self.CaC, self.Calim)
-            # self.Crs = max(self.Crs*self.CrsC, self.Crslim)
-
-            # print("Updating curriculum parameters")
-            if wandb.run is not None:
-                wandb.run.log({'Position Term':self.Cp,'Survival Reward':self.Crs})
+            self.update_curriculum()
             
             self.Nc += self.Nc
 
         # 2*math::acos(device.math, 1-math::abs(device.math, state.orientation[3])) in python:
         # orient_penalty = 2*np.acos(1-q[3]**2)
-
-        r = - self.Cv*np.sum((vel)**2) \
-                - self.Ca*np.sum((np.array(self.action.motor_command)-self.Cab)**2) \
+        if len(q.shape)==1:
+            r = - self.Cv*np.sum((vel)**2) \
+                - self.Ca*np.sum((np.array(action)-self.Cab)**2) \
                     -self.Cq*2*np.arccos(1-q[3]**2)\
                     - self.Cw*np.sum((qd)**2) \
                         + self.Crs \
-                            -self.Cp*np.sum((pos)**2) 
+                            -self.Cp*np.sum((pos)**2)
+        else:    
+            r = - self.Cv*np.sum((vel)**2) \
+                    - self.Ca*np.sum((np.array(action)-self.Cab)**2) \
+                        -self.Cq*2*np.arccos(1-q[:,3]**2)\
+                        - self.Cw*np.sum((qd)**2) \
+                            + self.Crs \
+                                -self.Cp*np.sum((pos)**2) 
         return r
-    
+    def update_curriculum(self):    
+        self.Cp = min(self.Cp*self.CpC, self.Cplim)
+        self.Cv = min(self.Cv*self.CvC, self.Cvlim)
+        self.Ca = min(self.Ca*self.CaC, self.Calim)
+        # self.Crs = max(self.Crs*self.CrsC, self.Crslim)
+
+        # print("Updating curriculum parameters")
+        if wandb.run is not None:
+            wandb.run.log({'Position Term':self.Cp,'Survival Reward':self.Crs, 'Velocity Term':self.Cv, 'Action Term':self.Ca, 'Angular Velocity Term':self.Cw})
+
+
     def _check_done(self):
         done = False
 
@@ -225,7 +246,7 @@ class Learning2Fly(gym.Env):
 
         velocity_threshold = np.sum((np.abs(vel) > 1000))
         angular_threshold  = np.sum((np.abs(qd) > 1000))
-        time_threshold = self.t>500
+        time_threshold = self.t>1000
 
         if np.any(np.isnan(self.obs)):
             done = True

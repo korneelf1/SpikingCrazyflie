@@ -131,7 +131,7 @@ class SMLP(nn.Module):
         x, self.cur_out = self.lif_out(x, self.cur_out)
         # self.cur_out = x
         self.hidden_states = [self.cur_in] + self.cur_lst + [self.cur_out]
-        x = x/self.output_dim
+        x = x
         return x, self.hidden_states
 
     def __call__(self, *args: Any) -> Any:
@@ -203,6 +203,7 @@ class SpikingNet(NetBase[Any]):
         repeat: int = 4,
         slope: float = 10.0,
         slope_schedule: bool = False,
+        reset_interval: int = 20e3
     ) -> None:
         super().__init__()
         self.device = device
@@ -234,6 +235,7 @@ class SpikingNet(NetBase[Any]):
         )
         self.slope_init = slope
         self.repeat = repeat
+        self.reset_interval = reset_interval
         self.reset_in_call = reset_in_call
         # self.model = MLP(
         #     input_dim,
@@ -324,32 +326,35 @@ class SpikingNet(NetBase[Any]):
             logits = torch.softmax(logits, dim=-1)
         return logits, state
 
-    def reset(self):
+    def reset(self, current_epoch: int| None=None):
         # print(self.scheduled)
         self.model.reset()
         if self.scheduled:
             self._n_reset += 1
             # print("n_reset: ", self._n_reset)
-            self._epoch = self._n_reset//20e3
+            if current_epoch is None:
+                self._epoch = self._n_reset//self.reset_interval
+            else:
+                self._epoch = current_epoch
             # print(self._epoch)
             # now we have epoch -> use as scheduler
             epochs_before_update = 50
-            epoch_update_interval = 15
+            epoch_update_interval = 50
             # avoid constantly updating the surrogate gradient!
             if self._prev_epoch != self._epoch:
                 if self._epoch == 1:
                     # self._slope = 10
-                    self.model.update_slope(self._slope)
+                    # self.model.update_slope(self._slope)
                     if wandb.run is not None:
                             # print('logging')
                             wandb.run.log({"surrogate fast sigmoid slope": self._slope})
 
                 if self._epoch > epochs_before_update:
-                    if self._epoch % epoch_update_interval == 0 and self._slope<10: # each epoch is 20e4 steps -> every 2 epochs # every 100 steps is 400 backwards -> 5e3 steps is 20e3 backwards every 9 epochs would be 18e4 backwards
+                    if self._epoch % epoch_update_interval == 0: # each epoch is 20e4 steps -> every 2 epochs # every 100 steps is 400 backwards -> 5e3 steps is 20e3 backwards every 9 epochs would be 18e4 backwards
                         if wandb.run is not None:
                             # print('logging')
                             wandb.run.log({"surrogate fast sigmoid slope": self._slope})
-                        self._slope = min(self.slope_init+1*(self._epoch - epochs_before_update)/epoch_update_interval, 10)
+                        self._slope = min(self.slope_init+5*(self._epoch - epochs_before_update)/epoch_update_interval, 50)
                         # print("updating model, current slope: ", self._slope)
                         # create model with new slope
                         self.model.update_slope(self._slope)

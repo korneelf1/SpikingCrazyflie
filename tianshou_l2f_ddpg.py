@@ -10,13 +10,13 @@ import torch
 
 from tianshou.data import Collector, CollectStats, ReplayBuffer, VectorReplayBuffer
 from tianshou.highlevel.logger import LoggerFactoryDefault
-from tianshou.policy import DDPGPolicy
+from tianshou.policy import DDPGPolicy, TD3Policy
 from tianshou.policy.base import BasePolicy
 from tianshou.trainer import OffpolicyTrainer
 from tianshou.utils.net.common import Net
 from tianshou.utils.net.continuous import Actor, Critic
 from tianshou.env import DummyVectorEnv
-from l2f_gym import Learning2Fly, SubprocVectorizedL2F, ShmemVectorizedL2F
+from l2f_gym import Learning2Fly
 from tianshou.utils import WandbLogger
 from torch.utils.tensorboard import SummaryWriter
 from spikingActorProb import SpikingNet
@@ -25,7 +25,7 @@ def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--buffer-size", type=int, default=1000000)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--hidden-sizes", type=int, nargs="*", default=[64, 64])
+    parser.add_argument("--hidden-sizes", type=int, nargs="*", default=[256, 128])
     parser.add_argument("--actor-lr", type=float, default=1e-3)
     parser.add_argument("--critic-lr", type=float, default=1e-3)
     parser.add_argument("--gamma", type=float, default=0.99)
@@ -35,7 +35,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--start-timesteps", type=int, default=10000)
     parser.add_argument("--epoch", type=int, default=200)
     parser.add_argument("--step-per-epoch", type=int, default=1.5e4)
-    parser.add_argument("--step-per-collect", type=int, default=1)
+    parser.add_argument("--step-per-collect", type=int, default=50)
     parser.add_argument("--update-per-step", type=int, default=1)
     parser.add_argument("--n-step", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=256)
@@ -47,7 +47,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument(
         "--device",
         type=str,
-        default="cuda" if torch.cuda.is_available() else "cpu",
+        default="cuda:2" if torch.cuda.is_available() else "cpu",
     )
     parser.add_argument("--resume-path", type=str, default=None)
     parser.add_argument("--resume-id", type=str, default=None)
@@ -57,11 +57,12 @@ def get_args() -> argparse.Namespace:
         default="wandb",
         choices=["tensorboard", "wandb"],
     )
-    parser.add_argument("--wandb-project", type=str, default="l2f")
+    parser.add_argument("--wandb-project", type=str, default="l2f_ddpg")
     parser.add_argument("--exploration-noise", type=str, default="default")
     parser.add_argument("--spiking", type=bool, default=False)
     parser.add_argument("--slope", type=float, default=2)
-    parser.add_argument("--slope-schedule", type=bool, default=True)
+    parser.add_argument("--slope-schedule", type=bool, default=False)
+    parser.add_argument("--reset-interval", type=int, default=20e3)
     parser.add_argument(
         "--watch",
         default=False,
@@ -79,17 +80,16 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
     args.state_shape = env.observation_space.shape or env.observation_space.n
     args.action_shape = env.action_space.shape or env.action_space.n
     args.max_action = env.action_space.high[0]
-    print("Observations shape:", args.state_shape)
-    print("Actions shape:", args.action_shape)
-    print("Action range:", np.min(env.action_space.low), np.max(env.action_space.high))
+    
     # seed
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
     if args.spiking:
-        args.hidden_sizes = [128]
-        net_a = SpikingNet(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, action_shape=256, repeat=args.repeat_per_forward, slope=args.slope, slope_schedule=args.slope_schedule, reset_in_call=True)
+        print("Using spiking network")
+        net_a = SpikingNet(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes[:-1], action_shape=args.hidden_sizes[-1], repeat=args.repeat_per_forward, slope=args.slope, slope_schedule=args.slope_schedule, reset_in_call=True, device=args.device)
     else: # model
+        print("Using regular network")
         net_a = Net(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device)
     actor = Actor(net_a, args.action_shape, device=args.device,).to(args.device)
 
@@ -134,9 +134,27 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
       'slope_schedule': args.slope_schedule
       }
     
+    # log
+    now = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
+    args.algo_name = "ddpg"
+    log_name = os.path.join(args.algo_name, str(args.seed), now)
+    log_path = os.path.join(args.logdir, log_name)
+    logger = WandbLogger(project="l2f_ddpg",config=args_wandb)
+    writer = SummaryWriter(log_path)
+    writer.add_text("args", str(args_wandb))
+    logger.load(writer)
+
+
+    timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
+    exploration_noise = str(args.exploration_noise)
+
+    print("Observations shape:", args.state_shape)
+    print("Actions shape:", args.action_shape)
+    print("Action range:", np.min(env.action_space.low), np.max(env.action_space.high))
     if args.exploration_noise == 'None':
+        print("No exploration noise")
         args.exploration_noise = None
-    policy: DDPGPolicy = DDPGPolicy(
+    policy: TD3Policy = TD3Policy(
         actor=actor,
         actor_optim=actor_optim,
         critic=critic1,
@@ -146,6 +164,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
         estimation_step=args.n_step,
         action_space=env.action_space,
         exploration_noise=args.exploration_noise,
+        policy_noise=0.,
     )
 
     # load a previous policy
@@ -167,11 +186,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
     train_collector.reset()
     train_collector.collect(n_step=args.start_timesteps, random=True)
 
-    # log
-    now = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
-    args.algo_name = "ddpg"
-    log_name = os.path.join(args.algo_name, str(args.seed), now)
-    log_path = os.path.join(args.logdir, log_name)
+    
 
     # logger
     # logger_factory = LoggerFactoryDefault()
@@ -188,14 +203,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
     #     config_dict=vars(args),
     # )
 
-    logger = WandbLogger(project="l2f_ddpg",config=args_wandb)
-    writer = SummaryWriter(log_path)
-    writer.add_text("args", str(args_wandb))
-    logger.load(writer)
-
-
-    timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
-    exploration_noise = str(args.exploration_noise)
+    
     if args.spiking:
         exploration_noise = "spiking_" + exploration_noise
 
