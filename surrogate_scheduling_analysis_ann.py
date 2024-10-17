@@ -18,12 +18,13 @@ from spikingActorProb import SMLP
 import seaborn as sb
 from tianshou.utils.net.common import MLP
 from torch.nn.modules import Module
-INPUT_SIZE = 4
-OUTPUT_SIZE = 4
+INPUT_SIZE = 63
+OUTPUT_SIZE = 64
 HIDDEN_SIZE = 64
 N_LAYERS = 10
 HIDDEN_LAYER_LST = [HIDDEN_SIZE]*(N_LAYERS - 1)
 
+BIAS = False
 N_SAMPLES = 256
 
 import torch
@@ -128,7 +129,9 @@ class sigmoid_17(Module):
 # class customSigmoid_17(customSigmoid):
 #     def __init__(self, b=1/17):
 #         super(customSigmoid_17, self).__init__(b)
- 
+class NoBiasLinear(nn.Linear):
+    def __init__(self, in_features, out_features, **kwargs):
+        super(NoBiasLinear, self).__init__(in_features, out_features, bias=False, **kwargs)
 class Wrapper(nn.Module):
     '''
     Wraps SMLP model with one nn.Linear output of size 4,2 to be able to use nn.MSELoss
@@ -145,13 +148,13 @@ class Wrapper(nn.Module):
 # create a simple model with 3 hidden layers of size 4 each
 # create 5 models with slopes 2,7,12,17,true
 # by having action size 0 and 3 hidden layers, we enforce an activation layer before the output!
-model_2 = Wrapper(MLP(INPUT_SIZE,0, HIDDEN_LAYER_LST,activation=sigmoid_2,flatten_input=False))
-model_7 = Wrapper(MLP(INPUT_SIZE,0, HIDDEN_LAYER_LST, activation=sigmoid_7,flatten_input=False))
-model_12 = Wrapper(MLP(INPUT_SIZE,0, HIDDEN_LAYER_LST, activation=sigmoid_12,flatten_input=False))
-model_17 = Wrapper(MLP(INPUT_SIZE,0, HIDDEN_LAYER_LST, activation=sigmoid_17,flatten_input=False))
-model_true = Wrapper(MLP(INPUT_SIZE,0, HIDDEN_LAYER_LST,flatten_input=False))
-model_label_noise = Wrapper(MLP(INPUT_SIZE,0, HIDDEN_LAYER_LST,flatten_input=False))
-model_noisy = Wrapper(MLP(INPUT_SIZE,0, HIDDEN_LAYER_LST,flatten_input=False))
+model_2 = Wrapper(MLP(INPUT_SIZE,0, HIDDEN_LAYER_LST,activation=sigmoid_2,flatten_input=False,linear_layer=NoBiasLinear))
+model_7 = Wrapper(MLP(INPUT_SIZE,0, HIDDEN_LAYER_LST, activation=sigmoid_7,flatten_input=False,linear_layer=NoBiasLinear))
+model_12 = Wrapper(MLP(INPUT_SIZE,0, HIDDEN_LAYER_LST, activation=sigmoid_12,flatten_input=False,linear_layer=NoBiasLinear))
+model_17 = Wrapper(MLP(INPUT_SIZE,0, HIDDEN_LAYER_LST, activation=sigmoid_17,flatten_input=False,linear_layer=NoBiasLinear))
+model_true = Wrapper(MLP(INPUT_SIZE,0, HIDDEN_LAYER_LST,flatten_input=False,linear_layer=NoBiasLinear))
+model_label_noise = Wrapper(MLP(INPUT_SIZE,0, HIDDEN_LAYER_LST,flatten_input=False,linear_layer=NoBiasLinear))
+model_noisy = Wrapper(MLP(INPUT_SIZE,0, HIDDEN_LAYER_LST,flatten_input=False,linear_layer=NoBiasLinear))
 print("MAKE SURE TO CHANGE DEFAULT ACTIVATION TO SIGMOID IN MLP")
 print(model_2)
 # make the weights and biases the same for all models
@@ -376,7 +379,7 @@ def calculate_sign_reversal_accross_layer():
         plt.title("Sign Reversal Probability For Each Layer (1-N_LAYERS)")
  
 def calculate_cosine_similarity():
-    fig, axs = plt.subplots(nrows=1, ncols=N_LAYERS)
+    fig, axs = plt.subplots(nrows=1, ncols=3)
     data_models = []
     for i, grads in enumerate(all_grads):
         data = []
@@ -387,7 +390,7 @@ def calculate_cosine_similarity():
             cos_sim = np.sum(grad * grad_high_slope, axis=1)/(np.linalg.norm(grad,axis=1)*np.linalg.norm(grad_high_slope, axis=1))
             data.append(cos_sim)
         data_models.append(data)
-    for j in range(N_LAYERS):
+    for j in range(3):
         # gather data for layer j for each model
         data_accross_batch = [model[j] for model in data_models]
         # # add to boxplot
@@ -398,10 +401,11 @@ def calculate_cosine_similarity():
         axs[j].violinplot(data_accross_batch,
                 showmeans=False,
                 showmedians=True)
+        # axs[j].set_xticklabels(['2','7','10','20','noise on Parameters','true'])
         axs[j].set_title(f'Layer {j} Cosine Similarity')
         # share y axis
         axs[j].set_ylim(-1,1)
-        plt.title("Cosine Similarity For Each Layer (1-N_LAYERS)")
+        # plt.title("Cosine Similarity For Each Layer (1-N_LAYERS)")
 
 
             # draw this in subplot on ax[i], column j
@@ -410,8 +414,34 @@ def calculate_cosine_similarity():
         # axs[i].set_title(f'Layer {j+1} Gradients for model with slope {2+5*i}')
     # calculate the cosine similarity between the gradients of the high slope model and the other models
 
+def calculate_l2_distance():
+    fig, axs = plt.subplots(nrows=1, ncols=N_LAYERS)
+    data_models = []
+    for i, grads in enumerate(all_grads):
+        data = []
+        for j, grad in enumerate(grads):
+            grad = grad.detach().numpy().reshape(N_SAMPLES,-1)
+            grad_high_slope = all_grads[-1][j].detach().numpy().reshape(N_SAMPLES,-1)
+            # calculate the cosine similarity between the gradients of the high slope model and the other models
+            l2_dist = np.linalg.norm(grad - grad_high_slope, axis=1)
+            data.append(l2_dist)
+        data_models.append(data)
+def calculate_gradient_distribution():
+    '''Calculate the distribution of the gradients for each layer, for each model use a different colour when plotting'''
+    fig, axs = plt.subplots(nrows=1, ncols=N_LAYERS)
+    for j in range(N_LAYERS):
+        data = [grads_2_stacked[j].flatten().numpy()-grads_true_stacked[j].flatten().numpy(), 
+                grads_7_stacked[j].flatten().numpy()-grads_true_stacked[j].flatten().numpy(), 
+                grads_12_stacked[j].flatten().numpy()-grads_true_stacked[j].flatten().numpy(), 
+                grads_17_stacked[j].flatten().numpy()-grads_true_stacked[j].flatten().numpy(), 
+                grads_noisy_stacked[j].flatten().numpy()-grads_true_stacked[j].flatten().numpy(),
+                grads_true_stacked[j].flatten().numpy()-grads_true_stacked[j].flatten().numpy()]
+        sb.kdeplot(data, ax=axs[j], common_norm=True)
+        # draw vertical line at x = 0
+        axs[j].axvline(x=0, color='black', linestyle='--')
 # calculate_sign_reversal_accross_layer()
 # gradient_boxplot()
 calculate_cosine_similarity()
+# calculate_gradient_distribution()
 
 plt.show()
