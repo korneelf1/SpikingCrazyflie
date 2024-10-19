@@ -1,6 +1,10 @@
 import pandas as pd
 import numpy as np
+import seaborn as sns
 import matplotlib.pyplot as plt
+
+# Set a seaborn color palette globally
+sns.set_palette('muted', desat=.75)  # Or you can use 'muted', 'bright', 'dark', etc.
 
 def plot_avg_rew(filename):
     # file names have slopeSLOPE in them, extract the slope for the legend
@@ -8,6 +12,10 @@ def plot_avg_rew(filename):
         slope = filename.split('slope')[1].split('_')[0]
     else:
         slope ='scheduled'
+    if '64' in filename:
+        hidden_layer_size = 64
+    elif '128' in filename:
+        hidden_layer_size = 128
 
     # Load the data
     data = pd.read_csv(filename)
@@ -15,7 +23,7 @@ def plot_avg_rew(filename):
     data = data.loc[:, ~data.columns.str.contains('MIN|MAX')]
     data.interpolate(inplace=True, method='linear')
     # Calculate mean and std for each row in the DataFrame, ONLY for cols that have reward in name
-    data_rews = data.filter(like='reward').fillna(0)
+    data_rews = data.filter(like='returns').fillna(0)
     data['mean'] = data_rews.mean(axis=1)
     data['std'] = data_rews.std(axis=1)
 
@@ -38,19 +46,19 @@ def plot_avg_rew(filename):
     
     
 
-    plt.plot(data['Step'],data['mean'], label=filename.split('/')[-1].split('.')[0])
+    plt.plot(data['Step'],data['mean'], label=f'Slope {slope}')
     plt.fill_between(data['Step'], data['mean']-data['std'], data['mean']+data['std'], alpha=0.1)
 # find all files in figures/bc/
 import os
 import re
-files = os.listdir('figures/compare_algos/')
+files = os.listdir('figures/rl/')
 for file in files:
-    # if '64' in file:
-        plot_avg_rew(f'figures/compare_algos/{file}')
+    if 'slope2' in file or 'slope100' in file:
+        plot_avg_rew(f'figures/rl/{file}')
 plt.xlim(0, 500)
 plt.ylim(0,500)
-plt.legend()
-plt.xlabel('Epoch', fontsize=15)
-plt.ylabel('Average Return', fontsize=15)
-plt.suptitle('Average Return for Different Algorithms, no curriculum')
+plt.legend(fontsize=13)
+plt.xlabel('Epoch', fontsize=13)
+plt.ylabel('Average Return', fontsize=13)
+plt.suptitle('Average Return for Surrogate Slopes, TD3', fontsize=15)
 plt.show()
