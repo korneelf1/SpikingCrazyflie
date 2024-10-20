@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import struct
-
+import numpy as np
 # Example byte array
 byte_array = [196, 144, 96, 61, 46, 25, 238, 61, 128, 237, 203, 59, 144, 63, 23, 61]
 
@@ -24,7 +24,7 @@ class ConvertedModel(nn.Module):
         x = torch.tanh(self.layer0(x))
         x = torch.tanh(self.layer1(x))
         x = torch.tanh(self.layer2(x))
-        return x
+        return x.detach().numpy()
 
 # Create the model
 model = ConvertedModel()
