@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 from tqdm import tqdm
 class BC:
-    def __init__(self, env, model, optimizer, buffer, batch_size=256, warmup=50, device='cpu'):
+    def __init__(self, env, model, optimizer, buffer, batch_size=256, warmup=50, device='cpu', noise=0.):
         self.env = env
         self.model = model
         self.optimizer = optimizer
@@ -16,8 +16,9 @@ class BC:
         self.best_epoch_loss = np.inf
         self.loss_fn = torch.nn.MSELoss()
         self.device= device
+        self.noise = noise
 
-    def test(self, n_episodes=20,viz=True):
+    def test(self, n_episodes=20,viz=False):
         avg_rew = 0
         avg_len = 0
         for episode in range(n_episodes):
@@ -28,6 +29,9 @@ class BC:
             actions = []
             while not done:
                 obs = torch.tensor(obs[:18],device=self.device)
+                # add noise
+                noise = torch.randn(size=obs.shape, device=obs.device) * self.noise
+                obs = obs + noise
                 action = self.model(obs)
                 actions.append(action.detach().cpu())
                 obs, rew, done, done, info = self.env.step(np.array(action.detach().cpu()))
@@ -66,7 +70,7 @@ class BC:
                 ax[i].plot(t,outputs.cpu().detach().numpy()[0,:,i], c='r')
             
             # plt.show()
-            wandb.log({"img": [wandb.Image(fig, caption=f"Compared to true")]})
+            # wandb.log({"img": [wandb.Image(fig, caption=f"Compared to true")]})
 
         wandb.log({'test reward': avg_rew/n_episodes,'test len': avg_len/n_episodes})
 
@@ -74,13 +78,19 @@ class BC:
     def learn(self, epoch=50):
         loss = np.inf
         for n in tqdm(range(epoch)):
+            if n%20==0:
+                self.env.update_curriculum()
+            wandb.log({"epoch":n})
             losses=[]
             self.model.to(device)
             # print(self.model.device)
             for _ in range(int(len(self.buffer)//self.batch_size)):
-                self.model.preprocess.reset()
+                self.model.preprocess.reset(current_epoch=n)
                 batch = self.buffer.sample(self.batch_size)[0]
                 observations = torch.tensor(batch.obs[:,:, :18],dtype=torch.float32).to(self.device)
+                # add noise
+                noise = torch.randn(size=observations.shape, device=observations.device) * self.noise
+                observations = observations + noise
                 actions = torch.tensor(batch.obs[:,:, 146:150]).to(torch.float32).to(self.device)
 
                 self.optimizer.zero_grad()
@@ -126,7 +136,7 @@ if __name__ == "__main__":
         parser.add_argument("--seed", type=int, default=0)
         parser.add_argument("--expert-data-task", type=str, default="halfcheetah-expert-v2")
         parser.add_argument("--buffer-size", type=int, default=1000000)
-        parser.add_argument("--hidden-sizes", type=int, nargs="*", default=[256, 256])
+        parser.add_argument("--hidden-sizes", type=int, nargs="*", default=[32,32])
         parser.add_argument("--actor-lr", type=float, default=3e-4)
         parser.add_argument("--critic-lr", type=float, default=3e-4)
         parser.add_argument("--epoch", type=int, default=200)
@@ -167,9 +177,12 @@ if __name__ == "__main__":
             action="store_true",
             help="watch the play of pre-trained policy only",
         )
-        parser.add_argument("--surrogate-scheduling", type=bool,default=False)
-        parser.add_argument("--slope", type=int,default=2)
-        parser.add_argument("--interval", type=bool,default=1)
+        # Use 'store_true' or 'store_false' for boolean flags
+        parser.add_argument("--surrogate-scheduling", action='store_true', help="Enable surrogate scheduling")
+        parser.add_argument("--slope", type=int, default=2, help="Slope value")
+        
+        # Use 'store_true' for interval if you want it as a flag, or use 'type=int' if it's an integer
+        parser.add_argument("--interval", type=int, default=1, help="Interval flag")
         return parser.parse_args()
 
 
@@ -192,11 +205,11 @@ if __name__ == "__main__":
     import wandb
     import torch.nn as nn
     class Wrapper(nn.Module):
-        def __init__(self, model):
+        def __init__(self, model, size=128):
             super().__init__()
             self.preprocess = model
-            self.mu = nn.Linear(128,4)
-            self.sigma = nn.Linear(128,4)
+            self.mu = nn.Linear(size,4)
+            self.sigma = nn.Linear(size,4)
         def forward(self, x):
             x = self.preprocess(x)
             if isinstance(x, tuple):
@@ -208,23 +221,34 @@ if __name__ == "__main__":
         def to_cuda(self):
             return self.preprocess.to(device)
     
-    wandb_args = {"spiking":True, 'Slope': 2,'Schedule': True, 'Algo':'BC'}
-    wandb.init(project="l2f_bc", config=wandb_args)
-    # wandb.init(mode="disabled")
+    
+
+
 
     # prepare the data
     buffer = ReplayBuffer.load_hdf5('l2f_controller_buffer.hdf5')
     
-    env = Learning2Fly()
+    env = Learning2Fly(fast_learning=False)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     args = get_args()
+    
+    wandb_args = {"spiking":True, 'Slope': args.slope,'Schedule': args.surrogate_scheduling, 'Algo':'BC', 'fast_learning':False}
+    wandb.init(project="l2f_bc", config=wandb_args)
+    # wandb.init(mode="disabled")
+
+    wandb.define_metric("*", step_metric="epoch")
     print('Device in use:',device)
-    spiking_module = SpikingNet(state_shape=18, action_shape=128, hidden_sizes=[256], device=device,slope=args.slope,slope_schedule=args.surrogate_scheduling,reset_interval=args.interval, reset_in_call=False, repeat=1).to(device)
-    model = Wrapper(spiking_module).to(device)
+    print("Initial slope:",args.slope)
+    print("Surrogate scheduling:",args.surrogate_scheduling)
+    print("Hidden sizes:",args.hidden_sizes)
+    print("Policy Noise:",args.policy_noise)
+    wandb.config.update({'slope':args.slope, 'surrogate_scheduling':args.surrogate_scheduling,'hidden_sizes':args.hidden_sizes, 'policy_noise':args.policy_noise})
+    spiking_module = SpikingNet(state_shape=18, action_shape=args.hidden_sizes[-1], hidden_sizes=args.hidden_sizes[:-1], device=device,slope=args.slope,slope_schedule=args.surrogate_scheduling,reset_interval=args.interval, reset_in_call=False, repeat=1).to(device)
+    model = Wrapper(spiking_module, size=args.hidden_sizes[-1]).to(device)
     print(model)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     # prepare the BC
-    bc = BC(env,model, optimizer, buffer, batch_size=500, device=device)
+    bc = BC(env,model, optimizer, buffer, batch_size=250, device=device, noise=args.policy_noise)
     # learn the model
     loss = bc.learn(epoch=300)
     print(loss)
