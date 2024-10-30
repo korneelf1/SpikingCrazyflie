@@ -31,7 +31,8 @@ model = ConvertedModel()
 
 # Load weights and biases from the actor.txt file where the naming convention is weights0, bias0, weights1, bias1, etc.
 # Layer 0
-from actor import weights0, bias0, weights1, bias1, weights2, bias2
+# from actor import weights0, bias0, weights1, bias1, weights2, bias2
+from actor_git import weights0, bias0, weights1, bias1, weights2, bias2
 
 # Convert byte array to float
 weights0 = convert_to_float(weights0)

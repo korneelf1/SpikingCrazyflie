@@ -63,7 +63,7 @@ from tianshou.policy.base import TLearningRateScheduler, TrainingStats
 from tianshou.utils.net.continuous import Actor, Critic
 
 model = ConvertedModel()
-
+model.load_state_dict(torch.load("l2f_agent.pth", map_location="cpu"))
 
 env = Learning2Fly()
 print(env.action_space)
@@ -116,10 +116,10 @@ def gather_buffer(model, name='l2f_controller_buffer_short', size = 10, step_len
                 obs = torch.tensor(obs)
                 action = model(obs)
                 obs_lst.append(obs.numpy())
-                obs, rewards, dones,_, info = env.step(action.detach().numpy()) 
+                obs, rewards, dones,_, info = env.step(action) 
 
                 obs_next_lst.append(obs)
-                action_lst.append(action.detach().numpy())
+                action_lst.append(action)
                 rewards_lst.append(rewards)
                 dones_lst.append(dones)
 
@@ -494,13 +494,13 @@ def test_td3_bc(buffer) -> None:
 
 
 if __name__ == "__main__":
-    # buffer = gather_buffer(model)
+    replay_buffer = gather_buffer(model)
     # print("Buffer size: ", len(buffer))
 
 
     # import h5py
     
-    replay_buffer = ReplayBuffer.load_hdf5('l2f_controller_buffer_short.hdf5')
+    # replay_buffer = ReplayBuffer.load_hdf5('l2f_controller_buffer_short.hdf5')
     print("Buffer size: ", len(replay_buffer))
     test_td3_bc(replay_buffer)
 

@@ -88,6 +88,9 @@ class SMLP(nn.Module):
         print("slope: ", slope)
         self.reset()
 
+        # for debugging
+        self.counter = 0
+        self.s1_arr = np.zeros((250,4))
     def update_slope(self, slope: float):
         '''
         Update the slope of the surrogate gradient
@@ -122,16 +125,29 @@ class SMLP(nn.Module):
 
         x = self.layer_in(x)
         x, self.cur_in = self.lif_in(x, self.cur_in)
-        # self.cur_in = x
+        
+        
+
+        
         for i in range(int(len(self.hidden_layers)/2)):
             x = self.hidden_layers[2*i](x)
             x, self.cur_lst[i] = self.hidden_layers[2*i+1](x, self.cur_lst[i])
             self.cur_lst[i] = x
+        
+        # print(x.shape)
         x = self.layer_out(x)
+        
+        
+        
+        # print(x.shape)
+        
         x, self.cur_out = self.lif_out(x, self.cur_out)
+        # self.s1_arr[self.counter] = x.detach().cpu().numpy().reshape(-1)[:10]
+        # self.counter += 1
+        
         # self.cur_out = x
         self.hidden_states = [self.cur_in] + self.cur_lst + [self.cur_out]
-        x = x/self.output_dim
+        # x = x/self.output_dim
         return x, self.hidden_states
 
     def __call__(self, *args: Any) -> Any:
@@ -334,7 +350,7 @@ class SpikingNet(NetBase[Any]):
             # print(self._epoch)
             # now we have epoch -> use as scheduler
             epochs_before_update = 50
-            epoch_update_interval = 15
+            epoch_update_interval = 19
             # avoid constantly updating the surrogate gradient!
             if self._prev_epoch != self._epoch:
                 if self._epoch == 1:

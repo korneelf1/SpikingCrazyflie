@@ -79,7 +79,7 @@ def power_distribution_force_torque(control, arm_length=0.046, thrust_to_torque=
 # power_distribution_force_torque(control, motor_thrust_uncapped, arm_length=0.1, thrust_to_torque=0.05, pwm_to_thrust_a=0.01, pwm_to_thrust_b=0.02)
 
 class Learning2Fly(gym.Env):
-    def __init__(self, fast_learning=True,seed=None, ez_reset=False) -> None:
+    def __init__(self, fast_learning=True,seed=None, ez_reset=False, terminal_conditions='training') -> None:
 
         super().__init__()
         # L2F initialization
@@ -148,6 +148,10 @@ class Learning2Fly(gym.Env):
 
 
         # reset environmnet
+        if terminal_conditions=='testing':
+            self.term = False
+        else:
+            self.term = True
         self.ez_reset = ez_reset
         self.reset()
 
@@ -167,6 +171,8 @@ class Learning2Fly(gym.Env):
         self.t += 1
 
         done = self._check_done()
+        if not self.term:
+            done = False
         # print("Step: ", self.t, "Done: ", done)
         reward = self._reward()
         # print(self.obs)
@@ -209,11 +215,11 @@ class Learning2Fly(gym.Env):
 
         r = - self.Cv*np.sum((vel)**2) \
                 - self.Ca*np.sum((np.array(self.action.motor_command)-self.Cab)**2) \
-                    -self.Cq*2*np.arccos(1-q[3]**2)\
+                    -self.Cq*2*np.arccos(1-q[0]**2)\
                     - self.Cw*np.sum((qd)**2) \
                         + self.Crs \
                             -self.Cp*np.sum((pos)**2) 
-        return 1
+        return r
     
     def _check_done(self):
         done = False
@@ -229,7 +235,7 @@ class Learning2Fly(gym.Env):
 
         velocity_threshold = np.sum((np.abs(vel) > 1000))
         angular_threshold  = np.sum((np.abs(qd) > 1000))
-        time_threshold = self.t>500
+        time_threshold = self.t>1000
 
         if np.any(np.isnan(self.obs)):
             done = True
@@ -251,12 +257,16 @@ def create_learning2fly_env():
 
         
 if __name__=='__main__':
+    from pprint import pprint
+    import ast
     # from stable_baselines3.common.env_checker import check_env
     env = Learning2Fly()
     env.reset()
-    env2 = Learning2Fly()
-    env2.reset()
-
+    # env2 = Learning2Fly()
+    # env2.reset()
+    print(env.params.parameters.dynamics.mass)
+    dictionary = ast.literal_eval(parameters_to_json(env.device,env.env,env.params))
+    pprint(dictionary)
     # check_env(env)
     # # register the env
     # gym.register('L2F',Learning2Fly())

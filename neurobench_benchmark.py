@@ -143,10 +143,10 @@ def benchmark_file(filename):
     # postprocessors
     postprocessors = [] # goes from probalities to actions
 
-    static_metrics = ["model_size", "connection_sparsity"]
-    # static_metrics = []
-    data_metrics = [ 'synaptic_operations', "activation_sparsity"]
-
+    # static_metrics = ["model_size", "connection_sparsity"]
+    static_metrics = []
+    # data_metrics = [ 'synaptic_operations', "activation_sparsity"]
+    data_metrics = ['reward_score']
     model_snn = SNNTorchAgent(actor)
 
     pruner = ActivityBasedPruning()
@@ -260,4 +260,5 @@ def benchmark_snn_baseline():
 
     pprint(results)
 
-benchmark_snn_baseline()
+# benchmark_snn_baseline()
+benchmark_file('TD3BC_TEMP.pth')
