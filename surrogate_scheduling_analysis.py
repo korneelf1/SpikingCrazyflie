@@ -14,6 +14,9 @@ from matplotlib.colors import ListedColormap, LinearSegmentedColormap
 from spikingActorProb import SMLP
 import seaborn as sb
 
+# Set a seaborn color palette globally
+sb.set_palette('muted', desat=.75) 
+
 INPUT_SIZE = 63
 OUTPUT_SIZE = 64
 HIDDEN_SIZE = 64
@@ -58,16 +61,16 @@ def plot_surrogate_gradients():
     slopes = [1,10,25,50,100]
     fig, axs = plt.subplots(nrows=1, ncols=1)
     x = np.linspace(-1.5,.5,1000)
-    # plot a RED dirac delta as well:
+    # plot a RED Dirac Delta as well:
     
     for slope in slopes:
         y = surr_grad(torch.tensor(x), slope)
-        plt.plot(x,y, label=f'slope {slope}', linestyle='--')
-    plt.plot([0,0],[0,1], label='dirac delta', linewidth=4, color='red')
-    plt.legend()
-    plt.title('Surrogate Gradient')
-    plt.xlabel('Membrane potential, U')
-    plt.ylabel('Gradient')
+        plt.plot(x,y, label=f'Slope {slope}', linestyle='--')
+    plt.plot([0,0],[0,1], label='Dirac Delta', linewidth=4, color='red')
+    plt.legend(fontsize=17)
+    plt.title('Surrogate Gradient', fontsize=20)
+    plt.xlabel('Membrane potential, U', fontsize=19)
+    plt.ylabel('Gradient', fontsize=19)
     plt.show()
 
 plot_surrogate_gradients()
@@ -182,9 +185,9 @@ def gradient_heatmap():
             # make box plot of the gradients
 
             # set x-axis label
-            heatmap.set_xlabel(f'layer {j} gradient')
+            heatmap.set_xlabel(f'layer {j} gradient', fontsize=19)
             # draw this in subplot on ax[i], column j
-        heatmap.set_ylabel(f'Model with slope {2+5*i}')
+        heatmap.set_ylabel(f'Model with slope {2+5*i}', fontsize=19)
 
 
 
@@ -234,9 +237,9 @@ def calculate_sign_reversal_accross_batch():
             # make box plot of the gradients
 
             # set x-axis label
-            heatmap.set_xlabel(f'layer {j} sign reversal probability')
+            heatmap.set_xlabel(f'layer {j} sign reversal probability', fontsize=19)
             # draw this in subplot on ax[i], column j
-        heatmap.set_ylabel(f'Model with slope {2+5*i}')
+        heatmap.set_ylabel(f' Slope {2+5*i}', fontsize=19)
 
         # axs[i].imshow(grad, cmap='viridis')
         # axs[i].set_title(f'Layer {j+1} Gradients for model with slope {2+5*i}')
@@ -328,7 +331,7 @@ def calculate_cosine_similarity(display='violin'):
                     showmeans=False,
                     showmedians=True)
             # axs[j].set_xticklabels(['2','7','10','20','noise on Parameters','true'])
-            axs[j].set_title(f'Layer {j} Cosine Similarity')
+            axs[j].set_title(f'Layer {j} Cosine Similarity', fontsize=20)
             # share y axis
             axs[j].set_ylim(-1,1)
             # plt.title("Cosine Similarity For Each Layer (1-N_LAYERS)")
@@ -347,15 +350,15 @@ def calculate_cosine_similarity(display='violin'):
             stds = [np.std(layer_data) for layer_data in model_data]
             assert len(means) == N_LAYERS+1
             print(means)
-            plt.plot(range(N_LAYERS+1), means, label=f'Model {model_slopes[i]}')
+            plt.plot(range(N_LAYERS+1), means, label=f'Slope {model_slopes[i]}')
             # plt.fill_between(x, y-error, y+error)
             # plt.fill_between(range(N_LAYERS+1), np.array(means)-np.array(stds), np.array(means)+np.array(stds), alpha=0.5)
             # axs.errorbar(range(N_LAYERS), means, yerr=stds, label=f'Model {2 + 5 * i}')
-        axs.legend()
+        axs.legend(fontsize=17)
         axs.xaxis.set_ticks(range(N_LAYERS+1))
-        axs.set_ylabel('Cosine Similarity')
-        axs.set_xlabel('Layer')
-        fig.suptitle('Cosine Similarity for Surrogate Gradient Slopes 1 to 100')
+        axs.set_ylabel('Cosine Similarity', fontsize=19)
+        axs.set_xlabel('Layer', fontsize=19)
+        fig.suptitle('Average Cosine Similarity', fontsize=20)
 
 def count_non_zero_gradient():
     fig, axs = plt.subplots(nrows=1, ncols=1)
@@ -382,15 +385,15 @@ def count_non_zero_gradient():
         means = [np.mean(layer_data) for layer_data in model_data]
         stds = [np.std(layer_data) for layer_data in model_data]
 
-        plt.plot(range(N_LAYERS+1), means, label=f'Model {model_slopes[i]}')
+        plt.plot(range(N_LAYERS+1), means, label=f'Slope {model_slopes[i]}')
         # plt.fill_between(x, y-error, y+error)
         plt.fill_between(range(N_LAYERS+1), np.array(means)-np.array(stds), np.array(means)+np.array(stds), alpha=0.5)
         # axs.errorbar(range(N_LAYERS+1), means, yerr=stds, label=f'Model {2 + 5 * i}')
-    axs.legend()
+    axs.legend(fontsize=17)
     axs.xaxis.set_ticks(range(N_LAYERS+1))
-    axs.set_ylabel('Fraction of Non Zero Gradients')
-    axs.set_xlabel('Layer')
-    fig.suptitle('Fraction of Non Zero Gradients for Each Layer for Shallow to Steep Surrogate Gradient Slopes')
+    axs.set_ylabel('Fraction of Non Zero Gradients', fontsize=19)
+    axs.set_xlabel('Layer', fontsize=19)
+    fig.suptitle('Fraction of Non Zero Gradients for Each Layer for Shallow to Steep Surrogate Gradient Slopes', fontsize=20)
     # axs.set_xticklabels(['Input Layer'] + [f'Layer {i}' for i in range(N_LAYERS)])
 
 
@@ -431,18 +434,18 @@ def calculate_avg_grad_mag():
         # plt.fill_between(x, y-error, y+error)
         # plt.fill_between(range(N_LAYERS+1), np.array(means)-np.array(stds), np.array(means)+np.array(stds), alpha=0.5)
         # axs.errorbar(range(N_LAYERS+1), means, yerr=stds, label=f'Model {2 + 5 * i}')
-    axs.legend()
+    axs.legend(fontsize=17)
     # set y to logscale
     axs.set_yscale('log')
     axs.xaxis.set_ticks(range(N_LAYERS+1))
-    axs.set_ylabel('Average Gradient Magnitude')
-    axs.set_xlabel('Layer')
-    fig.suptitle('Average Gradient Magnitude')
+    axs.set_ylabel('Average Gradient Magnitude', fontsize=19)
+    axs.set_xlabel('Layer', fontsize=19)
+    fig.suptitle('Average Gradient Magnitude', fontsize=20)
     
     
     # calculate_sign_reversal_accross_layer()
-# calculate_cosine_similarity(display='line')
+calculate_cosine_similarity(display='line')
 # count_non_zero_gradient()
-# calculate_avg_grad_mag()
+calculate_avg_grad_mag()
 # gradient_heatmap()
 plt.show()
