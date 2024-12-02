@@ -8,6 +8,7 @@ In addition to the simulator, this repository includes training scripts for both
 The simulator is based on the [Learning to Fly in Seconds](https://github.com/arplaboratory/learning-to-fly) project. The dynamics have been wrapped to follow the Gymnasium API. 
 `l2f_gym.py` file contains the core implementation of the simulator, providing the necessary interfaces and dynamics to simulate the Crazyflie 2.1 drone within the Gymnasium framework. 
 
+NOTE: as of Nov 2024, the learning to fly package supports CUDA operations, which can greatly increase the speed of the simulator!
 ## Training Agents
 Multiple training methods are available in this repository. 
 ### Online RL
