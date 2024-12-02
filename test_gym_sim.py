@@ -1,5 +1,5 @@
 import unittest
-from gym_sim import *
+from fastPyDroneSim_gym.fastPyDroneSim.gym_sim import *
 from libs.cpuKernels import controller, step
 import torch
 sim_N1 = Drone_Sim(drone='og', N_drones=1,)

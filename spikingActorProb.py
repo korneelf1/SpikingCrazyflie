@@ -330,40 +330,52 @@ class SpikingNet(NetBase[Any]):
         # print(self.scheduled)
         self.model.reset()
         if self.scheduled:
-            self._n_reset += 1
-            # print("n_reset: ", self._n_reset)
             if current_epoch is None:
-                self._epoch = self._n_reset//self.reset_interval
-            else:
-                self._epoch = current_epoch
-            # print(self._epoch)
-            # now we have epoch -> use as scheduler
-            epochs_before_update = 50
-            epoch_update_interval = 50
-            # avoid constantly updating the surrogate gradient!
-            if self._prev_epoch != self._epoch:
-                if self._epoch == 1:
-                    # self._slope = 10
-                    # self.model.update_slope(self._slope)
-                    if wandb.run is not None:
-                            # print('logging')
-                            wandb.run.log({"surrogate fast sigmoid slope": self._slope})
-
-                if self._epoch > epochs_before_update:
-                    if self._epoch % epoch_update_interval == 0: # each epoch is 20e4 steps -> every 2 epochs # every 100 steps is 400 backwards -> 5e3 steps is 20e3 backwards every 9 epochs would be 18e4 backwards
+                self._n_reset += 1
+                # print("n_reset: ", self._n_reset)
+                if current_epoch is None:
+                    self._epoch = self._n_reset//self.reset_interval
+                else:
+                    self._epoch = current_epoch
+                # print(self._epoch)
+                # now we have epoch -> use as scheduler
+                epochs_before_update = 200
+                epoch_update_interval = 200
+                # avoid constantly updating the surrogate gradient!
+                if self._prev_epoch != self._epoch:
+                    if self._epoch == 1:
+                        # self._slope = 10
+                        # self.model.update_slope(self._slope)
                         if wandb.run is not None:
-                            # print('logging')
-                            wandb.run.log({"surrogate fast sigmoid slope": self._slope})
-                        self._slope = min(self.slope_init+5*(self._epoch - epochs_before_update)/epoch_update_interval, 50)
-                        # print("updating model, current slope: ", self._slope)
-                        # create model with new slope
-                        self.model.update_slope(self._slope)
-                        print("\n###############################################")
-                        print("\nSetting slope to:", self._slope,"\n")
-                        print("###############################################\n")
-                
-                # set previous epoch to current epoch
-                self._prev_epoch = self._epoch
+                                # print('logging')
+                                wandb.run.log({"surrogate fast sigmoid slope": self._slope})
+
+                    if self._epoch > epochs_before_update:
+                        if self._epoch % epoch_update_interval == 0: # each epoch is 20e4 steps -> every 2 epochs # every 100 steps is 400 backwards -> 5e3 steps is 20e3 backwards every 9 epochs would be 18e4 backwards
+                            if wandb.run is not None:
+                                # print('logging')
+                                wandb.run.log({"surrogate fast sigmoid slope": self._slope})
+                            self._slope = min(self.slope_init+25*(self._epoch - epochs_before_update)/epoch_update_interval, 50)
+                            # print("updating model, current slope: ", self._slope)
+                            # create model with new slope
+                            self.model.update_slope(self._slope)
+                            print("\n###############################################")
+                            print("\nSetting slope to:", self._slope,"\n")
+                            print("###############################################\n")
+                    
+                    # set previous epoch to current epoch
+                    self._prev_epoch = self._epoch
+            else: # we are in TD3BC or JSLR or sth
+                self._epoch = current_epoch
+                if self._epoch % 100 == 0 and self._epoch > 1:
+                    self._slope = self.slope_init + 50*self._epoch/100
+                    # create model with new slope
+                    self.model.update_slope(self._slope)
+                    if wandb.run is not None:
+                        # print('logging')
+                        wandb.run.log({"surrogate fast sigmoid slope": self._slope})
+     
+
             
 
             # # print(self._epoch)

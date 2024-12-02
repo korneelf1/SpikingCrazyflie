@@ -167,10 +167,13 @@ class TD3BC:
             rewards[:,t] = self.env._reward(observations[:,t].detach().cpu(), actions[:,t].detach().cpu())
         batch.rew = rewards
 
-
     def learn_batch(self, batch):
         # create batch from first observations
         batch_size = batch.obs.shape[0]
+        if batch.obs.shape[-1] == 152:
+            correct_factor = 146-18
+        else:
+            correct_factor = 0
         observations = batch.obs[:,:, :146]
         actions = batch.obs[:,:, 146:150]
         rewards = batch.obs[:,:, 150]
@@ -231,6 +234,7 @@ class TD3BC:
             wandb.log({"actor_loss": actor_loss.item()})
             wandb.log({"critic_loss": critic_loss.item()})
             wandb.log({"critic2_loss": critic2_loss.item()})
+    
     def learn(self, epoch=50):
         loss = np.inf
         for n in tqdm(range(epoch)):
@@ -261,6 +265,7 @@ if __name__ == "__main__":
 
     import numpy as np
     import torch
+    
     def get_args() -> argparse.Namespace:
         parser = argparse.ArgumentParser()
         parser.add_argument("--task", type=str, default="l2f")
@@ -368,8 +373,11 @@ if __name__ == "__main__":
 
 
     # prepare the data
-    buffer = ReplayBuffer.load_hdf5('l2f_controller_buffer.hdf5')
-    
+    buffer_sim = ReplayBuffer.load_hdf5('l2f_controller_buffer.hdf5')
+    buffer_real = ReplayBuffer.load_hdf5('real_data_buffer_no_zeros.hdf5')
+    buffer = ReplayBuffer(size=(len(buffer_sim)+len(buffer_real)))
+    buffer.update(buffer_sim)
+    buffer.update(buffer_real)
     env = Learning2Fly(fast_learning=False, manual_curriculum=True)
     # list all availabel devices
     print("Available devices:",torch.cuda.device_count())
@@ -398,14 +406,14 @@ if __name__ == "__main__":
     # prepare the BC
         # critic network
     net_c1 = Net(
-        state_shape=146,
+        state_shape=18,
         action_shape=4,
         hidden_sizes=args.hidden_sizes,
         concat=True,
         device=args.device,
     )
     net_c2 = Net(
-        state_shape=146,
+        state_shape=18,
         action_shape=4,
         hidden_sizes=args.hidden_sizes,
         concat=True,

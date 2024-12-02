@@ -37,6 +37,7 @@ def observe_rotation_matrix(state):
     observation[8] = 1 - 2 * qx * qx - 2 * qy * qy
 
     return observation
+
 def power_distribution_force_torque(control, arm_length=0.046, thrust_to_torque=0.005964552, pwm_to_thrust_a=0.091492681, pwm_to_thrust_b=0.067673604):
     # rescale control from -1 - 1 to  
    
@@ -73,14 +74,55 @@ def power_distribution_force_torque(control, arm_length=0.046, thrust_to_torque=
     return action
         # motor_thrust_uncapped['list'][motor_index] = motor_pwm * 65535  # UINT16_MAX in C
 
-# Example usage:
-# control = {'torqueX': 0, 'torqueY': 0, 'torqueZ': 0, 'thrustSi': 0}
-# motor_thrust_uncapped = {'list': [0] * 4}
-# power_distribution_force_torque(control, motor_thrust_uncapped, arm_length=0.1, thrust_to_torque=0.05, pwm_to_thrust_a=0.01, pwm_to_thrust_b=0.02)
-
 class Learning2Fly(gym.Env):
-    def __init__(self, fast_learning=True,seed=None, manual_curriculum=True) -> None:
-
+    '''Custom Gym environment for reinforcement learning with a drone simulation.
+    Attributes:
+        device (Device): The device used for the simulation.
+        rng (Rng): Random number generator for the environment.
+        env (Environment): The simulation environment.
+        params (Parameters): Parameters for the simulation.
+        state (State): Current state of the environment.
+        next_state (State): Next state of the environment.
+        observation (Observation): Current observation of the environment.
+        next_observation (Observation): Next observation of the environment.
+        action (Action): Action to be taken in the environment.
+        manual_curriculum (bool): Flag to indicate if manual curriculum is used.
+        Nc (float): Interval of application of curriculum.
+        action_space (gym.spaces.Box): Action space for the environment.
+        observation_space (gym.spaces.Box): Observation space for the environment.
+        global_step_counter (int): Counter for the global steps taken.
+        t (int): Time step counter.
+        fast_learning (bool): Flag to indicate if fast learning mode is enabled.
+        Cp (float): Position weight for the reward function.
+        Cv (float): Velocity weight for the reward function.
+        Cq (float): Orientation weight for the reward function.
+        Ca (float): Action weight for the reward function.
+        Cw (float): Angular velocity weight for the reward function.
+        Crs (float): Reward for survival.
+        Cab (float): Action baseline for the reward function.
+        CpC (float): Position factor for curriculum update.
+        Cplim (float): Position limit for curriculum update.
+        CvC (float): Velocity factor for curriculum update.
+        Cvlim (float): Velocity limit for curriculum update.
+        CaC (float): Action factor for curriculum update.
+        Calim (float): Action limit for curriculum update.
+    Methods:
+        __init__(self, fast_learning=False, seed=None, manual_curriculum=True):
+            Initializes the Learning2Fly environment.
+        obs(self):
+            Returns the current observation as a numpy array.
+        step(self, action):
+            Takes a step in the environment with the given action.
+        reset(self, seed=None):
+            Resets the environment to the initial state.
+        _reward(self, obs=None, action=None):
+            Computes the reward based on the current state and action.
+        update_curriculum(self):
+            Updates the curriculum parameters.
+        _check_done(self):
+            Checks if the episode is done based on the current state.
+    '''
+    def __init__(self, fast_learning=False,seed=None, manual_curriculum=True) -> None:
         super().__init__()
         # L2F initialization
         self.device = Device()
@@ -130,10 +172,10 @@ class Learning2Fly(gym.Env):
         else:
             # Reward parameters
             self.Cp = 1.0
-            self.Cv = .0005# velocity weight
-            self.Cq = .25 # orientation weight
+            self.Cv = .005# velocity weight
+            self.Cq = .3 # orientation weight
             self.Ca = .01 # action weight og .334, but just learns to fly out of frame
-            self.Cw = .00 # angular velocity weight 
+            self.Cw = .0001 # angular velocity weight 
             self.Crs = 1 # reward for survival
             self.Cab = 2*.334-1 # action baseline
 
@@ -141,11 +183,13 @@ class Learning2Fly(gym.Env):
         self.CpC = 1.2 # position factor
         self.Cplim = 5 # position limit
 
-        self.CvC = 1.4 # velocity factor
-        self.Cvlim = .5 # velocity limit
+        self.CvC = 1.8 # velocity factor
+        self.Cvlim = .2 # velocity limit
 
         self.CaC = 1.4  # action factor
         self.Calim = .5 # action limit
+
+        
 
 
         # reset environmnet

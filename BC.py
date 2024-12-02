@@ -51,8 +51,12 @@ class BC:
             # plt.show()
             wandb.log({"img": [wandb.Image(fig, caption=f"BC Learning")]})
             batch = self.buffer.sample(1)[0]
-            observations = torch.tensor(batch.obs[:,:, :18],dtype=torch.float32).to(self.device)
-            actions = torch.tensor(batch.obs[:,:, 146:150]).to(torch.float32).to(self.device)
+            if batch.obs.shape[-1] <(146+4+1+1):    
+                observations = torch.tensor(batch.obs[:,:, :18],dtype=torch.float32).to(self.device)
+                actions = torch.tensor(batch.obs[:,:, 18:22]).to(torch.float32).to(self.device)
+            else:
+                observations = torch.tensor(batch.obs[:,:, :18],dtype=torch.float32).to(self.device)
+                actions = torch.tensor(batch.obs[:,:, 146:150]).to(torch.float32).to(self.device)
             
             outputs = []
             # hidden = None
@@ -63,7 +67,7 @@ class BC:
                 outputs.append(output)
 
             outputs = torch.stack(outputs, dim=1).to(torch.float32)
-            t = np.linspace(0,502,501)
+            t = np.linspace(0,101,100)
             fig, ax = plt.subplots(4, 1)
             for i in range(4):
                 ax[i].plot(t,actions.cpu().detach().numpy()[0,:,i], c='g')
@@ -78,8 +82,8 @@ class BC:
     def learn(self, epoch=50):
         loss = np.inf
         for n in tqdm(range(epoch)):
-            if n%20==0:
-                self.env.update_curriculum()
+            # if n%20==0:
+            #     self.env.update_curriculum()
             wandb.log({"epoch":n})
             losses=[]
             self.model.to(device)
@@ -87,11 +91,18 @@ class BC:
             for _ in range(int(len(self.buffer)//self.batch_size)):
                 self.model.preprocess.reset(current_epoch=n)
                 batch = self.buffer.sample(self.batch_size)[0]
-                observations = torch.tensor(batch.obs[:,:, :18],dtype=torch.float32).to(self.device)
+                if batch.obs.shape[-1] <(146+4+1+1):
+                    observations = torch.tensor(batch.obs[:,:, :18],dtype=torch.float32).to(self.device)
+                    actions = torch.tensor(batch.obs[:,:, 18:22]).to(torch.float32).to(self.device)
+                    # clip all actions between -1 and 1
+                    actions = torch.clamp(actions, -1, 1)
+                else:
+                    observations = torch.tensor(batch.obs[:,:, :18],dtype=torch.float32).to(self.device)
+                    actions = torch.tensor(batch.obs[:,:, 146:150]).to(torch.float32).to(self.device)
                 # add noise
                 noise = torch.randn(size=observations.shape, device=observations.device) * self.noise
                 observations = observations + noise
-                actions = torch.tensor(batch.obs[:,:, 146:150]).to(torch.float32).to(self.device)
+                
 
                 self.optimizer.zero_grad()
                 outputs = []
@@ -136,7 +147,7 @@ if __name__ == "__main__":
         parser.add_argument("--seed", type=int, default=0)
         parser.add_argument("--expert-data-task", type=str, default="halfcheetah-expert-v2")
         parser.add_argument("--buffer-size", type=int, default=1000000)
-        parser.add_argument("--hidden-sizes", type=int, nargs="*", default=[32,32])
+        parser.add_argument("--hidden-sizes", type=int, nargs="*", default=[256,128])
         parser.add_argument("--actor-lr", type=float, default=3e-4)
         parser.add_argument("--critic-lr", type=float, default=3e-4)
         parser.add_argument("--epoch", type=int, default=200)
@@ -226,14 +237,17 @@ if __name__ == "__main__":
 
 
     # prepare the data
-    buffer = ReplayBuffer.load_hdf5('l2f_controller_buffer.hdf5')
-    
+    # buffer = ReplayBuffer.load_hdf5('l2f_controller_buffer.hdf5')
+    buffer = ReplayBuffer.load_hdf5('real_data_buffer_no_zeros_full.hdf5')
+    # buffer2 = ReplayBuffer.load_hdf5('real_data_buffer_no_zeros_2.hdf5')
+    # buffer.update(buffer2)
+    print(len(buffer))
     env = Learning2Fly(fast_learning=False)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     args = get_args()
     
     wandb_args = {"spiking":True, 'Slope': args.slope,'Schedule': args.surrogate_scheduling, 'Algo':'BC', 'fast_learning':False}
-    wandb.init(project="l2f_bc", config=wandb_args)
+    wandb.init(project="l2f_bc_real_data", config=wandb_args)
     # wandb.init(mode="disabled")
 
     wandb.define_metric("*", step_metric="epoch")
@@ -245,11 +259,12 @@ if __name__ == "__main__":
     wandb.config.update({'slope':args.slope, 'surrogate_scheduling':args.surrogate_scheduling,'hidden_sizes':args.hidden_sizes, 'policy_noise':args.policy_noise})
     spiking_module = SpikingNet(state_shape=18, action_shape=args.hidden_sizes[-1], hidden_sizes=args.hidden_sizes[:-1], device=device,slope=args.slope,slope_schedule=args.surrogate_scheduling,reset_interval=args.interval, reset_in_call=False, repeat=1).to(device)
     model = Wrapper(spiking_module, size=args.hidden_sizes[-1]).to(device)
+    model.load_state_dict(torch.load("TD3BC_TEMP_original.pth",map_location=device))
     print(model)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     # prepare the BC
-    bc = BC(env,model, optimizer, buffer, batch_size=250, device=device, noise=args.policy_noise)
+    bc = BC(env,model, optimizer, buffer, batch_size=50, device=device, noise=args.policy_noise)
     # learn the model
-    loss = bc.learn(epoch=300)
+    loss = bc.learn(epoch=500)
     print(loss)
     wandb.run.finish()

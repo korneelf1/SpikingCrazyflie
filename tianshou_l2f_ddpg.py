@@ -61,7 +61,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--exploration-noise", type=str, default="default")
     parser.add_argument("--spiking", type=bool, default=False)
     parser.add_argument("--slope", type=float, default=2)
-    parser.add_argument("--slope-schedule", type=bool, default=False)
+    parser.add_argument("--slope-schedule", action='store_true')
     parser.add_argument("--reset-interval", type=int, default=20e3)
     parser.add_argument(
         "--watch",

@@ -1,6 +1,6 @@
 # custom code
 # from custom_collector import FastPyDroneSimCollector
-from gym_sim import Drone_Sim
+from fastPyDroneSim_gym.fastPyDroneSim.gym_sim import Drone_Sim
 
 # tianshou code
 from tianshou.policy import SACPolicy, BasePolicy

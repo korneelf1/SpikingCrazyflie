@@ -17,6 +17,7 @@ class TD3BC_Online:
                  buffer, batch_size=256, warmup=50, 
                  device='cpu', 
                  controller=None, curriculum=False,
+                 bc_val = 0.2,
                  bc_factor=0.95):
         self.env = env
         self.model = model
@@ -26,7 +27,8 @@ class TD3BC_Online:
         self.critic2_optimizer = critic2_optimizer
         self.optimizer = optimizer
         self.buffer = buffer
-        self.curriculum = curriculum    
+        self.curriculum = curriculum  
+        self.timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
         # create copy of first 30 percent of replay buffer with expert data
         len_buf = len(buffer)
         print("original buffer size:",len_buf)
@@ -49,11 +51,12 @@ class TD3BC_Online:
         # create deep copies of the critic networks
         self.critic1_old = deepcopy(critic1)
         self.critic2_old = deepcopy(critic2)
-        self.bc_coeff = .2
+        self.bc_coeff = bc_val
         self.bc_factor = bc_factor
 
         self.best_test = 0
         self.envsteps = 0
+        self.epoch = 0
 
         # TD3 adds noise to the target_q actions and evaluates using CURRENT policy! Seems to improve training
         self.policy_noise = 0.2 
@@ -119,8 +122,9 @@ class TD3BC_Online:
         wandb.log({'test reward': avg_rew/n_episodes,'test len': avg_len/n_episodes})
         if avg_rew/n_episodes > self.best_test:
             self.best_test = avg_rew/n_episodes
-            torch.save(self.model.state_dict(), 'TD3BC_Online_TEMP.pth')
-            wandb.run.log_artifact("TD3BC_Online_TEMP.pth", name='policy_streaming', type='model')
+            filename = f"TD3BC_Online_TEMP_{self.timestamp}.pth"
+            torch.save(self.model.state_dict(), filename)
+            wandb.run.log_artifact(filename, name='policy_streaming', type='model')
 
     def _target_q(self, buffer: ReplayBuffer, indices: np.ndarray) -> torch.Tensor:
         obs_next_batch = Batch(
@@ -157,8 +161,8 @@ class TD3BC_Online:
         # )
         running_returns = 0
         # compute returns with Bellman equation and critics as value functin
-        for t in reversed(range(len(rewards))):
-            if t<len(rewards)-nstep-1:
+        for t in reversed(range(rewards.shape[-1])):
+            if t<rewards.shape[-1]-nstep-1:
                 act_  = actions[:,t+2]
                 noise = torch.randn(size=act_.shape, device=act_.device) * self.policy_noise
                 if self.noise_clip > 0.0:
@@ -185,7 +189,7 @@ class TD3BC_Online:
         weight = getattr(batch, "weight", 1.0)
         current_q = critic(batch.obs.reshape(-1,146), batch.act.reshape(-1,4)).flatten()
         target_q = batch.returns.flatten()
-        td = current_q - torch.tensor(target_q).to(self.device)
+        td = current_q - target_q.clone().detach().requires_grad_(True).to(self.device)
         # critic_loss = F.mse_loss(current_q1, target_q)
         critic_loss = (td.pow(2) * weight).mean()
         optimizer.zero_grad()
@@ -265,7 +269,7 @@ class TD3BC_Online:
             outputs = []
             # hidden = None
             # print(self.model.device)
-            priv_obs = torch.tensor(batch.obs[:,:, :18],dtype=torch.float32).to(self.device)
+            priv_obs = batch.obs[:,:, :18].clone().detach().requires_grad_(True).to(self.device).to(torch.float32)
             for t in range(observations.shape[1]):
                 mu = self.model(priv_obs[:, t])
                 output = mu # actor
@@ -291,16 +295,18 @@ class TD3BC_Online:
 
     def learn(self, epoch=0, end_epoch = 50):
         loss = np.inf
+        self.epoch += end_epoch
         for n in tqdm(range(epoch, end_epoch)):
             wandb.log({"epoch":n})
             losses=[]
             self.model.to(device)
-            # print(self.model.device)
-            for _ in range(int(len(self.buffer)//self.batch_size)):
-                self.model.preprocess.reset(current_epoch = n)
-                batch = self.buffer.sample(self.batch_size)[0]
-                
-                self.learn_batch(batch)
+            for _ in range(5): # perform 5 updates for each epoch
+                # print(self.model.device)
+                for _ in range(int(len(self.buffer)//self.batch_size)):
+                    self.model.preprocess.reset(current_epoch = n)
+                    batch = self.buffer.sample(self.batch_size)[0]
+                    
+                    self.learn_batch(batch)
 
 
             if n%10==0:
@@ -310,7 +316,7 @@ class TD3BC_Online:
         print("Gathering buffer...")
         # gather new buffer
         buffer = ReplayBuffer(size=size)
-        n_rollouts = size 
+        n_rollouts = int(size//(rollout_len/100) )
         js = jump_start_len if jump_start_len is not None else 0
         for _ in tqdm(range(n_rollouts), desc="Gathering buffer"):
             # assure that we get usable sequences, by discarding rollouts that crash too fast or all the way at the end
@@ -354,14 +360,26 @@ class TD3BC_Online:
                         t_warmup = 0
                         # if our rollout crashses before 2x warmup, we discard it, it is not worth to warmup the model for only a few timesteps
                         # if our rollout crashes after rolloutlen - 2x warmup, we also wouldnt have at least the warmup length to trian on
-                        if not (self.warmup*2<i<rollout_len-self.warmup*2):
+                        if (self.warmup*2<i):
+                            obs_stack = np.hstack((np.array(obs_lst), np.array(action_lst), np.array(rewards_lst).reshape(-1,1), np.array(dones_lst).reshape(-1,1)))
+                            # add the rollout to the buffer
+                            # chop up in 100 step sequences with step size of 50 (0-100,50-150,100-200,150-250,...)
+                            for j in range(0,obs_stack.shape[0]-100,50):
+                                buffer.add(Batch({'obs':obs_stack[j:j+100],'act':np.array(action_lst[j+99]),'rew':np.array(rewards_lst[j+99]),'terminated': np.array(dones_lst[j+99]).reshape(-1,1),'truncated': np.array(dones_lst)[j+99].reshape(-1,1)}))
+
+                            # now add the last bit obs_stack.shape[0]%100 to the buffer
+                            if obs_stack.shape[0]%100>0:
+                                buffer.add(Batch({'obs':obs_stack[-100:],'act':np.array(action_lst[-1]),'rew':np.array(rewards_lst[-1]),'terminated': np.array(dones_lst[-1]).reshape(-1,1),'truncated': np.array(dones_lst)[-1].reshape(-1,1)}))
+                            # buffer.add(Batch({'obs':obs_stack,'act':np.array(action_lst[-1]),'rew':np.array(rewards_lst[-1]),'terminated': np.array(dones_lst[-1]).reshape(-1,1),'truncated': np.array(dones_lst)[-1].reshape(-1,1)}))
+                            # buffer.add(Batch({'obs':obs_stack}))
+                        else:
                             partial_rollout = True
                         # partial_rollout = True
             
         
-            obs_stack = np.hstack((np.array(obs_lst), np.array(action_lst), np.array(rewards_lst).reshape(-1,1), np.array(dones_lst).reshape(-1,1)))
-            # add the rollout to the buffer
-            buffer.add(Batch({'obs':obs_stack,'act':np.array(action_lst[-1]),'rew':np.array(rewards_lst[-1]),'terminated': np.array(dones_lst[-1]).reshape(-1,1),'truncated': np.array(dones_lst)[-1].reshape(-1,1)}))
+            # obs_stack = np.hstack((np.array(obs_lst), np.array(action_lst), np.array(rewards_lst).reshape(-1,1), np.array(dones_lst).reshape(-1,1)))
+            # # add the rollout to the buffer
+            # buffer.add(Batch({'obs':obs_stack,'act':np.array(action_lst[-1]),'rew':np.array(rewards_lst[-1]),'terminated': np.array(dones_lst[-1]).reshape(-1,1),'truncated': np.array(dones_lst)[-1].reshape(-1,1)}))
             # buffer.add(Batch({'obs':obs_stack}))
         # create buffer with old and new data
         self.buffer.update(buffer)
@@ -369,29 +387,31 @@ class TD3BC_Online:
         wandb.log({'environment interactions': self.envsteps})
         return buffer
     
-    def run(self, jumpstart=True):
+    def run(self, jumpstart=False):
         cur_epoch = 0
         # self.gather_buffer(jump_start_len=490, size=1000)
         n_epochs_tot = 0
-        for i in range(50,450,25):
+        for i in range(50,1000,25):
+            if jumpstart:
+                self.gather_buffer(jump_start_len=500-i, size=50)
+                wandb.log({"jump start steps (500 - n)": i})
+            else:
+                self.gather_buffer(size=50)
+            wandb.log({"behavorial cloning coefficient": self.bc_coeff})
             self.learn(epoch=cur_epoch, end_epoch=cur_epoch+50)
             n_epochs_tot+=50
             self.bc_coeff *= self.bc_factor
             cur_epoch+=50
             
-            if self.curriculum and i%100==0: # 
+            if self.curriculum and i%50==0: # 
                 self.env.update_curriculum()
-                self.env.update_curriculum()
-            if jumpstart:
-                self.gather_buffer(jump_start_len=500-i)
-                wandb.log({"jump start steps (500 - n)": i})
-            else:
-                self.gather_buffer()
-            wandb.log({"behavorial cloning coefficient": self.bc_coeff})
         while n_epochs_tot<1000:
             self.learn(epoch=cur_epoch, end_epoch=cur_epoch+50)
             n_epochs_tot+=50
             cur_epoch+=50
+            filename = f"TD3BC_Online_TEMP_{self.timestamp}_epoch_{cur_epoch}.pth"
+            torch.save(self.model.state_dict(), filename)
+            wandb.run.log_artifact(filename, name='policy_streaming', type='model')
             if self.curriculum:
                 self.env.update_curriculum()
             self.gather_buffer()
@@ -507,6 +527,7 @@ if __name__ == "__main__":
         parser.add_argument("--slope", type=int, default=2, help="Slope value")
         parser.add_argument("--bc-factor", type=float, default=0.99, help="Behavioral cloning factor")
         
+        parser.add_argument("--bc-val", type=float, default=0.2, help="Behavioral cloning factor")
         # Use 'store_true' for interval if you want it as a flag, or use 'type=int' if it's an integer
         parser.add_argument("--interval", type=int, default=1, help="Interval flag")
         return parser.parse_args()
@@ -517,9 +538,9 @@ if __name__ == "__main__":
 
 
     # prepare the data
-    bufferog = ReplayBuffer.load_hdf5('l2f_controller_buffer.hdf5')
-    buffer = ReplayBuffer(size=1000)
-    # buffer.update(bufferog)
+    bufferog = ReplayBuffer.load_hdf5('buffer_fully_sim.hdf5')
+    buffer = ReplayBuffer(size=20000)
+    buffer.update(bufferog)
     env = Learning2Fly(fast_learning=False)
     # list all availabel devices
     print("Available devices:",torch.cuda.device_count())
@@ -548,6 +569,8 @@ if __name__ == "__main__":
     # args.surrogate_scheduling = True
     spiking_module = SpikingNet(state_shape=18, action_shape=args.hidden_sizes[-1], hidden_sizes=args.hidden_sizes[:-1], device=device,slope=args.slope,slope_schedule=args.surrogate_scheduling,reset_interval=5, reset_in_call=False, repeat=1).to(device)
     model = Wrapper(spiking_module, size=args.hidden_sizes[-1]).to(device)
+    model.load_state_dict(torch.load("TD3BC_Online_TEMP.pth", map_location="cpu"))
+
     # model = ActorProb(spiking_module,4,device=args.device).to(device)
     print(model)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -580,15 +603,25 @@ if __name__ == "__main__":
                 critic2=critic2,
                 critic2_optimizer=critic2_optim,
                 buffer=buffer,
-                batch_size=125, device=device,
+                batch_size=350, device=device,
                 curriculum=args.curriculum,
+                bc_val=args.bc_val,
                 bc_factor=args.bc_factor,)
+    # # first gather model and append it with expert data ( real data )
+    # buffer_og= bc.gather_buffer(size=2500)
+    # buffer_len = len(buffer_og)
+    # # buffer_real = ReplayBuffer.load_hdf5('real_data_buffer_no_zeros_full.hdf5')
+    # # buffer_real_len = len(buffer_real)
+    # buffer = ReplayBuffer(size=(buffer_len)*4)
+    # buffer.update(bufferog)
+    # bc.buffer = buffer
+    # buffer_og.save_hdf5("buffer_fully_sim.hdf5")
     # learn the model
-    bc.run()
+    bc.run(jumpstart=args.jumpstart)
     # loss = bc.learn(epoch=250)
     # print(loss)
     
     wandb.run.finish()
     timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
 
-    torch.save(model.state_dict(),f'td3bconline_{timestamp}.pth')
+    torch.save(model.state_dict(),f'TD3BC_ONLINE_STABLE_{timestamp}.pth')
