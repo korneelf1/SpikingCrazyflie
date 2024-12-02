@@ -21,10 +21,20 @@ sdist/
 var/
 wheels/
 share/python-wheels/
+wandb/
 *.egg-info/
 .installed.cfg
 *.egg
 MANIFEST
+
+# ignore images
+*.png
+
+# ignore logs
+*.log
+
+# ignore pth files
+*.pth
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
