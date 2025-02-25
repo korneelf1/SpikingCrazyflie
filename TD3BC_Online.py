@@ -388,6 +388,17 @@ class TD3BC_Online:
         return buffer
     
     def run(self, jumpstart=False):
+        """
+        This function is used to run the training.
+        It will gather data from the environment and train the model.
+        It will also log the training progress to WandB.
+        It will also save the model periodically.
+        It will also update the curriculum if it is enabled.
+        
+        Args:
+            jumpstart (bool): If True, the training will start with a jumpstart phase, meaning we initially use the pre-trained controller to collect data.
+
+        """
         cur_epoch = 0
         # self.gather_buffer(jump_start_len=490, size=1000)
         n_epochs_tot = 0
@@ -532,15 +543,16 @@ if __name__ == "__main__":
         parser.add_argument("--interval", type=int, default=1, help="Interval flag")
         return parser.parse_args()
 
+
     from l2f_agent import ConvertedModel
     controller = ConvertedModel()
     controller.load_state_dict(torch.load("l2f_agent.pth", map_location="cpu"))
 
 
     # prepare the data
-    bufferog = ReplayBuffer.load_hdf5('buffer_fully_sim.hdf5')
+    # bufferog = ReplayBuffer.load_hdf5('buffer_fully_sim.hdf5')
     buffer = ReplayBuffer(size=20000)
-    buffer.update(bufferog)
+    # buffer.update(bufferog)
     env = Learning2Fly(fast_learning=False)
     # list all availabel devices
     print("Available devices:",torch.cuda.device_count())
@@ -549,9 +561,11 @@ if __name__ == "__main__":
     
     args = get_args()
     device = args.device
+
+    # Initialize WandB
     wandb_args = {"spiking":True, 'Slope': args.slope,'Schedule': args.surrogate_scheduling, 'Algo':'TD3BC_JS_Online', 'fast_learning':False, 'curriculum':args.curriculum}
     wandb.init(project="l2f_bc", config=wandb_args)
-    # wandb.init(mode="disabled")
+
     wandb.define_metric("*", step_metric="epoch")
 
     print('Device in use:',device)
@@ -567,11 +581,15 @@ if __name__ == "__main__":
     wandb.config.update({"bc_factor":args.bc_factor})
     wandb.config.update({"jumpstart":args.jumpstart})
     # args.surrogate_scheduling = True
-    spiking_module = SpikingNet(state_shape=18, action_shape=args.hidden_sizes[-1], hidden_sizes=args.hidden_sizes[:-1], device=device,slope=args.slope,slope_schedule=args.surrogate_scheduling,reset_interval=5, reset_in_call=False, repeat=1).to(device)
-    model = Wrapper(spiking_module, size=args.hidden_sizes[-1]).to(device)
-    model.load_state_dict(torch.load("TD3BC_Online_TEMP.pth", map_location="cpu"))
 
-    # model = ActorProb(spiking_module,4,device=args.device).to(device)
+
+    # Initialize the spiking module
+    spiking_module = SpikingNet(state_shape=18, action_shape=args.hidden_sizes[-1], hidden_sizes=args.hidden_sizes[:-1], device=device,slope=args.slope,slope_schedule=args.surrogate_scheduling,reset_interval=5, reset_in_call=False, repeat=1).to(device)
+    
+    # Initialize the wrapper
+    model = Wrapper(spiking_module, size=args.hidden_sizes[-1]).to(device)
+    # model.load_state_dict(torch.load("TD3BC_Online_TEMP.pth", map_location="cpu"))
+
     print(model)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     # prepare the BC

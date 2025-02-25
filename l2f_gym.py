@@ -1,4 +1,4 @@
-from l2f import Rng, Device, Environment, Parameters, State, Observation,initialize_environment,step,initialize_rng,parameters_to_json,sample_initial_parameters,initial_state, sample_initial_state, observe
+from l2f import Rng, Device, Environment, Action, Parameters, State, Observation,initialize_environment,step,initialize_rng,parameters_to_json,sample_initial_parameters,initial_state, sample_initial_state, observe
 import gymnasium as gym
 import numpy as np
 
@@ -133,8 +133,8 @@ class Learning2Fly(gym.Env):
         self.next_state = State()
         self.observation = Observation()
         self.next_observation = Observation()
-        self.action = np.zeros(4)
-        initialize_environment(self.device, self.env)
+        self.action = Action()
+        initialize_environment(self.device, self.env, self.params)
         if seed is None:
             seed = np.random.randint(0, 2**32-1)
         # print("Environment initialized with seed: ", seed)
@@ -201,7 +201,7 @@ class Learning2Fly(gym.Env):
 
     def step(self, action):
         # self.action = power_distribution_force_torque(action.reshape((4,)))
-        self.action = action.reshape((4,))
+        self.action.motor_commands = action.reshape((4,))
         # print(self.action)
         step(self.device, self.env, self.params, self.state, self.action, self.next_state, self.rng)
         self.state = self.next_state
@@ -231,7 +231,7 @@ class Learning2Fly(gym.Env):
             vel   = np.array(self.state.linear_velocity)
             q     = np.array(self.state.orientation)
             qd    = np.array(self.state.angular_velocity)
-            action = self.action
+            action = self.action.motor_commands
         else:
             pos   = np.array(obs[:,0:3])
             vel   = np.array(obs[:,12:15])
@@ -315,6 +315,7 @@ if __name__=='__main__':
     # from stable_baselines3.common.env_checker import check_env
     env = Learning2Fly()
     env.reset()
+    print(env.obs.shape)
     env2 = Learning2Fly()
     env2.reset()
 
