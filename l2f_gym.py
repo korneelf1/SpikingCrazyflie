@@ -1,4 +1,4 @@
-from l2f import Rng, Device, Environment, Parameters, State, Observation, Action,initialize_environment,step,initialize_rng,parameters_to_json,sample_initial_parameters,initial_state, sample_initial_state, observe
+from l2f import Rng, Device, Environment, Parameters, State, Observation,initialize_environment,step,initialize_rng,parameters_to_json,sample_initial_parameters,initial_state, sample_initial_state, observe
 import gymnasium as gym
 import numpy as np
 
@@ -133,8 +133,8 @@ class Learning2Fly(gym.Env):
         self.next_state = State()
         self.observation = Observation()
         self.next_observation = Observation()
-        self.action = Action()
-        initialize_environment(self.device, self.env, self.params)
+        self.action = np.zeros(4)
+        initialize_environment(self.device, self.env)
         if seed is None:
             seed = np.random.randint(0, 2**32-1)
         # print("Environment initialized with seed: ", seed)
@@ -200,9 +200,9 @@ class Learning2Fly(gym.Env):
         return np.array(self.observation.observation,dtype=np.float32)
 
     def step(self, action):
-        # self.action.motor_command = power_distribution_force_torque(action.reshape((4,)))
-        self.action.motor_command = action.reshape((4,))
-        # print(self.action.motor_command)
+        # self.action = power_distribution_force_torque(action.reshape((4,)))
+        self.action = action.reshape((4,))
+        # print(self.action)
         step(self.device, self.env, self.params, self.state, self.action, self.next_state, self.rng)
         self.state = self.next_state
 
@@ -231,7 +231,7 @@ class Learning2Fly(gym.Env):
             vel   = np.array(self.state.linear_velocity)
             q     = np.array(self.state.orientation)
             qd    = np.array(self.state.angular_velocity)
-            action = self.action.motor_command
+            action = self.action
         else:
             pos   = np.array(obs[:,0:3])
             vel   = np.array(obs[:,12:15])
