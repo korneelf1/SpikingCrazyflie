@@ -201,7 +201,7 @@ class Learning2Fly(gym.Env):
 
     def step(self, action):
         # self.action = power_distribution_force_torque(action.reshape((4,)))
-        self.action.motor_commands = action.reshape((4,))
+        self.action.motor_command = action.reshape((4,))
         # print(self.action)
         step(self.device, self.env, self.params, self.state, self.action, self.next_state, self.rng)
         self.state = self.next_state
@@ -231,7 +231,7 @@ class Learning2Fly(gym.Env):
             vel   = np.array(self.state.linear_velocity)
             q     = np.array(self.state.orientation)
             qd    = np.array(self.state.angular_velocity)
-            action = self.action.motor_commands
+            action = self.action.motor_command
         else:
             pos   = np.array(obs[:,0:3])
             vel   = np.array(obs[:,12:15])
