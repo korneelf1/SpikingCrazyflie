@@ -1,0 +1,68 @@
+wandb_version: 1
+
+N_drones:
+  desc: null
+  value: 1
+gpu:
+  desc: null
+  value: false
+hidden_sizes:
+  desc: null
+  value:
+  - 64
+  - 64
+actor:
+  desc: null
+  value: SpikingNet
+popsize:
+  desc: null
+  value: 200
+center_learning_rate:
+  desc: null
+  value: 0.01125
+stdev_learning_rate:
+  desc: null
+  value: 0.1
+max_speed:
+  desc: null
+  value: 0.015
+radius_init:
+  desc: null
+  value: 0.27
+num_interactions:
+  desc: null
+  value: 150000
+popsize_max:
+  desc: null
+  value: 3200
+drone:
+  desc: null
+  value: stock drone
+num_runs:
+  desc: null
+  value: 500
+forward_per_sample:
+  desc: null
+  value: 1
+_wandb:
+  desc: null
+  value:
+    python_version: 3.11.9
+    cli_version: 0.17.3
+    framework: torch
+    is_jupyter_run: false
+    is_kaggle_kernel: false
+    start_time: 1723722168
+    t:
+      1:
+      - 1
+      - 30
+      - 55
+      3:
+      - 16
+      - 23
+      4: 3.11.9
+      5: 0.17.3
+      8:
+      - 5
+      13: linux-x86_64
