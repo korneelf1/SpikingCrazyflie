@@ -11,14 +11,22 @@ import torch.nn.functional as F
 from torch import nn
 
 class TD3BC_Online:
-    def __init__(self, env, model, optimizer,
-                 critic1, critic1_optimizer, 
-                 critic2, critic2_optimizer, 
-                 buffer, batch_size=256, warmup=50, 
-                 device='cpu', 
-                 controller=None, curriculum=False,
-                 bc_val = 0.2,
-                 bc_factor=0.95):
+    def __init__(self, 
+                 env, 
+                 model, 
+                 optimizer,
+                 critic1, 
+                 critic1_optimizer, 
+                 critic2, 
+                 critic2_optimizer, 
+                 buffer, 
+                 batch_size:int = 256, 
+                 warmup:int = 50, 
+                 device:str = 'cpu', 
+                 controller:nn.Module|None = None, 
+                 curriculum:bool = False,
+                 bc_val:float = 0.2,
+                 bc_factor:float = 0.95):
         self.env = env
         self.model = model
         self.critic1 = critic1 
@@ -41,6 +49,10 @@ class TD3BC_Online:
         self.best_epoch_loss = np.inf
         self.loss_fn = torch.nn.MSELoss()
         self.device= device
+        # if device is mps, no float64 can be used
+        if device == 'mps':
+            torch.set_default_dtype(torch.float32)
+
         self.alpha = 2.5
         self._alpha = 2.5
         self.gamma = 0.99
@@ -54,6 +66,7 @@ class TD3BC_Online:
         self.bc_coeff = bc_val
         self.bc_factor = bc_factor
 
+        self.last_test_rew = 0 # used for adaptive scheduling of slopes
         self.best_test = 0
         self.envsteps = 0
         self.epoch = 0
@@ -62,7 +75,9 @@ class TD3BC_Online:
         self.policy_noise = 0.2 
         self.noise_clip = 0.5
 
-    def test(self, n_episodes=30,viz=True):
+    def test(self, 
+             n_episodes:int = 30,
+             viz:bool = True):
         avg_rew = 0
         avg_len = 0
         for episode in range(n_episodes):
@@ -119,14 +134,17 @@ class TD3BC_Online:
             # plt.show()
             wandb.log({"img": [wandb.Image(fig, caption=f"Compared to true")]})
 
-        wandb.log({'test reward': avg_rew/n_episodes,'test len': avg_len/n_episodes})
-        if avg_rew/n_episodes > self.best_test:
-            self.best_test = avg_rew/n_episodes
+        self.last_test_rew = avg_rew/n_episodes
+        wandb.log({'test reward': self.last_test_rew,'test len': avg_len/n_episodes})
+        if self.last_test_rew > self.best_test:
+            self.best_test = self.last_test_rew
             filename = f"TD3BC_Online_TEMP_{self.timestamp}.pth"
             torch.save(self.model.state_dict(), filename)
             wandb.run.log_artifact(filename, name='policy_streaming', type='model')
 
-    def _target_q(self, buffer: ReplayBuffer, indices: np.ndarray) -> torch.Tensor:
+    def _target_q(self, 
+                  buffer: ReplayBuffer, 
+                  indices: np.ndarray) -> torch.Tensor:
         obs_next_batch = Batch(
             obs=buffer[indices].obs_next,
             info=[None] * len(indices),
@@ -141,7 +159,10 @@ class TD3BC_Online:
             self.critic2_old(obs_next_batch.obs, act_),
         )
     
-    def compute_returns(self,batch, nstep=1, recompute_with_current_policy=False):
+    def compute_returns(self,
+                        batch, 
+                        nstep:int = 1, 
+                        recompute_with_current_policy:bool = False):
         '''Compute returns from rewards using discounted rewards:
         R_t = r_t + gamma * r_{t+1} + gamma^2 * r_{t+2} + ... + gamma^{T-t} * r_T
         where T is the last timestep of the episode
@@ -179,6 +200,7 @@ class TD3BC_Online:
         #     running_returns = rewards[t] + gamma * running_returns * (1 - dones[t])
         #     returns[t] = running_returns
         return returns
+    
     def _mse_optimizer(
             self,
         batch,
@@ -207,7 +229,9 @@ class TD3BC_Online:
         self.soft_update(self.critic2_old, self.critic2, self.tau)
         # self.soft_update(self.actor_old, self.actor, self.tau)
 
-    def learn_batch(self, batch, length=100):
+    def learn_batch(self, 
+                    batch, 
+                    length:int = 100):
         if batch.obs.shape[1]%length!=0:
             # print("Batch length not divisible by length, cutting original batch")
             batch.obs = batch.obs[:,:-(batch.obs.shape[1]%length)]
@@ -293,7 +317,9 @@ class TD3BC_Online:
             wandb.log({"critic_loss": critic_loss.item()})
             wandb.log({"critic2_loss": critic2_loss.item()})
 
-    def learn(self, epoch=0, end_epoch = 50):
+    def learn(self, 
+              epoch:int = 0, 
+              end_epoch:int = 50):
         loss = np.inf
         self.epoch += end_epoch
         for n in tqdm(range(epoch, end_epoch)):
@@ -303,7 +329,8 @@ class TD3BC_Online:
             for _ in range(5): # perform 5 updates for each epoch
                 # print(self.model.device)
                 for _ in range(int(len(self.buffer)//self.batch_size)):
-                    self.model.preprocess.reset(current_epoch = n)
+                    self.model.preprocess.reset(current_epoch = n,
+                                                last_test_rew = self.last_test_rew) # pass last test reward and current epoch to reset (used for adaptive scheduling and interval based scheduling  of slopes, respectively)
                     batch = self.buffer.sample(self.batch_size)[0]
                     
                     self.learn_batch(batch)
@@ -312,7 +339,12 @@ class TD3BC_Online:
             if n%10==0:
                 self.test(viz=False)
 
-    def gather_buffer(self, name='l2f_controller_buffer_in_ru ', size = 200, rollout_len = 501, jump_start_len=None,keep_og=False):
+    def gather_buffer(self, 
+                      name:str ='l2f_controller_buffer_in_ru ', 
+                      size:int = 200, 
+                      rollout_len:int = 501, 
+                      jump_start_len:int|None = None,
+                      keep_og:bool = False):
         print("Gathering buffer...")
         # gather new buffer
         buffer = ReplayBuffer(size=size)
@@ -356,7 +388,7 @@ class TD3BC_Online:
 
                     if dones:
                         obs = env.reset()[0]
-                        # print("Crashed at step", i)
+
                         t_warmup = 0
                         # if our rollout crashses before 2x warmup, we discard it, it is not worth to warmup the model for only a few timesteps
                         # if our rollout crashes after rolloutlen - 2x warmup, we also wouldnt have at least the warmup length to trian on
@@ -387,7 +419,19 @@ class TD3BC_Online:
         wandb.log({'environment interactions': self.envsteps})
         return buffer
     
-    def run(self, jumpstart=False):
+    def run(self, 
+            jumpstart:bool = False,):
+        """
+        This function is used to run the training.
+        It will gather data from the environment and train the model.
+        It will also log the training progress to WandB.
+        It will also save the model periodically.
+        It will also update the curriculum if it is enabled.
+        
+        Args:
+            jumpstart (bool): If True, the training will start with a jumpstart phase, meaning we initially use the pre-trained controller to collect data.
+
+        """
         cur_epoch = 0
         # self.gather_buffer(jump_start_len=490, size=1000)
         n_epochs_tot = 0
@@ -520,7 +564,7 @@ if __name__ == "__main__":
             help="watch the play of pre-trained policy only",
         )
         # Use 'store_true' or 'store_false' for boolean flags
-        parser.add_argument("--surrogate-scheduling", action='store_true', help="Enable surrogate scheduling")
+        parser.add_argument("--surrogate-scheduling", type=str, default='adaptive', help="Enable surrogate scheduling, options: fixed, interval, adaptive")
         parser.add_argument("--curriculum", action='store_true', help="Enable reward curriculum scheduling")
         parser.add_argument("--jumpstart", action='store_true', help="JumpStartScheduling")
 
@@ -532,26 +576,32 @@ if __name__ == "__main__":
         parser.add_argument("--interval", type=int, default=1, help="Interval flag")
         return parser.parse_args()
 
+
     from l2f_agent import ConvertedModel
     controller = ConvertedModel()
     controller.load_state_dict(torch.load("l2f_agent.pth", map_location="cpu"))
 
 
     # prepare the data
-    bufferog = ReplayBuffer.load_hdf5('buffer_fully_sim.hdf5')
+    # bufferog = ReplayBuffer.load_hdf5('buffer_fully_sim.hdf5')
     buffer = ReplayBuffer(size=20000)
-    buffer.update(bufferog)
+    # buffer.update(bufferog)
     env = Learning2Fly(fast_learning=False)
     # list all availabel devices
     print("Available devices:",torch.cuda.device_count())
+    # for macos
+    
     # print(torch.device("cuda:1"))
     # device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
     
     args = get_args()
     device = args.device
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    device = torch.device("cpu")
+    # Initialize WandB
     wandb_args = {"spiking":True, 'Slope': args.slope,'Schedule': args.surrogate_scheduling, 'Algo':'TD3BC_JS_Online', 'fast_learning':False, 'curriculum':args.curriculum}
     wandb.init(project="l2f_bc", config=wandb_args)
-    # wandb.init(mode="disabled")
+
     wandb.define_metric("*", step_metric="epoch")
 
     print('Device in use:',device)
@@ -559,6 +609,8 @@ if __name__ == "__main__":
     print("Surrogate scheduling:",args.surrogate_scheduling)
     print("Hidden sizes:",args.hidden_sizes)
     print("Curriculum:",args.curriculum)
+    print("Jumpstart:",args.jumpstart)
+    args.jumpstart = True
     wandb.config.update({"device":device})
     wandb.config.update({"slope":args.slope})
     wandb.config.update({"surrogate_scheduling":args.surrogate_scheduling})
@@ -567,11 +619,24 @@ if __name__ == "__main__":
     wandb.config.update({"bc_factor":args.bc_factor})
     wandb.config.update({"jumpstart":args.jumpstart})
     # args.surrogate_scheduling = True
-    spiking_module = SpikingNet(state_shape=18, action_shape=args.hidden_sizes[-1], hidden_sizes=args.hidden_sizes[:-1], device=device,slope=args.slope,slope_schedule=args.surrogate_scheduling,reset_interval=5, reset_in_call=False, repeat=1).to(device)
-    model = Wrapper(spiking_module, size=args.hidden_sizes[-1]).to(device)
-    model.load_state_dict(torch.load("TD3BC_Online_TEMP.pth", map_location="cpu"))
 
-    # model = ActorProb(spiking_module,4,device=args.device).to(device)
+
+    # Initialize the spiking module
+    spiking_module = SpikingNet(state_shape=18, 
+                                action_shape=args.hidden_sizes[-1], 
+                                hidden_sizes=args.hidden_sizes[:-1], 
+                                device=device,
+                                reset_in_call=False,
+                                repeat=1,
+                                slope=args.slope,
+                                schedule=args.surrogate_scheduling,
+                                reward_range=(0,400),
+                                max_slope=100).to(device)
+    
+    # Initialize the wrapper
+    model = Wrapper(spiking_module, size=args.hidden_sizes[-1]).to(device)
+    # model.load_state_dict(torch.load("TD3BC_Online_TEMP.pth", map_location="cpu"))
+
     print(model)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     # prepare the BC

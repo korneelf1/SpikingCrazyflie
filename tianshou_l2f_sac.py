@@ -16,7 +16,7 @@ from tianshou.trainer import OffpolicyTrainer
 from tianshou.utils.net.common import Net
 from tianshou.utils.net.continuous import ActorProb, Critic
 from tianshou.env import DummyVectorEnv
-from l2f_gym import Learning2Fly, SubprocVectorizedL2F, ShmemVectorizedL2F
+from l2f_gym import Learning2Fly
 from tianshou.utils import WandbLogger
 from torch.utils.tensorboard import SummaryWriter
 
@@ -29,7 +29,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--critic-lr", type=float, default=1e-3)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
-    parser.add_argument("--alpha", type=float, default=0)
+    parser.add_argument("--alpha", type=float, default=0.)
     parser.add_argument("--auto-alpha", default=False, action="store_true")
     parser.add_argument("--alpha-lr", type=float, default=3e-4)
     parser.add_argument("--start-timesteps", type=int, default=10000)
