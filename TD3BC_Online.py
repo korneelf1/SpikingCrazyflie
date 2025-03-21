@@ -546,7 +546,7 @@ if __name__ == "__main__":
         parser.add_argument(
             "--device",
             type=str,
-            default="cuda:1" if torch.cuda.is_available() else "cpu",
+            default="cuda" if torch.cuda.is_available() else "cpu",
         )
         parser.add_argument("--resume-path", type=str, default=None)
         parser.add_argument("--resume-id", type=str, default=None)
@@ -569,6 +569,7 @@ if __name__ == "__main__":
         parser.add_argument("--jumpstart", action='store_true', help="JumpStartScheduling")
 
         parser.add_argument("--slope", type=int, default=2, help="Slope value")
+        parser.add_argument("--scheduling-order", type=int, default=1, help="Scheduling order, 0 is based on last score, 1 is based on slope of score history")
         parser.add_argument("--bc-factor", type=float, default=0.99, help="Behavioral cloning factor")
         
         parser.add_argument("--bc-val", type=float, default=0.2, help="Behavioral cloning factor")
@@ -583,8 +584,8 @@ if __name__ == "__main__":
 
 
     # prepare the data
-    # bufferog = ReplayBuffer.load_hdf5('buffer_fully_sim.hdf5')
-    buffer = ReplayBuffer(size=20000)
+    buffer = ReplayBuffer.load_hdf5('buffers/l2f_buffer_1996.hdf5')
+    # buffer = ReplayBuffer(size=20000)
     # buffer.update(bufferog)
     env = Learning2Fly(fast_learning=False)
     # list all availabel devices
@@ -596,8 +597,8 @@ if __name__ == "__main__":
     
     args = get_args()
     device = args.device
-    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-    device = torch.device("cpu")
+    # device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    # device = torch.device("cpu")
     # Initialize WandB
     wandb_args = {"spiking":True, 'Slope': args.slope,'Schedule': args.surrogate_scheduling, 'Algo':'TD3BC_JS_Online', 'fast_learning':False, 'curriculum':args.curriculum}
     wandb.init(project="l2f_bc", config=wandb_args)
@@ -630,8 +631,9 @@ if __name__ == "__main__":
                                 repeat=1,
                                 slope=args.slope,
                                 schedule=args.surrogate_scheduling,
-                                reward_range=(0,400),
-                                max_slope=100).to(device)
+                                reward_range=(-300,400),
+                                max_slope=100,
+                                order=args.scheduling_order).to(device)
     
     # Initialize the wrapper
     model = Wrapper(spiking_module, size=args.hidden_sizes[-1]).to(device)

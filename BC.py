@@ -17,6 +17,7 @@ class BC:
         self.loss_fn = torch.nn.MSELoss()
         self.device= device
         self.noise = noise
+        self.test_reward = 0
 
     def test(self, n_episodes=20,viz=False):
         avg_rew = 0
@@ -77,6 +78,7 @@ class BC:
             # wandb.log({"img": [wandb.Image(fig, caption=f"Compared to true")]})
 
         wandb.log({'test reward': avg_rew/n_episodes,'test len': avg_len/n_episodes})
+        self.test_reward = avg_rew/n_episodes
 
 
     def learn(self, epoch=50):
@@ -89,7 +91,7 @@ class BC:
             self.model.to(device)
             # print(self.model.device)
             for _ in range(int(len(self.buffer)//self.batch_size)):
-                self.model.preprocess.reset(current_epoch=n)
+                self.model.preprocess.reset(current_epoch=n, last_test_rew=self.test_reward)
                 batch = self.buffer.sample(self.batch_size)[0]
                 if batch.obs.shape[-1] <(146+4+1+1):
                     observations = torch.tensor(batch.obs[:,:, :18],dtype=torch.float32).to(self.device)
@@ -189,7 +191,7 @@ if __name__ == "__main__":
             help="watch the play of pre-trained policy only",
         )
         # Use 'store_true' or 'store_false' for boolean flags
-        parser.add_argument("--surrogate-scheduling", action='store_true', help="Enable surrogate scheduling")
+        parser.add_argument("--surrogate-scheduling", type=str, default='adaptive', help="Enable surrogate scheduling, options: fixed, interval, adaptive")
         parser.add_argument("--slope", type=int, default=2, help="Slope value")
         
         # Use 'store_true' for interval if you want it as a flag, or use 'type=int' if it's an integer
@@ -238,7 +240,8 @@ if __name__ == "__main__":
 
     # prepare the data
     # buffer = ReplayBuffer.load_hdf5('l2f_controller_buffer.hdf5')
-    buffer = ReplayBuffer.load_hdf5('real_data_buffer_no_zeros_full.hdf5')
+    buffer = ReplayBuffer.load_hdf5('buffers/l2f_buffer_1996.hdf5')
+    # buffer = ReplayBuffer.load_hdf5('real_data_buffer_no_zeros_full.hdf5')
     # buffer2 = ReplayBuffer.load_hdf5('real_data_buffer_no_zeros_2.hdf5')
     # buffer.update(buffer2)
     print(len(buffer))
@@ -257,12 +260,24 @@ if __name__ == "__main__":
     print("Hidden sizes:",args.hidden_sizes)
     print("Policy Noise:",args.policy_noise)
     wandb.config.update({'slope':args.slope, 'surrogate_scheduling':args.surrogate_scheduling,'hidden_sizes':args.hidden_sizes, 'policy_noise':args.policy_noise})
-    spiking_module = SpikingNet(state_shape=18, action_shape=args.hidden_sizes[-1], hidden_sizes=args.hidden_sizes[:-1], device=device,slope=args.slope,slope_schedule=args.surrogate_scheduling,reset_interval=args.interval, reset_in_call=False, repeat=1).to(device)
+        # Initialize the spiking module
+    spiking_module = SpikingNet(state_shape=18, 
+                                action_shape=args.hidden_sizes[-1], 
+                                hidden_sizes=args.hidden_sizes[:-1], 
+                                device=device,
+                                reset_in_call=False,
+                                repeat=1,
+                                slope=args.slope,
+                                schedule=args.surrogate_scheduling,
+                                reward_range=(0,400),
+                                max_slope=100,
+                                verbose=True).to(device)
+    
     model = Wrapper(spiking_module, size=args.hidden_sizes[-1]).to(device)
-    model.load_state_dict(torch.load("TD3BC_TEMP_original.pth",map_location=device))
+    # model.load_state_dict(torch.load("TD3BC_TEMP_original.pth",map_location=device))
     print(model)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-    # prepare the BC
+    # prepare the BC  
     bc = BC(env,model, optimizer, buffer, batch_size=50, device=device, noise=args.policy_noise)
     # learn the model
     loss = bc.learn(epoch=500)

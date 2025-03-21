@@ -49,7 +49,8 @@ args_wandb = {
       'reinit': True,
       'reward_function': 'surrogate slope scheduling, alpha=0.0 symmetric observations with action history',
       'slope': 2,
-      'slope_schedule': False,
+      'slope_schedule': 'adaptive',
+      'scheduling_order': 2,
         'alpha': 0.0,
         'action_history': True,
         'stack_number': 1,
@@ -80,7 +81,8 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--logdir", type=str, default="log")
     parser.add_argument("--render", type=float, default=0.0)
     parser.add_argument("--slope", type=float, default=args_wandb['slope'])
-    parser.add_argument("--slope_schedule", type=bool, default=args_wandb['slope_schedule'])
+    parser.add_argument("--slope_schedule", type=str, default=args_wandb['slope_schedule'])
+    parser.add_argument("--scheduling_order", type=int, default=args_wandb['scheduling_order'])
     parser.add_argument("--stack-number", type=bool, default=args_wandb['stack_number'])
     parser.add_argument(
         "--device",
@@ -137,9 +139,27 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
     torch.manual_seed(args.seed)
     # model
     if args_wandb['stack_number'] == 1:
-        net_a = SpikingNet(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device, action_shape=128, repeat=args.repeat_per_forward, slope=args.slope, slope_schedule=args.slope_schedule, reset_in_call=True)
+        net_a = SpikingNet(state_shape=args.state_shape, 
+                           hidden_sizes=args.hidden_sizes, 
+                           device=args.device, 
+                           action_shape=128, 
+                           repeat=args.repeat_per_forward, 
+                           slope=args.slope, 
+                           schedule=args.slope_schedule, 
+                           reset_in_call=True,
+                           order=args.scheduling_order,
+                           reward_range=(-300,300))
     else:
-        net_a = SpikingNet(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device, action_shape=128, repeat=1, slope=args.slope, slope_schedule=args.slope_schedule, reset_in_call=True)
+        net_a = SpikingNet(state_shape=args.state_shape, 
+                           hidden_sizes=args.hidden_sizes, 
+                           device=args.device, 
+                           action_shape=128, 
+                           repeat=1, 
+                           slope=args.slope, 
+                           schedule=args.slope_schedule, 
+                           reset_in_call=True,
+                           order=args.scheduling_order,
+                           reward_range=(-300,300))
     actor = ActorProb(
         net_a,
         args.action_shape,

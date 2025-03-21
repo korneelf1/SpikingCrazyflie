@@ -164,15 +164,18 @@ class SlopeScheduler:
                  reward_range: tuple[float, float]=(0,1), 
                  max_slope: float=100, 
                  start_epoch: int=0,
-                 update_interval: int=100):
+                 update_interval: int=10,
+                 verbose: bool=False):
         
         self.model = model
         self.slope_init = slope_init
+        self.slope = slope_init
         self.schedule = schedule
         self.reward_range = reward_range
         self.max_slope = max_slope
         self.start_epoch = start_epoch
         self.update_interval = update_interval
+        self.verbose = verbose
         # internal variables
         self._epoch = 0
         self._prev_epoch = 0
@@ -181,44 +184,59 @@ class SlopeScheduler:
 
         if self.schedule == 'fixed':
             self.slope = self.slope_init
+            self.order = 0
             raise Warning("Slope scheduler is fixed, order neglected")
-        elif self.schedule == 'interval':
+        else:
             self.slope = self.slope_init
             self.epoch_interval = max_epochs/n_intervals
-            raise Warning("Slope scheduler is interval, order neglected")
-        elif self.schedule == 'adaptive':
-            self.slope = self.slope_init
-            print("Slope scheduler is adaptive, order: ", order)
+            print("Slope scheduler is interval, order: ", order)
             self.order = order
             self.history = deque(maxlen=10)
-            self.smoothed_history = deque(maxlen=10)
+            self.first_order_history = deque(maxlen=10)
+            self.second_order_history = deque(maxlen=10)
 
     def _update_slope(self, slope: float):
+        slope = max(min(slope, self.max_slope), 1)
         self.model.update_slope(slope)
         self.slope = slope
+        if self.verbose:
+            print("Updated slope to: ", slope)
 
     
     def _first_order_score(self, normalized_score: float):
         self.history.append(normalized_score)
         # smoothed avg slope of score history
         if len(self.history) > 1:
-            self.smoothed_history.append(self.history[-1] - self.history[-2])
+            self.first_order_history.append(self.history[-1] - self.history[-2])
         else:
-            self.smoothed_history.append(0)
+            self.first_order_history.append(0)
             return self.slope
-        avg_increase = sum(self.smoothed_history)/len(self.smoothed_history) # always between -1 and 1
+        avg_increase = sum(self.first_order_history)/len(self.first_order_history) # always between -1 and 1
         # pass through tanh to get -1 to 1 rescaled
-        avg_increase = nn.Tanh()(torch.tensor(avg_increase))
+        avg_increase = nn.Tanh()(torch.tensor(avg_increase*2))
 
 
         # the as long as the slope of the score history is consisten positive, keep surrogate gradient slope, 
         # if slope of score history decreases, increase slope of surrogate gradient
         # if slope becomes negative, decrease slope of surrogate gradient
-        if avg_increase > .3:
-            return self.slope
+        # if avg_increase > .7:
+        #     return self.slope
+        # # elif np.abs(avg_increase) < .1:
+        # #     return self.slope - self.max_slope/10
+        # else:
+        return self.slope + (avg_increase)*self.max_slope # expect good behavior to be between 0.1 and 0.9 and if 0 we should reduce slope
+        
+    def _second_order_score(self, normalized_score: float):
+        self._first_order_score(normalized_score)
+        if len(self.first_order_history) > 1:
+            self.second_order_history.append(self.first_order_history[-1] - self.first_order_history[-2])
         else:
-            return self.slope + avg_increase*self.max_slope
-    
+            self.second_order_history.append(0)
+        avg_increase = sum(self.second_order_history)/len(self.second_order_history)
+        # pass through tanh to get -1 to 1 rescaled
+        avg_increase = nn.Tanh()(torch.tensor(avg_increase*2))
+
+        return self.slope + (avg_increase)*self.max_slope
     def update_slope(self, score: float=None, epoch: int=None, wandb_run= None):
         '''
         Update the slope of the surrogate gradient based on the last and current score (eg reward)
@@ -285,19 +303,22 @@ class SlopeScheduler:
         if epoch - self._prev_epoch > self.update_interval: # update every update_interval epochs
             if self.schedule == 'interval':
                 if epoch - self._prev_epoch > self.epoch_interval:
-                    self.slope = self.slope_init + (epoch//self.epoch_interval)*(self.max_slope - self.slope_init)
+                    self.slope = self.slope_init + (epoch/self.max_slope)*(self.max_slope - self.slope_init)
                     self._update_slope(self.slope)
                     self._prev_epoch = epoch
             elif self.schedule == 'adaptive': # adaptive scheduling based on score
-                
+                if score is None:
+                    raise ValueError("Score must be provided for adaptive scheduling")
                 self._prev_epoch = epoch
-                normalized_slope = ((score - self.reward_range[0])/(self.reward_range[1] - self.reward_range[0]))
+                normalized_score = ((score - self.reward_range[0])/(self.reward_range[1] - self.reward_range[0]))
                 if self.order == 0:
-                    self._update_slope(self.slope_init + normalized_slope**3*self.max_slope)
+                    self._update_slope(self.slope_init + normalized_score**3*self.max_slope)
                 elif self.order == 1:
-                    self._update_slope(self._first_order_score(normalized_slope))
+                    self._update_slope(self._first_order_score(normalized_score))
+                elif self.order == 2:
+                    self._update_slope(self._second_order_score(normalized_score))
                 else:
-                    raise ValueError("Invalid order for adaptive scheduling, currently only 0 and 1 are supported")
+                    raise ValueError("Invalid order for adaptive scheduling, currently only 0, 1 and 2 are supported")
         
         # log to wandb
         if wandb_run is not None:
@@ -377,7 +398,9 @@ class SpikingNet(NetBase[Any]):
         reset_interval: int = 20e3,
         schedule: str = 'fixed',
         reward_range: tuple[float, float] = (0,1),
-        max_slope: float = 100
+        max_slope: float = 75,
+        verbose: bool = False,
+        order: int = 0
     ) -> None:
         super().__init__()
         self.device = device
@@ -431,6 +454,7 @@ class SpikingNet(NetBase[Any]):
             self.output_dim = self.model.output_dim
 
         self._epoch = 0 # is updated by collector test_episode...
+        self.last_test_rew = 0 # is updated by base trainer _next_
         self._prev_epoch = 0 # avoid constant updating of the surrogate gradient
         self.model.reset()
 
@@ -438,9 +462,23 @@ class SpikingNet(NetBase[Any]):
         self.schedule = schedule
         self.reward_range = reward_range
         self.max_slope = max_slope
-        self.slope_scheduler = SlopeScheduler(self.model, self.slope_init, schedule=self.schedule, reward_range=self.reward_range, max_slope=self.max_slope)
+        self.slope_scheduler = SlopeScheduler(self.model, 
+                                              self.slope_init, 
+                                              schedule=self.schedule, 
+                                              reward_range=self.reward_range, 
+                                              max_slope=self.max_slope,
+                                              verbose=verbose,
+                                              order=order,
+                                              update_interval=10)
 
+    @property
+    def epoch(self):
+        return self._epoch
 
+    @epoch.setter
+    def epoch(self, value):
+        self._epoch = value
+         
     def forward(
         self,
         obs: np.ndarray | torch.Tensor,
@@ -480,6 +518,10 @@ class SpikingNet(NetBase[Any]):
         return logits, state
 
     def reset(self, current_epoch: int| None=None, last_test_rew: float| None=None):
+        if current_epoch is None:
+            current_epoch = self.epoch #for tianshou
+        if last_test_rew is None:
+            last_test_rew = self.last_test_rew
         # print(self.scheduled)
         self.model.reset()
         if self.schedule != 'fixed':
