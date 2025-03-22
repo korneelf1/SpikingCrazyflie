@@ -317,6 +317,10 @@ class SlopeScheduler:
                     self._update_slope(self._first_order_score(normalized_score))
                 elif self.order == 2:
                     self._update_slope(self._second_order_score(normalized_score))
+                elif self.order == 3:
+                    score_based = self.slope_init + normalized_score**3*self.max_slope
+                    slope_based = self._first_order_score(normalized_score)
+                    self._update_slope(score_based*0.3 + slope_based*0.7)
                 else:
                     raise ValueError("Invalid order for adaptive scheduling, currently only 0, 1 and 2 are supported")
         

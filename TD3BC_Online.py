@@ -525,7 +525,7 @@ if __name__ == "__main__":
         parser.add_argument("--hidden-sizes", type=int, nargs="*", default=[256,128])
         parser.add_argument("--actor-lr", type=float, default=3e-4)
         parser.add_argument("--critic-lr", type=float, default=3e-4)
-        parser.add_argument("--epoch", type=int, default=200)
+        parser.add_argument("--epoch", type=int, default=150)
         parser.add_argument("--step-per-epoch", type=int, default=5000)
         parser.add_argument("--n-step", type=int, default=3)
         parser.add_argument("--batch-size", type=int, default=256)
@@ -569,7 +569,7 @@ if __name__ == "__main__":
         parser.add_argument("--jumpstart", action='store_true', help="JumpStartScheduling")
 
         parser.add_argument("--slope", type=int, default=2, help="Slope value")
-        parser.add_argument("--scheduling-order", type=int, default=1, help="Scheduling order, 0 is based on last score, 1 is based on slope of score history")
+        parser.add_argument("--scheduling-order", type=int, default=3, help="Scheduling order, 0 is based on last score, 1 is based on slope of score history")
         parser.add_argument("--bc-factor", type=float, default=0.99, help="Behavioral cloning factor")
         
         parser.add_argument("--bc-val", type=float, default=0.2, help="Behavioral cloning factor")
