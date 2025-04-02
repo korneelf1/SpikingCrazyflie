@@ -27,7 +27,7 @@ import os
 # Replace with your W&B project and entity details
 PROJECT_NAME = "l2f_bc"
 CONFIG_COLUMN = "hidden_sizes"  # The config key you're filtering on
-CONFIG_VALUE = [128,128]        # The value you're looking for in the config
+CONFIG_VALUE = [256,128]        # The value you're looking for in the config
 ARTIFACT_NAME = "policy_streaming"  # Name of the artifact to download (e.g., 'model')
 
 # Initialize wandb API
@@ -101,7 +101,7 @@ def benchmark_file(filename):
     #         dict_actor[key[6:]] = dict_policy[key]
 
     # model
-    hidden_sizes = [128, 128]
+    hidden_sizes = [256, 128]
     net_a = SpikingNet(state_shape=18, hidden_sizes=hidden_sizes[:-1], action_shape=hidden_sizes[-1], repeat=1, reset_in_call=False)
     class Wrapper(nn.Module):
         def __init__(self,model , stoch=False, warmup=50):
@@ -133,7 +133,7 @@ def benchmark_file(filename):
         #     return self.preprocess.to(device)
 
     actor = Wrapper(net_a, stoch=False)
-    actor.load_state_dict(torch.load(str(filename), map_location='cpu'))
+    actor.load_state_dict(torch.load(str('TD3BC_Online_TEMP.pth'), map_location='cpu'))
     # postprocessors
     postprocessors = [] # goes from probalities to actions
 
@@ -141,11 +141,12 @@ def benchmark_file(filename):
     data_metrics = ["activation_sparsity", 'reward_score','synaptic_operations']
 
     model_snn = SNNTorchAgent(actor)
+    print(model_snn.activation_layers())
 
     pruner = ActivityBasedPruning()
 
     benchmark = Benchmark_Closed_Loop(model_snn, env, [], postprocessors, [static_metrics, data_metrics])
-    results = benchmark.run(nr_interactions=10, max_length=500) # for risk, now min 20 interactions as risk is lowest 5 percentile
+    results = benchmark.run(nr_interactions=1, max_length=500) # for risk, now min 20 interactions as risk is lowest 5 percentile
 
     pprint(results)
 

@@ -79,7 +79,7 @@ def power_distribution_force_torque(control, arm_length=0.046, thrust_to_torque=
 # power_distribution_force_torque(control, motor_thrust_uncapped, arm_length=0.1, thrust_to_torque=0.05, pwm_to_thrust_a=0.01, pwm_to_thrust_b=0.02)
 
 class Learning2Fly(gym.Env):
-    def __init__(self, fast_learning=True,seed=None) -> None:
+    def __init__(self, fast_learning=True,seed=None, ez_reset=False) -> None:
 
         super().__init__()
         # L2F initialization
@@ -116,7 +116,7 @@ class Learning2Fly(gym.Env):
         self.t = 0
         self.fast_learning = fast_learning # if True, the environment will use soft terminal conditions initially
 
-        if not self.fast_learning:
+        if self.fast_learning:
             # Reward parameters
                     # intial parameters
             self.Cp = .1 # position weight
@@ -148,6 +148,7 @@ class Learning2Fly(gym.Env):
 
 
         # reset environmnet
+        self.ez_reset = ez_reset    
         self.reset()
 
     @property
@@ -173,8 +174,10 @@ class Learning2Fly(gym.Env):
     
     def reset(self,seed=None):
         sample_initial_parameters(self.device, self.env, self.params, self.rng)
-
-        sample_initial_state(self.device, self.env, self.params, self.state, self.rng)
+        if self.ez_reset:
+            initial_state(self.device, self.env, self.params, self.state)
+        else:
+            sample_initial_state(self.device, self.env, self.params, self.state, self.rng)
 
         observe(self.device, self.env, self.params, self.state, self.observation, self.rng)
         self.t = 0

@@ -319,7 +319,6 @@ class SpikingNet(NetBase[Any]):
             logits += last_logits
         # logits = torch.sum(logits, dim=1
 
-
         if self.softmax:
             logits = torch.softmax(logits, dim=-1)
         return logits, state
