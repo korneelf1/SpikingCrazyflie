@@ -61,6 +61,8 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--exploration-noise", type=str, default="default")
     parser.add_argument("--spiking", type=bool, default=False)
     parser.add_argument("--slope", type=float, default=2)
+    parser.add_argument("--slope_schedule", type=str, default='adaptive')
+    parser.add_argument("--scheduling_order", type=int, default=3)
     parser.add_argument("--slope-schedule", action='store_true')
     parser.add_argument("--reset-interval", type=int, default=20e3)
     parser.add_argument(
@@ -87,7 +89,29 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
 
     if args.spiking:
         print("Using spiking network")
-        net_a = SpikingNet(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes[:-1], action_shape=args.hidden_sizes[-1], repeat=args.repeat_per_forward, slope=args.slope, slope_schedule=args.slope_schedule, reset_in_call=True, device=args.device)
+        # model
+        if args_wandb['stack_number'] == 1:
+            net_a = SpikingNet(state_shape=args.state_shape, 
+                            hidden_sizes=args.hidden_sizes, 
+                            device=args.device, 
+                            action_shape=128, 
+                            repeat=args.repeat_per_forward, 
+                            slope=args.slope, 
+                            schedule=args.slope_schedule, 
+                            reset_in_call=True,
+                            order=args.scheduling_order,
+                            reward_range=(-300,300))
+        else:
+            net_a = SpikingNet(state_shape=args.state_shape, 
+                            hidden_sizes=args.hidden_sizes, 
+                            device=args.device, 
+                            action_shape=128, 
+                            repeat=1, 
+                            slope=args.slope, 
+                            schedule=args.slope_schedule, 
+                            reset_in_call=True,
+                            order=args.scheduling_order,
+                            reward_range=(-300,300))
     else: # model
         print("Using regular network")
         net_a = Net(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device)

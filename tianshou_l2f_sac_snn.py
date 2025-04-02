@@ -37,9 +37,9 @@ args_wandb = {
       'logger':'wandb',
       'algo_name': 'sac',
       'task': 'stabilize',
-      'seed': int(3),
+      'seed': int(4),
       'logdir':'',
-      'spiking':False,
+      'spiking':True,
       'recurrent':False,
       'masked':False,
       'logger': 'wandb',
@@ -49,8 +49,8 @@ args_wandb = {
       'reinit': True,
       'reward_function': 'surrogate slope scheduling, alpha=0.0 symmetric observations with action history',
       'slope': 2,
-      'slope_schedule': 'adaptive',
-      'scheduling_order': 2,
+      'slope_schedule': 'fixed',
+      'scheduling_order': 3,
         'alpha': 0.0,
         'action_history': True,
         'stack_number': 1,
@@ -59,7 +59,7 @@ args_wandb = {
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--buffer-size", type=int, default=1000000)
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=4)
     parser.add_argument("--hidden-sizes", type=int, nargs="*", default=[128])
     parser.add_argument("--actor-lr", type=float, default=1e-3)
     parser.add_argument("--critic-lr", type=float, default=1e-3)
@@ -114,7 +114,6 @@ current_path = os.path.dirname(os.path.abspath(__file__))
 log_path = os.path.join(current_path,args_wandb['logdir'], args_wandb['task'], "sac")
 from tianshou.utils import WandbLogger
 from torch.utils.tensorboard import SummaryWriter
-
 logger = WandbLogger(project="thesis_graphs_fast_learning",config=args_wandb)
 writer = SummaryWriter(log_path)
 writer.add_text("args", str(args_wandb))
@@ -168,9 +167,13 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
         conditioned_sigma=True,
     ).to(args.device)
 
-    train_envs = DummyVectorEnv([lambda: Learning2Fly() for _ in range(args.training_num)])
-    test_envs = DummyVectorEnv([lambda: Learning2Fly() for _ in range(args.test_num)])
+    train_envs = DummyVectorEnv([lambda: Learning2Fly(True) for _ in range(args.training_num)])
+    test_envs = DummyVectorEnv([lambda: Learning2Fly(True) for _ in range(args.test_num)])
     
+    wandb.run.config.update({'slope': args.slope,
+                             'slope_schedule': args.slope_schedule,
+                             'scheduling_order': args.scheduling_order})
+
     logger.wandb_run.watch(actor)
     actor_optim = torch.optim.Adam(actor.parameters(), lr=args.actor_lr)
     net_c1 = Net(

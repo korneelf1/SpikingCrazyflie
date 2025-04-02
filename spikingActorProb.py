@@ -185,9 +185,11 @@ class SlopeScheduler:
         if self.schedule == 'fixed':
             self.slope = self.slope_init
             self.order = 0
-            raise Warning("Slope scheduler is fixed, order neglected")
+            # raise Warning("Slope scheduler is fixed, order neglected")
         else:
             self.slope = self.slope_init
+            slope_range = self.max_slope - self.slope_init
+            self.slope_update_per_epoch_interval = slope_range/n_intervals
             self.epoch_interval = max_epochs/n_intervals
             print("Slope scheduler is interval, order: ", order)
             self.order = order
@@ -303,7 +305,7 @@ class SlopeScheduler:
         if epoch - self._prev_epoch > self.update_interval: # update every update_interval epochs
             if self.schedule == 'interval':
                 if epoch - self._prev_epoch > self.epoch_interval:
-                    self.slope = self.slope_init + (epoch/self.max_slope)*(self.max_slope - self.slope_init)
+                    self.slope = self.slope + self.slope_update_per_epoch_interval
                     self._update_slope(self.slope)
                     self._prev_epoch = epoch
             elif self.schedule == 'adaptive': # adaptive scheduling based on score
@@ -320,7 +322,7 @@ class SlopeScheduler:
                 elif self.order == 3:
                     score_based = self.slope_init + normalized_score**3*self.max_slope
                     slope_based = self._first_order_score(normalized_score)
-                    self._update_slope(score_based*0.3 + slope_based*0.7)
+                    self._update_slope(score_based*0.1 + slope_based*0.9)
                 else:
                     raise ValueError("Invalid order for adaptive scheduling, currently only 0, 1 and 2 are supported")
         
