@@ -59,12 +59,13 @@ def get_args() -> argparse.Namespace:
     )
     parser.add_argument("--wandb-project", type=str, default="l2f_ddpg")
     parser.add_argument("--exploration-noise", type=str, default="default")
-    parser.add_argument("--spiking", type=bool, default=False)
+    parser.add_argument("--spiking", type=bool, default=True)
     parser.add_argument("--slope", type=float, default=2)
     parser.add_argument("--slope_schedule", type=str, default='adaptive')
-    parser.add_argument("--scheduling_order", type=int, default=3)
+    parser.add_argument("--scheduling_order", type=int, default=1)
     parser.add_argument("--slope-schedule", action='store_true')
     parser.add_argument("--reset-interval", type=int, default=20e3)
+    parser.add_argument("--stack_number", type=int, default=1)
     parser.add_argument(
         "--watch",
         default=False,
@@ -90,7 +91,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
     if args.spiking:
         print("Using spiking network")
         # model
-        if args_wandb['stack_number'] == 1:
+        if args.stack_number == 1:
             net_a = SpikingNet(state_shape=args.state_shape, 
                             hidden_sizes=args.hidden_sizes, 
                             device=args.device, 
