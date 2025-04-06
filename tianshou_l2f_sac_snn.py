@@ -49,7 +49,7 @@ args_wandb = {
       'reinit': True,
       'reward_function': 'surrogate slope scheduling, alpha=0.0 symmetric observations with action history',
       'slope': 2,
-      'slope_schedule': 'fixed',
+      'slope_schedule': 'adaptive',
       'scheduling_order': 3,
         'alpha': 0.0,
         'action_history': True,
@@ -147,7 +147,7 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
                            schedule=args.slope_schedule, 
                            reset_in_call=True,
                            order=args.scheduling_order,
-                           reward_range=(-300,300))
+                           reward_range=(-30,300))
     else:
         net_a = SpikingNet(state_shape=args.state_shape, 
                            hidden_sizes=args.hidden_sizes, 
@@ -158,7 +158,7 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
                            schedule=args.slope_schedule, 
                            reset_in_call=True,
                            order=args.scheduling_order,
-                           reward_range=(-300,300))
+                           reward_range=(-30,300))
     actor = ActorProb(
         net_a,
         args.action_shape,
@@ -169,10 +169,7 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
 
     train_envs = DummyVectorEnv([lambda: Learning2Fly(True) for _ in range(args.training_num)])
     test_envs = DummyVectorEnv([lambda: Learning2Fly(True) for _ in range(args.test_num)])
-    
-    wandb.run.config.update({'slope': args.slope,
-                             'slope_schedule': args.slope_schedule,
-                             'scheduling_order': args.scheduling_order})
+
 
     logger.wandb_run.watch(actor)
     actor_optim = torch.optim.Adam(actor.parameters(), lr=args.actor_lr)

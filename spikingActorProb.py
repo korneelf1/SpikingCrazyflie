@@ -194,7 +194,8 @@ class SlopeScheduler:
             print("Slope scheduler is interval, order: ", order)
             self.order = order
             self.history = deque(maxlen=10)
-            self.first_order_history = deque(maxlen=10)
+            self.first_order_history = deque(maxlen=5)
+            self.long_term_history = deque(maxlen=25)
             self.second_order_history = deque(maxlen=10)
 
     def _update_slope(self, slope: float):
@@ -205,17 +206,21 @@ class SlopeScheduler:
             print("Updated slope to: ", slope)
 
     
-    def _first_order_score(self, normalized_score: float):
+    def _first_order_score(self, normalized_score: float, long_term_history: bool=False):
         self.history.append(normalized_score)
         # smoothed avg slope of score history
         if len(self.history) > 1:
             self.first_order_history.append(self.history[-1] - self.history[-2])
+            self.long_term_history.append(self.history[-1] - self.history[-2])
         else:
             self.first_order_history.append(0)
+            self.long_term_history.append(0)
             return self.slope
-        avg_increase = sum(self.first_order_history)/len(self.first_order_history) # always between -1 and 1
+        avg_increase_short = sum(self.first_order_history)/len(self.first_order_history) # always between -1 and 1
+        avg_increase_long = sum(self.long_term_history)/len(self.long_term_history)
         # pass through tanh to get -1 to 1 rescaled
-        avg_increase = nn.Tanh()(torch.tensor(avg_increase*2))
+        avg_increase_short = nn.Tanh()(torch.tensor(avg_increase_short*2))
+        avg_increase_long = nn.Tanh()(torch.tensor(avg_increase_long*2))
 
 
         # the as long as the slope of the score history is consisten positive, keep surrogate gradient slope, 
@@ -226,7 +231,10 @@ class SlopeScheduler:
         # # elif np.abs(avg_increase) < .1:
         # #     return self.slope - self.max_slope/10
         # else:
-        return self.slope + (avg_increase)*self.max_slope # expect good behavior to be between 0.1 and 0.9 and if 0 we should reduce slope
+        if long_term_history:
+            return self.slope + (avg_increase_long*.5 + avg_increase_short*.5)*self.max_slope
+        else:
+            return self.slope + (avg_increase_short)*self.max_slope # expect good behavior to be between 0.1 and 0.9 and if 0 we should reduce slope
         
     def _second_order_score(self, normalized_score: float):
         self._first_order_score(normalized_score)
@@ -314,15 +322,20 @@ class SlopeScheduler:
                 self._prev_epoch = epoch
                 normalized_score = ((score - self.reward_range[0])/(self.reward_range[1] - self.reward_range[0]))
                 if self.order == 0:
-                    self._update_slope(self.slope_init + normalized_score**3*self.max_slope)
+                    self._update_slope(self.slope_init + normalized_score*self.max_slope)
                 elif self.order == 1:
                     self._update_slope(self._first_order_score(normalized_score))
                 elif self.order == 2:
                     self._update_slope(self._second_order_score(normalized_score))
                 elif self.order == 3:
-                    score_based = self.slope_init + normalized_score**3*self.max_slope
+                    score_based = self.slope_init + normalized_score*self.max_slope
+                    W1 = normalized_score
+                    W2 = 1 - normalized_score
                     slope_based = self._first_order_score(normalized_score)
-                    self._update_slope(score_based*0.1 + slope_based*0.9)
+                    self._update_slope(score_based*W1 + slope_based*W2)
+                elif self.order == 4:
+                    # if 4 take long and short term history into account
+                    self._update_slope(self._first_order_score(normalized_score, long_term_history=True))
                 else:
                     raise ValueError("Invalid order for adaptive scheduling, currently only 0, 1 and 2 are supported")
         
@@ -475,7 +488,7 @@ class SpikingNet(NetBase[Any]):
                                               max_slope=self.max_slope,
                                               verbose=verbose,
                                               order=order,
-                                              update_interval=10)
+                                              update_interval=2)
 
     @property
     def epoch(self):
