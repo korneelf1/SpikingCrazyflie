@@ -164,7 +164,7 @@ class SlopeScheduler:
                  reward_range: tuple[float, float]=(0,1), 
                  max_slope: float=100, 
                  start_epoch: int=0,
-                 update_interval: int=10,
+                 update_interval: int=1,
                  verbose: bool=False):
         
         self.model = model
@@ -194,7 +194,7 @@ class SlopeScheduler:
             print("Slope scheduler is interval, order: ", order)
             self.order = order
             self.history = deque(maxlen=10)
-            self.first_order_history = deque(maxlen=5)
+            self.first_order_history = deque(maxlen=10)
             self.long_term_history = deque(maxlen=25)
             self.second_order_history = deque(maxlen=10)
 
@@ -219,8 +219,8 @@ class SlopeScheduler:
         avg_increase_short = sum(self.first_order_history)/len(self.first_order_history) # always between -1 and 1
         avg_increase_long = sum(self.long_term_history)/len(self.long_term_history)
         # pass through tanh to get -1 to 1 rescaled
-        avg_increase_short = nn.Tanh()(torch.tensor(avg_increase_short*2))
-        avg_increase_long = nn.Tanh()(torch.tensor(avg_increase_long*2))
+        avg_increase_short = (np.abs(nn.Tanh()(torch.tensor(avg_increase_short))))*np.sign(avg_increase_short)
+        avg_increase_long = (np.abs(nn.Tanh()(torch.tensor(avg_increase_long))))*np.sign(avg_increase_long)
 
 
         # the as long as the slope of the score history is consisten positive, keep surrogate gradient slope, 
@@ -310,7 +310,7 @@ class SlopeScheduler:
         if epoch < self.start_epoch:
             pass
 
-        if epoch - self._prev_epoch > self.update_interval: # update every update_interval epochs
+        if epoch - self._prev_epoch >= self.update_interval: # update every update_interval epochs
             if self.schedule == 'interval':
                 if epoch - self._prev_epoch > self.epoch_interval:
                     self.slope = self.slope + self.slope_update_per_epoch_interval
@@ -329,8 +329,10 @@ class SlopeScheduler:
                     self._update_slope(self._second_order_score(normalized_score))
                 elif self.order == 3:
                     score_based = self.slope_init + normalized_score*self.max_slope
-                    W1 = normalized_score
-                    W2 = 1 - normalized_score
+                    # W1 = normalized_score
+                    # W2 = 1 - normalized_score
+                    W1 = .2
+                    W2 = .8
                     slope_based = self._first_order_score(normalized_score)
                     self._update_slope(score_based*W1 + slope_based*W2)
                 elif self.order == 4:
@@ -341,7 +343,7 @@ class SlopeScheduler:
         
         # log to wandb
         if wandb_run is not None:
-            wandb_run.log({"surrogate fast sigmoid slope": self.slope})
+            wandb_run.log({"surrogate fast sigmoid slope": self.slope}, step=epoch)
 
 
 class SpikingNet(NetBase[Any]):
@@ -545,25 +547,6 @@ class SpikingNet(NetBase[Any]):
         self.model.reset()
         if self.schedule != 'fixed':
             self.slope_scheduler.update_slope(score=last_test_rew, epoch=current_epoch, wandb_run=wandb.run)
-            # # print(self._epoch)
-            # self._n_reset += 1
-            # print(self._epoch)
-            #         # schedule first 20 epochs nothing happens
-            # # after 20 epochs start making the surrogate steeper every 3*60e3 steps +1 to the slope until 30
-            # # n_reset is 10e3 per epoch
-            # steps_per_epoch = 10e3
-            # start_resets = steps_per_epoch*60    
-            # if self._n_reset > start_resets: # after 20 epochs start making the surrogate steeper
-                
-            #     update_interval = steps_per_epoch*10
-            #     if self._n_reset % update_interval == 0 and self._slope<30: # each epoch is 20e4 steps -> every 2 epochs # every 100 steps is 400 backwards -> 5e3 steps is 20e3 backwards every 9 epochs would be 18e4 backwards
-            #         if wandb.run is not None:
-            #             # print('logging')
-            #             wandb.run.log({"surrogate fast sigmoid slope": self._slope})
-            #         self._slope = min(10+(self._n_reset - start_resets)/update_interval, 30)
-            #         # print("updating model, current slope: ", self._slope)
-            #         # create model with new slope
-            #         self.model.update_slope(self._slope)
         self.model.reset()
 
 

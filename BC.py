@@ -119,9 +119,9 @@ class BC:
                 loss = self.loss_fn(outputs[:,self.warmup:].flatten().to(self.device), actions[:,self.warmup:].flatten().to(self.device)).to(torch.float32)
                 loss.backward()
                 losses.append(loss.item())
-                wandb.log({"loss":loss.item()})
+                # wandb.log({"loss":loss.item()})
                 self.optimizer.step()
-            wandb.log({"epoch_loss":np.mean(losses)})
+            # wandb.log({"epoch_loss":np.mean(losses)})
 
             # print(np.mean(losses))
             if np.mean(losses)<self.best_epoch_loss:
@@ -191,8 +191,10 @@ if __name__ == "__main__":
             help="watch the play of pre-trained policy only",
         )
         # Use 'store_true' or 'store_false' for boolean flags
-        parser.add_argument("--surrogate-scheduling", type=str, default='adaptive', help="Enable surrogate scheduling, options: fixed, interval, adaptive")
+        # parser.add_argument("--surrogate-scheduling", type=str, default='adaptive', help="Enable surrogate scheduling, options: fixed, interval, adaptive")
         parser.add_argument("--slope", type=int, default=2, help="Slope value")
+        parser.add_argument("--slope_schedule", type=str, default='adaptive')
+        parser.add_argument("--scheduling_order", type=int, default=1)
         
         # Use 'store_true' for interval if you want it as a flag, or use 'type=int' if it's an integer
         parser.add_argument("--interval", type=int, default=1, help="Interval flag")
@@ -249,17 +251,18 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     args = get_args()
     
-    wandb_args = {"spiking":True, 'Slope': args.slope,'Schedule': args.surrogate_scheduling, 'Algo':'BC', 'fast_learning':False}
-    wandb.init(project="l2f_bc_real_data", config=wandb_args)
+    wandb_args = {"spiking":True, 'Slope': args.slope,'Schedule': args.slope_schedule, 'Algo':'BC', 'fast_learning':False, 'scheduling_order':args.scheduling_order}
+    wandb.init(project="l2f_bc", config=wandb_args)
     # wandb.init(mode="disabled")
 
     wandb.define_metric("*", step_metric="epoch")
     print('Device in use:',device)
     print("Initial slope:",args.slope)
-    print("Surrogate scheduling:",args.surrogate_scheduling)
+    print("Slope schedule:",args.slope_schedule)
+    print("Scheduling order:",args.scheduling_order)
     print("Hidden sizes:",args.hidden_sizes)
     print("Policy Noise:",args.policy_noise)
-    wandb.config.update({'slope':args.slope, 'surrogate_scheduling':args.surrogate_scheduling,'hidden_sizes':args.hidden_sizes, 'policy_noise':args.policy_noise})
+    wandb.config.update({'slope':args.slope, 'slope_schedule':args.slope_schedule,'scheduling_order':args.scheduling_order,'hidden_sizes':args.hidden_sizes, 'policy_noise':args.policy_noise})
         # Initialize the spiking module
     spiking_module = SpikingNet(state_shape=18, 
                                 action_shape=args.hidden_sizes[-1], 
@@ -268,7 +271,8 @@ if __name__ == "__main__":
                                 reset_in_call=False,
                                 repeat=1,
                                 slope=args.slope,
-                                schedule=args.surrogate_scheduling,
+                                schedule=args.slope_schedule,
+                                order=args.scheduling_order,
                                 reward_range=(0,400),
                                 max_slope=100,
                                 verbose=True).to(device)
@@ -280,6 +284,6 @@ if __name__ == "__main__":
     # prepare the BC  
     bc = BC(env,model, optimizer, buffer, batch_size=50, device=device, noise=args.policy_noise)
     # learn the model
-    loss = bc.learn(epoch=500)
+    loss = bc.learn(epoch=300)
     print(loss)
     wandb.run.finish()

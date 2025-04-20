@@ -569,7 +569,8 @@ if __name__ == "__main__":
         parser.add_argument("--jumpstart", action='store_true', help="JumpStartScheduling")
 
         parser.add_argument("--slope", type=int, default=2, help="Slope value")
-        parser.add_argument("--scheduling-order", type=int, default=3, help="Scheduling order, 0 is based on last score, 1 is based on slope of score history")
+        parser.add_argument("--slope_schedule", type=str, default='adaptive')
+        parser.add_argument("--scheduling_order", type=int, default=3)
         parser.add_argument("--bc-factor", type=float, default=0.99, help="Behavioral cloning factor")
         
         parser.add_argument("--bc-val", type=float, default=0.2, help="Behavioral cloning factor")
@@ -630,10 +631,11 @@ if __name__ == "__main__":
                                 reset_in_call=False,
                                 repeat=1,
                                 slope=args.slope,
-                                schedule=args.surrogate_scheduling,
-                                reward_range=(-300,400),
+                                schedule=args.slope_schedule,
+                                order=args.scheduling_order,
+                                reward_range=(0,400),
                                 max_slope=100,
-                                order=args.scheduling_order).to(device)
+                                verbose=True).to(device)
     
     # Initialize the wrapper
     model = Wrapper(spiking_module, size=args.hidden_sizes[-1]).to(device)
