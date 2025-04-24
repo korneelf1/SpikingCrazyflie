@@ -50,7 +50,7 @@ args_wandb = {
       'reward_function': 'surrogate slope scheduling, alpha=0.0 symmetric observations with action history',
       'slope': 2,
       'slope_schedule': 'adaptive',
-      'scheduling_order': 3,
+      'scheduling_order': 4,
         'alpha': 0.0,
         'action_history': True,
         'stack_number': 1,

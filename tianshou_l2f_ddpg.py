@@ -33,7 +33,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--auto-alpha", default=False, action="store_true")
     parser.add_argument("--alpha-lr", type=float, default=3e-4)
     parser.add_argument("--start-timesteps", type=int, default=10000)
-    parser.add_argument("--epoch", type=int, default=200)
+    parser.add_argument("--epoch", type=int, default=50)
     parser.add_argument("--step-per-epoch", type=int, default=1.5e4)
     parser.add_argument("--step-per-collect", type=int, default=50)
     parser.add_argument("--update-per-step", type=int, default=1)
@@ -63,7 +63,6 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--slope", type=float, default=2)
     parser.add_argument("--slope_schedule", type=str, default='adaptive')
     parser.add_argument("--scheduling_order", type=int, default=1)
-    parser.add_argument("--slope-schedule", action='store_true')
     parser.add_argument("--reset-interval", type=int, default=20e3)
     parser.add_argument("--stack_number", type=int, default=1)
     parser.add_argument(
@@ -101,7 +100,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
                             schedule=args.slope_schedule, 
                             reset_in_call=True,
                             order=args.scheduling_order,
-                            reward_range=(-300,300))
+                            reward_range=(-30,300))
         else:
             net_a = SpikingNet(state_shape=args.state_shape, 
                             hidden_sizes=args.hidden_sizes, 
@@ -112,7 +111,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
                             schedule=args.slope_schedule, 
                             reset_in_call=True,
                             order=args.scheduling_order,
-                            reward_range=(-300,300))
+                            reward_range=(-30,300))
     else: # model
         print("Using regular network")
         net_a = Net(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device)

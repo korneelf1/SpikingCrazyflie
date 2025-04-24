@@ -1,7 +1,8 @@
-python BC.py --slope 50 --device 'cuda:0' --hidden-sizes  32 32 
-python BC.py --slope 50 --device 'cuda:0' --hidden-sizes  32 32 
-python BC.py --slope 2  --device 'cuda:0' --hidden-sizes  32 32 
-python BC.py --slope 2  --device 'cuda:0' --hidden-sizes  32 32 
-python BC.py --slope 2  --device 'cuda:0' --hidden-sizes  32 32 --surrogate-scheduling
-python BC.py --slope 2  --device 'cuda:0' --hidden-sizes  32 32 --surrogate-scheduling
-python BC.py --slope 2  --device 'cuda:0' --hidden-sizes  32 32 --surrogate-scheduling
+python BC.py --slope 5 --hidden-sizes  256 128 --slope_schedule 'adaptive'  --scheduling_order 3
+python BC.py --slope 5 --hidden-sizes  256 128 --slope_schedule 'adaptive' --scheduling_order 3
+python BC.py --slope 5 --hidden-sizes  256 128 --slope_schedule 'adaptive' --scheduling_order 3
+python BC.py --slope 5 --hidden-sizes  256 128 --slope_schedule 'adaptive' --scheduling_order 3
+python BC.py --slope 5 --hidden-sizes  256 128 --slope_schedule 'adaptive' --scheduling_order 3
+
+
+

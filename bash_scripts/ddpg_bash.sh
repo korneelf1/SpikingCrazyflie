@@ -1,1 +1,3 @@
-python tianshou_l2f_ddpg.py --spiking True --slope=2 --device='cuda:0' --exploration-noise 'default' --slope-schedule 
+python tianshou_l2f_ddpg.py --spiking True --exploration-noise 'None'  --slope_schedule 'adaptive' --slope 2 --scheduling_order 3
+python tianshou_l2f_ddpg.py --spiking True --exploration-noise 'None'  --slope_schedule 'adaptive' --slope 2 --scheduling_order 3
+python tianshou_l2f_ddpg.py --spiking True --exploration-noise 'None'  --slope_schedule 'adaptive' --slope 2 --scheduling_order 3

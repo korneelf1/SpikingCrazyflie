@@ -113,16 +113,17 @@ class TD3BC:
         #     self.critic1_old(obs_next_batch.obs, act_),
         #     self.critic2_old(obs_next_batch.obs, act_),
         # )
-        running_returns = 0
-        # compute returns with Bellman equation and critics as value functin
-        for t in reversed(range(len(rewards))):
-            if t<len(rewards)-nstep-1:
+        for t in reversed(range(rewards.shape[-1])):
+            if t<rewards.shape[-1]-nstep-1:
+                act_  = actions[:,t+2]
+ 
                 running_returns = rewards[:,t] + gamma*rewards[:,t+1]+\
-                gamma**2 * torch.min(self.critic1_old(observations[:,t+2],actions[:,2]),
-                              self.critic2_old(observations[:,t+2],actions[:,2])).squeeze(-1) * (1 - dones[:,t+2])
+                gamma**2 * torch.min(self.critic1_old(observations[:,t+2],act_),
+                              self.critic2_old(observations[:,t+2],act_)).squeeze(-1) * (1 - dones[:,t+2])
             else:
                 running_returns = rewards[:,t] + gamma*running_returns * (1 - dones[:,t])
             returns[:,t] = running_returns.detach()
+
 
         # for t in reversed(range(len(rewards))):
         #     running_returns = rewards[t] + gamma * running_returns * (1 - dones[t])
@@ -167,18 +168,23 @@ class TD3BC:
             rewards[:,t] = self.env._reward(observations[:,t].detach().cpu(), actions[:,t].detach().cpu())
         batch.rew = rewards
 
-    def learn_batch(self, batch):
+    def learn_batch(self, batch, length = 100):
         # create batch from first observations
         batch_size = batch.obs.shape[0]
-        if batch.obs.shape[-1] == 152:
-            correct_factor = 146-18
-        else:
-            correct_factor = 0
+        if batch.obs.shape[1]%length!=0:
+            # print("Batch length not divisible by length, cutting original batch")
+            batch.obs = batch.obs[:,:-(batch.obs.shape[1]%length)]
+        
+            
+        # create batch from first observations
+        batch_size = batch.obs.shape[0]*batch.obs.shape[1]//length
         observations = batch.obs[:,:, :146]
         actions = batch.obs[:,:, 146:150]
         rewards = batch.obs[:,:, 150]
         terminated = batch.obs[:,:, 151]
-        observations_next = np.hstack((batch.obs[:,1:, :146], np.zeros((batch_size,1, 146))),dtype=np.float32)
+        observations_next = np.hstack((batch.obs[:,1:, :146], np.zeros((batch.obs.shape[0],1, 146))),dtype=np.float32)
+
+        
 
         # compute returns
         # modified batch
@@ -197,6 +203,22 @@ class TD3BC:
         compute_returns = self.compute_returns(batch)
         batch.returns = compute_returns
 
+        # reshape them where now (batch, t, features) -> (batch*500/length, length, features)
+        observations = batch.obs.reshape(-1,length,146)
+        actions = batch.act.reshape(-1,length,4)
+        rewards = batch.rew.reshape(-1,length)
+        terminated = batch.done.reshape(-1,length)
+        observations_next = batch.obs_next.reshape(-1,length,146)
+        returns = batch.returns.reshape(-1,length)
+
+        batch = Batch(
+            obs=observations,
+            act=actions,
+            rew=rewards,
+            done=terminated,
+            obs_next=observations_next,
+            returns=returns
+        )
         # learn critics
         td1, critic_loss = self._mse_optimizer(
             batch, self.critic1, self.critic1_optimizer
@@ -207,11 +229,12 @@ class TD3BC:
         batch.weight = (td1 + td2) / 2.0  # prio-buffer
         # actor
         if self._cnt % self._freq == 0:
+            self._cnt+=1
             self.optimizer.zero_grad()
             outputs = []
             # hidden = None
             # print(self.model.device)
-            priv_obs = torch.tensor(batch.obs[:,:, :18],dtype=torch.float32).to(self.device)
+            priv_obs = batch.obs[:,:, :18].clone().detach().requires_grad_(True).to(self.device).to(torch.float32)
             for t in range(observations.shape[1]):
                 mu = self.model(priv_obs[:, t])
                 output = mu # actor
@@ -219,7 +242,7 @@ class TD3BC:
 
             act = torch.stack(outputs, dim=1).to(torch.float32)
                 
-            q_value = self.critic1(batch.obs.reshape(-1,146), batch.act.reshape(-1,4)).reshape(-1,501)
+            q_value = self.critic1(batch.obs.reshape(-1,146), batch.act.reshape(-1,4)).reshape(-1,length)
             # after warmup
             q_value = q_value[:,self.warmup:]
             act = act[:,self.warmup:]
@@ -234,13 +257,14 @@ class TD3BC:
             wandb.log({"actor_loss": actor_loss.item()})
             wandb.log({"critic_loss": critic_loss.item()})
             wandb.log({"critic2_loss": critic2_loss.item()})
-    
+
     def learn(self, epoch=50):
         loss = np.inf
+        curriculum_int = epoch//6
         for n in tqdm(range(epoch)):
             losses=[]
             
-            if n%10==0 and self.curriculum:
+            if n%curriculum_int==0 and self.curriculum:
                 # update the reward parameters
                 self.env.update_curriculum()
             self.model.to(device)
@@ -314,10 +338,10 @@ if __name__ == "__main__":
             help="watch the play of pre-trained policy only",
         )
         # Use 'store_true' or 'store_false' for boolean flags
-        parser.add_argument("--surrogate-scheduling", action='store_true', help="Enable surrogate scheduling")
-        parser.add_argument("--curriculum", action='store_true', help="Enable reward curriculum scheduling")
-
         parser.add_argument("--slope", type=int, default=2, help="Slope value")
+        parser.add_argument("--slope_schedule", type=str, default='adaptive')
+        parser.add_argument("--scheduling_order", type=int, default=3)
+        parser.add_argument("--curriculum", action='store_true', help="Enable reward curriculum scheduling")
         
         # Use 'store_true' for interval if you want it as a flag, or use 'type=int' if it's an integer
         parser.add_argument("--interval", type=int, default=1, help="Interval flag")
@@ -373,11 +397,11 @@ if __name__ == "__main__":
 
 
     # prepare the data
-    buffer_sim = ReplayBuffer.load_hdf5('l2f_controller_buffer.hdf5')
-    buffer_real = ReplayBuffer.load_hdf5('real_data_buffer_no_zeros.hdf5')
-    buffer = ReplayBuffer(size=(len(buffer_sim)+len(buffer_real)))
+    buffer_sim = ReplayBuffer.load_hdf5('buffers/l2f_buffer_1996.hdf5')
+    # buffer_real = ReplayBuffer.load_hdf5('real_data_buffer_no_zeros.hdf5')
+    buffer = ReplayBuffer(size=20000)
     buffer.update(buffer_sim)
-    buffer.update(buffer_real)
+    # buffer.update(buffer_real)
     env = Learning2Fly(fast_learning=False, manual_curriculum=True)
     # list all availabel devices
     print("Available devices:",torch.cuda.device_count())
@@ -386,9 +410,31 @@ if __name__ == "__main__":
     
     args = get_args()
     device = args.device
-    wandb_args = {"spiking":True, 'Slope': args.slope,'Schedule': args.surrogate_scheduling, 'Algo':'TD3BC', 'fast_learning':False}
+    wandb_args = {"spiking":True, 'Slope': args.slope,'Schedule': args.slope_schedule, 'Algo':'TD3BC', 'fast_learning':False, 'scheduling_order':args.scheduling_order}
     wandb.init(project="l2f_bc", config=wandb_args)
     # wandb.init(mode="disabled")
+
+    wandb.define_metric("*", step_metric="epoch")
+    print('Device in use:',device)
+    print("Initial slope:",args.slope)
+    print("Slope schedule:",args.slope_schedule)
+    print("Scheduling order:",args.scheduling_order)
+    print("Hidden sizes:",args.hidden_sizes)
+    print("Policy Noise:",args.policy_noise)
+    wandb.config.update({'slope':args.slope, 'slope_schedule':args.slope_schedule,'scheduling_order':args.scheduling_order,'hidden_sizes':args.hidden_sizes, 'policy_noise':args.policy_noise})
+        # Initialize the spiking module
+    spiking_module = SpikingNet(state_shape=18, 
+                                action_shape=args.hidden_sizes[-1], 
+                                hidden_sizes=args.hidden_sizes[:-1], 
+                                device=device,
+                                reset_in_call=False,
+                                repeat=1,
+                                slope=args.slope,
+                                schedule=args.slope_schedule,
+                                order=args.scheduling_order,
+                                reward_range=(-400,400),
+                                max_slope=100,
+                                verbose=True).to(device)
 
     wandb.define_metric("*", step_metric="epoch")
     print('Device in use:',device)
@@ -396,24 +442,24 @@ if __name__ == "__main__":
     print("Hidden sizes:",args.hidden_sizes)
     print("Curriculum:",args.curriculum)
     args.curriculum = True  
-    print("Surrogate scheduling:",args.surrogate_scheduling)
-    wandb.config.update({'slope':args.slope,'surrogate_scheduling':args.surrogate_scheduling})
+    print("Slope schedule:",args.slope_schedule)
+    print("Scheduling order:",args.scheduling_order)
+    wandb.config.update({'slope':args.slope,'slope_schedule':args.slope_schedule,'scheduling_order':args.scheduling_order})
     wandb.config.update({'hidden_sizes':args.hidden_sizes})
-    spiking_module = SpikingNet(state_shape=18, action_shape=args.hidden_sizes[-1], hidden_sizes=args.hidden_sizes[:-1], device=device,slope=args.slope,slope_schedule=args.surrogate_scheduling,reset_interval=5, reset_in_call=False, repeat=1).to(device)
     model = Wrapper(spiking_module, size= args.hidden_sizes[-1]).to(device)
     print(model)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     # prepare the BC
         # critic network
     net_c1 = Net(
-        state_shape=18,
+        state_shape=146,
         action_shape=4,
         hidden_sizes=args.hidden_sizes,
         concat=True,
         device=args.device,
     )
     net_c2 = Net(
-        state_shape=18,
+        state_shape=146,
         action_shape=4,
         hidden_sizes=args.hidden_sizes,
         concat=True,

@@ -1,4 +1,4 @@
-python tianshou_l2f_ddpg.py --slope_schedule 'adaptive' --slope 25 --exploration-noise 'default' 
-python tianshou_l2f_ddpg.py --slope_schedule 'adaptive' --slope 25 --exploration-noise 'default' 
-python tianshou_l2f_ddpg.py --slope_schedule 'adaptive' --slope 25 --exploration-noise 'None' 
-python tianshou_l2f_ddpg.py --slope_schedule 'adaptive' --slope 25 --exploration-noise 'None' 
+python tianshou_l2f_sac_snn.py --slope_schedule 'adaptive' --slope 2 --scheduling_order 3
+python tianshou_l2f_sac_snn.py --slope_schedule 'adaptive' --slope 2 --scheduling_order 3
+python tianshou_l2f_sac_snn.py --slope_schedule 'adaptive' --slope 2 --scheduling_order 3
+python tianshou_l2f_sac_snn.py --slope_schedule 'adaptive' --slope 2 --scheduling_order 3

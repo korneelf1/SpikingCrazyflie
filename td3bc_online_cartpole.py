@@ -9,6 +9,7 @@ from tianshou.data import Batch,to_torch_as
 from tqdm import tqdm
 import torch.nn.functional as F
 from torch import nn
+import gymnasium as gym
 
 class TD3BC_Online:
     def __init__(self, 
@@ -93,10 +94,10 @@ class TD3BC_Online:
                     self.model(obs[:18]) # warmup the model
                 else:
                     obs = torch.tensor(obs,device=self.device)
-                    action = self.model(obs[:18])
+                    action = self.model(torch.tensor(obs, dtype=torch.float32))
                 
                 actions.append(action.detach().cpu())
-                obs, rew, done, done, info = self.env.step(np.array(action.detach().cpu()))
+                obs, rew, done, done, info = self.env.step(np.array(action.squeeze(0).detach().cpu()))
                 t+=1
                 total_rew+= rew
             avg_rew+= total_rew
@@ -375,13 +376,14 @@ class TD3BC_Online:
                         action = self.controller(obs)
                         _ = self.model(obs[:18])
                     else:
-                        action = self.model(obs[:18])
+                        
+                        action = self.model(torch.tensor(obs, dtype=torch.float32))
                     # action = model(obs)
                     obs_lst.append(obs.cpu().numpy())
-                    obs, rewards, dones,_, info = env.step(action.cpu().detach().numpy()) 
+                    obs, rewards, dones,_, info = env.step(action.squeeze(0).cpu().detach().numpy()) 
 
                     obs_next_lst.append(obs)
-                    action_lst.append(action.cpu().detach().numpy().reshape(4,))
+                    action_lst.append(action.cpu().detach().numpy().reshape(8,))
                     rewards_lst.append(rewards)
                     dones_lst.append(dones)
 
@@ -466,11 +468,11 @@ def dist_fion(mu,sigma):
     return Independent(Normal(loc=mu, scale=torch.clamp(sigma, min=SIGMA_MIN, max=SIGMA_MAX).exp()), 1)
 
 class Wrapper(nn.Module):
-    def __init__(self,model , size=128,stoch=False):
+    def __init__(self,model , size=128,stoch=False,output_shape=4):
         super().__init__()
         self.preprocess = model
-        self.mu = nn.Linear(size,4)
-        self.sigma = nn.Linear(size,4)
+        self.mu = nn.Linear(size,output_shape)
+        self.sigma = nn.Linear(size,output_shape)
         if stoch:
             self.dist = dist_fion
     def forward(self, x):
@@ -583,12 +585,13 @@ if __name__ == "__main__":
     controller = ConvertedModel()
     controller.load_state_dict(torch.load("l2f_agent.pth", map_location="cpu"))
 
-
     # prepare the data
-    buffer = ReplayBuffer.load_hdf5('buffers/l2f_buffer_1996.hdf5')
-    # buffer = ReplayBuffer(size=20000)
+    # buffer = ReplayBuffer.load_hdf5('buffers/l2f_buffer_1996.hdf5')
+    buffer = ReplayBuffer(size=20000)
     # buffer.update(bufferog)
-    env = Learning2Fly(fast_learning=False)
+    # env = Learning2Fly(fast_learning=False)
+    env = gym.make('Ant-v4', ctrl_cost_weight=0.5,)
+
     # list all availabel devices
     print("Available devices:",torch.cuda.device_count())
     # for macos
@@ -602,7 +605,7 @@ if __name__ == "__main__":
     # device = torch.device("cpu")
     # Initialize WandB
     wandb_args = {"spiking":True, 'Slope': args.slope,'Schedule': args.surrogate_scheduling, 'Algo':'TD3BC_JS_Online', 'fast_learning':False, 'curriculum':args.curriculum}
-    wandb.init(project="l2f_bc", config=wandb_args)
+    wandb.init(project="ant_td3bc_online", config=wandb_args)
 
     wandb.define_metric("*", step_metric="epoch")
 
@@ -624,8 +627,10 @@ if __name__ == "__main__":
 
 
     # Initialize the spiking module
-    spiking_module = SpikingNet(state_shape=18, 
-                                action_shape=args.hidden_sizes[-1], 
+    input_shape = env.observation_space.shape[0]
+    output_shape = env.action_space.shape[0]
+    spiking_module = SpikingNet(state_shape=input_shape, 
+                                action_shape=128, 
                                 hidden_sizes=args.hidden_sizes[:-1], 
                                 device=device,
                                 reset_in_call=False,
@@ -633,12 +638,12 @@ if __name__ == "__main__":
                                 slope=args.slope,
                                 schedule=args.slope_schedule,
                                 order=args.scheduling_order,
-                                reward_range=(-300,600),
+                                reward_range=(0,6000),
                                 max_slope=100,
                                 verbose=True).to(device)
     
     # Initialize the wrapper
-    model = Wrapper(spiking_module, size=args.hidden_sizes[-1]).to(device)
+    model = Wrapper(spiking_module, size=args.hidden_sizes[-1], output_shape=output_shape).to(device)
     # model.load_state_dict(torch.load("TD3BC_Online_TEMP.pth", map_location="cpu"))
 
     print(model)
@@ -675,7 +680,7 @@ if __name__ == "__main__":
                 batch_size=350, device=device,
                 curriculum=args.curriculum,
                 bc_val=args.bc_val,
-                bc_factor=args.bc_factor,)
+                bc_factor=args.bc_factor,warmup=0)
     # # first gather model and append it with expert data ( real data )
     # buffer_og= bc.gather_buffer(size=2500)
     # buffer_len = len(buffer_og)
@@ -686,7 +691,8 @@ if __name__ == "__main__":
     # bc.buffer = buffer
     # buffer_og.save_hdf5("buffer_fully_sim.hdf5")
     # learn the model
-    bc.run(jumpstart=args.jumpstart)
+    jumpstart = False
+    bc.run(jumpstart=jumpstart)
     # loss = bc.learn(epoch=250)
     # print(loss)
     
