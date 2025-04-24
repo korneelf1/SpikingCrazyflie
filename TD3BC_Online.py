@@ -435,7 +435,10 @@ class TD3BC_Online:
         cur_epoch = 0
         # self.gather_buffer(jump_start_len=490, size=1000)
         n_epochs_tot = 0
-        for i in range(50,1000,25):
+        iterator = range(50,1000,25)
+        n_curriculum_epochs = len(iterator)//6
+        last_curr_update = 0
+        for i in iterator:
             if jumpstart:
                 self.gather_buffer(jump_start_len=500-i, size=50)
                 wandb.log({"jump start steps (500 - n)": i})
@@ -447,8 +450,9 @@ class TD3BC_Online:
             self.bc_coeff *= self.bc_factor
             cur_epoch+=50
             
-            if self.curriculum and i%50==0: # 
+            if self.curriculum and i-last_curr_update >n_curriculum_epochs: # 
                 self.env.update_curriculum()
+                last_curr_update = i
         while n_epochs_tot<1000:
             self.learn(epoch=cur_epoch, end_epoch=cur_epoch+50)
             n_epochs_tot+=50
@@ -633,7 +637,7 @@ if __name__ == "__main__":
                                 slope=args.slope,
                                 schedule=args.slope_schedule,
                                 order=args.scheduling_order,
-                                reward_range=(-300,600),
+                                reward_range=(-400,400),
                                 max_slope=100,
                                 verbose=True).to(device)
     
