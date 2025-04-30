@@ -432,7 +432,7 @@ if __name__ == "__main__":
                                 slope=args.slope,
                                 schedule=args.slope_schedule,
                                 order=args.scheduling_order,
-                                reward_range=(-400,400),
+                                reward_range=(-400,300),
                                 max_slope=100,
                                 verbose=True).to(device)
 
@@ -441,7 +441,7 @@ if __name__ == "__main__":
     print("Initial slope:",args.slope)
     print("Hidden sizes:",args.hidden_sizes)
     print("Curriculum:",args.curriculum)
-    args.curriculum = True  
+    # args.curriculum = True  
     print("Slope schedule:",args.slope_schedule)
     print("Scheduling order:",args.scheduling_order)
     wandb.config.update({'slope':args.slope,'slope_schedule':args.slope_schedule,'scheduling_order':args.scheduling_order})
@@ -480,7 +480,7 @@ if __name__ == "__main__":
                 buffer=buffer,
                 batch_size=125, device=device, curriculum=args.curriculum)
     # learn the model
-    loss = bc.learn(epoch=500)
+    loss = bc.learn(epoch=300)
     print(loss)
     
     wandb.run.finish()
