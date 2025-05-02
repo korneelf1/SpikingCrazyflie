@@ -219,8 +219,8 @@ class SlopeScheduler:
         avg_increase_short = sum(self.first_order_history)/len(self.first_order_history) # always between -1 and 1
         avg_increase_long = sum(self.long_term_history)/len(self.long_term_history)
         # pass through tanh to get -1 to 1 rescaled
-        avg_increase_short = (np.abs(nn.Tanh()(torch.tensor(avg_increase_short))))*np.sign(avg_increase_short)
-        avg_increase_long = (np.abs(nn.Tanh()(torch.tensor(avg_increase_long))))*np.sign(avg_increase_long)
+        avg_increase_short = (np.abs(nn.Tanh()(2*torch.tensor(avg_increase_short))))*np.sign(avg_increase_short)
+        avg_increase_long = (np.abs(nn.Tanh()(2*torch.tensor(avg_increase_long))))*np.sign(avg_increase_long)
 
 
         # the as long as the slope of the score history is consisten positive, keep surrogate gradient slope, 
@@ -331,8 +331,8 @@ class SlopeScheduler:
                     score_based = self.slope_init + normalized_score*self.max_slope
                     # W1 = normalized_score
                     # W2 = 1 - normalized_score
-                    W1 = .2
-                    W2 = .8
+                    W1 = .5
+                    W2 = .5
                     slope_based = self._first_order_score(normalized_score)
                     self._update_slope(score_based*W1 + slope_based*W2)
                 elif self.order == 4:
@@ -343,7 +343,7 @@ class SlopeScheduler:
         
         # log to wandb
         if wandb_run is not None:
-            wandb_run.log({"surrogate fast sigmoid slope": self.slope}, step=epoch)
+            wandb_run.log({"surrogate fast sigmoid slope": self.slope})
 
 
 class SpikingNet(NetBase[Any]):

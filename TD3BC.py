@@ -39,6 +39,7 @@ class TD3BC:
         self.critic2_old = deepcopy(critic2)
 
         self.best_test = 0
+        self.last_test_reward = 0
     def test(self, n_episodes=20,viz=True):
         avg_rew = 0
         avg_len = 0
@@ -92,6 +93,7 @@ class TD3BC:
             wandb.log({"img": [wandb.Image(fig, caption=f"Compared to true")]})
 
         wandb.log({'test reward': avg_rew/n_episodes,'test len': avg_len/n_episodes})
+        self.last_test_reward = avg_rew/n_episodes
         if avg_rew/n_episodes > self.best_test:
             self.best_test = avg_rew/n_episodes
             torch.save(self.model.state_dict(), 'TD3BC_TEMP.pth')
@@ -270,7 +272,7 @@ class TD3BC:
             self.model.to(device)
             # print(self.model.device)
             for _ in range(int(len(self.buffer)//self.batch_size)):
-                self.model.preprocess.reset(current_epoch = n)
+                self.model.preprocess.reset(current_epoch = n, last_test_rew = self.last_test_reward)
                 batch = self.buffer.sample(self.batch_size)[0]
                 
                 self.learn_batch(batch)
@@ -432,8 +434,8 @@ if __name__ == "__main__":
                                 slope=args.slope,
                                 schedule=args.slope_schedule,
                                 order=args.scheduling_order,
-                                reward_range=(-400,300),
-                                max_slope=100,
+                                reward_range=(0,400),
+                                max_slope=60,
                                 verbose=True).to(device)
 
     wandb.define_metric("*", step_metric="epoch")
