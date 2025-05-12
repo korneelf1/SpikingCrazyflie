@@ -50,10 +50,11 @@ args_wandb = {
       'reward_function': 'surrogate slope scheduling, alpha=0.0 symmetric observations with action history',
       'slope': 2,
       'slope_schedule': 'adaptive',
-      'scheduling_order': 4,
+      'scheduling_order': 1,
         'alpha': 0.0,
         'action_history': True,
         'stack_number': 1,
+        'fast_learning': False,
       }
 
 def get_args() -> argparse.Namespace:
@@ -69,7 +70,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--auto-alpha", default=False, action="store_true")
     parser.add_argument("--alpha-lr", type=float, default=3e-4)
     parser.add_argument("--start-timesteps", type=int, default=10000)
-    parser.add_argument("--epoch", type=int, default=100)
+    parser.add_argument("--epoch", type=int, default=50)
     parser.add_argument("--step-per-epoch", type=int, default=args_wandb['step_per_epoch'])
     parser.add_argument("--step-per-collect", type=int, default=args_wandb['step_per_collect'])
     parser.add_argument("--update-per-step", type=int, default=args_wandb['update_per_step'])
@@ -147,7 +148,8 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
                            schedule=args.slope_schedule, 
                            reset_in_call=True,
                            order=args.scheduling_order,
-                           reward_range=(-30,300))
+                           reward_range=(-30,300),
+                           max_slope=50)
     else:
         net_a = SpikingNet(state_shape=args.state_shape, 
                            hidden_sizes=args.hidden_sizes, 
@@ -158,7 +160,8 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
                            schedule=args.slope_schedule, 
                            reset_in_call=True,
                            order=args.scheduling_order,
-                           reward_range=(-30,300))
+                           reward_range=(-30,300),
+                           max_slope=50)
     actor = ActorProb(
         net_a,
         args.action_shape,
@@ -167,8 +170,8 @@ def test_sac(args: argparse.Namespace = get_args(),logger=None) -> None:
         conditioned_sigma=True,
     ).to(args.device)
 
-    train_envs = DummyVectorEnv([lambda: Learning2Fly(True) for _ in range(args.training_num)])
-    test_envs = DummyVectorEnv([lambda: Learning2Fly(True) for _ in range(args.test_num)])
+    train_envs = DummyVectorEnv([lambda: Learning2Fly(False) for _ in range(args.training_num)])
+    test_envs = DummyVectorEnv([lambda: Learning2Fly(False) for _ in range(args.test_num)])
 
 
     logger.wandb_run.watch(actor)

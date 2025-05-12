@@ -142,7 +142,7 @@ class Learning2Fly(gym.Env):
 
         self.manual_curriculum = manual_curriculum
         # curriculum parameters
-        self.Nc = 1e4 # interval of application of curriculum, roughly 10 epochs
+        self.Nc = 2.5e3 # interval of application of curriculum, roughly 10 epochs
 
         sample_initial_parameters(self.device, self.env, self.params, self.rng)
 
@@ -271,7 +271,8 @@ class Learning2Fly(gym.Env):
         self.Ca = min(self.Ca*self.CaC, self.Calim)
         # self.Crs = max(self.Crs*self.CrsC, self.Crslim)
 
-        # print("Updating curriculum parameters")
+        print("Updating curriculum parameters")
+        print("Position Term: ", self.Cp)
         if wandb.run is not None:
             wandb.run.log({'Position Term':self.Cp,'Survival Reward':self.Crs, 'Velocity Term':self.Cv, 'Action Term':self.Ca, 'Angular Velocity Term':self.Cw})
 

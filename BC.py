@@ -274,7 +274,7 @@ if __name__ == "__main__":
                                 schedule=args.slope_schedule,
                                 order=args.scheduling_order,
                                 reward_range=(0,400),
-                                max_slope=100,
+                                max_slope=50,
                                 verbose=True).to(device)
     
     model = Wrapper(spiking_module, size=args.hidden_sizes[-1]).to(device)

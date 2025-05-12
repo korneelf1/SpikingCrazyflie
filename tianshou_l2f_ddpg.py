@@ -34,7 +34,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--alpha-lr", type=float, default=3e-4)
     parser.add_argument("--start-timesteps", type=int, default=10000)
     parser.add_argument("--epoch", type=int, default=50)
-    parser.add_argument("--step-per-epoch", type=int, default=1.5e4)
+    parser.add_argument("--step-per-epoch", type=int, default=5e3)
     parser.add_argument("--step-per-collect", type=int, default=50)
     parser.add_argument("--update-per-step", type=int, default=1)
     parser.add_argument("--n-step", type=int, default=1)
@@ -43,7 +43,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--test-num", type=int, default=10)
     parser.add_argument("--logdir", type=str, default="log")
     parser.add_argument("--render", type=float, default=0.0)
-    parser.add_argument("--repeat-per-forward", type=int, default=4)
+    parser.add_argument("--repeat-per-forward", type=int, default=1)
     parser.add_argument(
         "--device",
         type=str,
@@ -76,8 +76,8 @@ def get_args() -> argparse.Namespace:
 
 def test_sac(args: argparse.Namespace = get_args()) -> None:
     env = Learning2Fly()
-    train_envs = DummyVectorEnv([lambda: Learning2Fly() for _ in range(args.training_num)])
-    test_envs = DummyVectorEnv([lambda: Learning2Fly() for _ in range(args.test_num)])
+    train_envs = DummyVectorEnv([lambda: Learning2Fly(manual_curriculum=False) for _ in range(args.training_num)])
+    test_envs = DummyVectorEnv([lambda: Learning2Fly(manual_curriculum=False) for _ in range(args.test_num)])
 
     args.state_shape = env.observation_space.shape or env.observation_space.n
     args.action_shape = env.action_space.shape or env.action_space.n
@@ -100,7 +100,8 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
                             schedule=args.slope_schedule, 
                             reset_in_call=True,
                             order=args.scheduling_order,
-                            reward_range=(-30,300))
+                            reward_range=(-30,300),
+                            max_slope=40)
         else:
             net_a = SpikingNet(state_shape=args.state_shape, 
                             hidden_sizes=args.hidden_sizes, 
@@ -111,7 +112,8 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
                             schedule=args.slope_schedule, 
                             reset_in_call=True,
                             order=args.scheduling_order,
-                            reward_range=(-30,300))
+                            reward_range=(-30,300),
+                            max_slope=40)
     else: # model
         print("Using regular network")
         net_a = Net(state_shape=args.state_shape, hidden_sizes=args.hidden_sizes, device=args.device)
@@ -139,7 +141,7 @@ def test_sac(args: argparse.Namespace = get_args()) -> None:
       'wandb_project': 'FastPyDroneGym',
       'resume_id':1,
       'logger':'wandb',
-      'algo_name': 'sac',
+      'algo_name': 'td3',
       'task': 'stabilize',
       'seed': int(3),
       'logdir':'',
