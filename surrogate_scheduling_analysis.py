@@ -12,10 +12,27 @@ import matplotlib.pyplot as plt
 from matplotlib import cm
 from matplotlib.colors import ListedColormap, LinearSegmentedColormap
 from spikingActorProb import SMLP
-import seaborn as sb
+import seaborn as sns
+import matplotlib as mpl
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import Normalize
 
-# Set a seaborn color palette globally
-sb.set_palette('muted', desat=.75) 
+# Set NeurIPS-style aesthetics
+plt.style.use('seaborn-v0_8-whitegrid')
+mpl.rcParams['font.family'] = 'Arial'
+mpl.rcParams['font.size'] = 15
+mpl.rcParams['axes.labelsize'] = 17
+mpl.rcParams['axes.titlesize'] = 17
+mpl.rcParams['xtick.labelsize'] = 13
+mpl.rcParams['ytick.labelsize'] = 13
+mpl.rcParams['legend.fontsize'] = 13
+mpl.rcParams['figure.titlesize'] = 20
+
+# Create a sequential colormap for slopes
+slopes = [1, 10, 25, 50, 100]
+colors = plt.cm.viridis(np.linspace(0, 1, len(slopes)))
+norm = Normalize(vmin=1, vmax=100)
+sm = ScalarMappable(cmap=plt.cm.viridis, norm=norm)
 
 INPUT_SIZE = 63
 OUTPUT_SIZE = 64
@@ -52,6 +69,24 @@ model_25 = Wrapper(SMLP(INPUT_SIZE,HIDDEN_SIZE, HIDDEN_LAYER_LST, slope=25))
 model_50 = Wrapper(SMLP(INPUT_SIZE,HIDDEN_SIZE, HIDDEN_LAYER_LST, slope=50))
 model_100 = Wrapper(SMLP(INPUT_SIZE,HIDDEN_SIZE, HIDDEN_LAYER_LST, slope=100))
 print(model_1)
+
+def add_colorbar_legend(ax, fig):
+    # Add colorbar
+    cbar = fig.colorbar(sm, ax=ax, pad=0.1)
+    cbar.set_label('Slope Value', fontsize=13)
+    cbar.ax.tick_params(labelsize=11)
+    
+    # Add individual slope markers
+    for slope in slopes:
+        ax.plot([], [], 'o', color=sm.to_rgba(slope), label=f'Slope {slope}')
+    
+    # Add Dirac Delta marker
+    ax.plot([], [], 'k-', linewidth=4, label='Dirac Delta')
+    
+    # Create legend
+    ax.legend(title="Slope Values", loc='best', frameon=True, framealpha=0.95, 
+             edgecolor='lightgray', fancybox=False)
+
 def plot_surrogate_gradients():
     # plot the surrogate gradients
     def surr_grad(x, slope):
@@ -59,18 +94,39 @@ def plot_surrogate_gradients():
         1 / (ctx.slope * torch.abs(input_) + 1.0) ** 2"""
         return 1/(slope*torch.abs(x)+1)**2
     slopes = [1,10,25,50,100]
-    fig, axs = plt.subplots(nrows=1, ncols=1)
+    fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
     x = np.linspace(-1.5,.5,1000)
-    # plot a RED Dirac Delta as well:
     
-    for slope in slopes:
+    for i, slope in enumerate(slopes):
         y = surr_grad(torch.tensor(x), slope)
-        plt.plot(x,y, label=f'Slope {slope}', linestyle='--')
-    plt.plot([0,0],[0,1], label='Dirac Delta', linewidth=4, color='red')
-    plt.legend(fontsize=17)
-    plt.title('Surrogate Gradient', fontsize=20)
-    plt.xlabel('Membrane potential, U', fontsize=19)
-    plt.ylabel('Gradient', fontsize=19)
+        ax.plot(x, y, color=colors[i])
+    
+    ax.plot([0,0], [0,1], linewidth=4, color='k')
+    
+    # Styling
+    ax.set_title('Surrogate Gradient', pad=15)
+    ax.set_xlabel('Membrane potential, U')
+    ax.set_ylabel('Gradient')
+    
+    # Add colorbar and legend
+    add_colorbar_legend(ax, fig)
+    
+    # Spine and grid styling
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_linewidth(0.5)
+    ax.spines['bottom'].set_linewidth(0.5)
+    ax.grid(True, linewidth=0.5, alpha=0.7, axis='y')
+    
+    # Y padding
+    y_min, y_max = ax.get_ylim()
+    y_range = y_max - y_min
+    ax.set_ylim(y_min - 0.05 * y_range, y_max + 0.05 * y_range)
+    
+    plt.tight_layout()
+    # Save in multiple formats
+    for ext in ['pdf', 'png', 'svg']:
+        plt.savefig(f'neurips_surrogate_gradients.{ext}', format=ext, bbox_inches='tight', dpi=300)
     plt.show()
 
 plot_surrogate_gradients()
@@ -285,165 +341,170 @@ def calculate_cosine_similarity(display='violin'):
     display the results in a violin plot or in one line plot with error bars'''
     
     data_models = []
-    # for i, grads in enumerate(all_grads):
-    #     data = []
-    #     for j, grad in enumerate(grads):
-    #         # grad = grad.detach().numpy().reshape(N_SAMPLES,-1)
-    #         # grad_high_slope = all_grads[-1][j].detach().numpy().reshape(N_SAMPLES,-1)
-    #         # # calculate the cosine similarity between the gradients of the high slope model and the other models
-    #         # cos_sim = np.sum(grad * grad_high_slope, axis=1)/(np.linalg.norm(grad,axis=1)*np.linalg.norm(grad_high_slope, axis=1))
-    #         # data.append(cos_sim)
-    #         data_models = []
     for i, grads in enumerate(all_grads):
         data = []
         for j, grad in enumerate(grads):
-            # Reshape the gradients
-            grad = grad.detach().numpy().reshape(N_SAMPLES, -1)
-            grad_high_slope = all_grads[-1][j].detach().numpy().reshape(N_SAMPLES, -1)
+            grad = grad.detach().numpy().reshape(N_SAMPLES,-1)
+            grad_high_slope = all_grads[-1][j].detach().numpy().reshape(N_SAMPLES,-1)
             
-            # Compute the norms of the gradients
             norm_grad = np.linalg.norm(grad, axis=1)
             norm_grad_high_slope = np.linalg.norm(grad_high_slope, axis=1)
             
-            # Avoid division by zero by setting cosine similarity to 0 for zero-norm cases
-            zero_norm_mask = (norm_grad == 0) | (norm_grad_high_slope == 0)  # Check where norms are zero
+            zero_norm_mask = (norm_grad == 0) | (norm_grad_high_slope == 0)
             
-            # Compute cosine similarity only for non-zero norm entries
             cos_sim = np.sum(grad * grad_high_slope, axis=1) / (norm_grad * norm_grad_high_slope)
-            
-            # Replace NaN or Inf values with 0 or another default value
             cos_sim[zero_norm_mask] = 0
             
             data.append(cos_sim)
         data_models.append(data)
 
     if display == 'violin':
-        fig, axs = plt.subplots(nrows=1, ncols=N_LAYERS)
-        for j in range(5):
-            # gather data for layer j for each model
+        fig, axs = plt.subplots(nrows=1, ncols=N_LAYERS, figsize=(15, 6), dpi=300)
+        for j in range(N_LAYERS):
             data_accross_batch = [model[j] for model in data_models]
-            # # add to boxplot
-            # color code eacht model
-            # axs[j].violinplot(data_accross_batch,
-            #         showmeans=False,
-            #         showmedians=True)
-            axs[j].violinplot(data_accross_batch,
-                    showmeans=False,
-                    showmedians=True)
-            # axs[j].set_xticklabels(['2','7','10','20','noise on Parameters','true'])
-            axs[j].set_title(f'Layer {j} Cosine Similarity', fontsize=20)
-            # share y axis
+            axs[j].violinplot(data_accross_batch, showmeans=False, showmedians=True)
+            axs[j].set_title(f'Layer {j} Cosine Similarity')
             axs[j].set_ylim(-1,1)
-            # plt.title("Cosine Similarity For Each Layer (1-N_LAYERS)")
-
-
-                # draw this in subplot on ax[i], column j
-
-            # axs[i].imshow(grad, cmap='viridis')
-            # axs[i].set_title(f'Layer {j+1} Gradients for model with slope {2+5*i}')
-        # calculate the cosine similarity between the gradients of the high slope model and the other models
+            
+            # Styling
+            axs[j].spines['top'].set_visible(False)
+            axs[j].spines['right'].set_visible(False)
+            axs[j].spines['left'].set_linewidth(0.5)
+            axs[j].spines['bottom'].set_linewidth(0.5)
+            axs[j].grid(True, linewidth=0.5, alpha=0.7, axis='y')
+        
+        # Add colorbar to the last subplot
+        add_colorbar_legend(axs[-1], fig)
+        
+        plt.tight_layout()
+        # Save in multiple formats
+        for ext in ['pdf', 'png', 'svg']:
+            plt.savefig(f'neurips_cosine_similarity_violin.{ext}', format=ext, bbox_inches='tight', dpi=300)
+        plt.show()
+            
     elif display == 'line':
-        fig, axs = plt.subplots(nrows=1, ncols=1)
+        fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
         model_slopes = [1,10,25,50,100]
         for i, model_data in enumerate(data_models):
             means = [np.mean(layer_data) for layer_data in model_data]
             stds = [np.std(layer_data) for layer_data in model_data]
-            assert len(means) == N_LAYERS+1
-            print(means)
-            plt.plot(range(N_LAYERS+1), means, label=f'Slope {model_slopes[i]}')
-            # plt.fill_between(x, y-error, y+error)
-            # plt.fill_between(range(N_LAYERS+1), np.array(means)-np.array(stds), np.array(means)+np.array(stds), alpha=0.5)
-            # axs.errorbar(range(N_LAYERS), means, yerr=stds, label=f'Model {2 + 5 * i}')
-        axs.legend(fontsize=17)
-        axs.xaxis.set_ticks(range(N_LAYERS+1))
-        axs.set_ylabel('Cosine Similarity', fontsize=19)
-        axs.set_xlabel('Layer', fontsize=19)
-        fig.suptitle('Average Cosine Similarity', fontsize=20)
+            
+            ax.plot(range(N_LAYERS+1), means, color=colors[i])
+        
+        # Styling
+        ax.set_title('Average Cosine Similarity', pad=15)
+        ax.set_xlabel('Layer')
+        ax.set_ylabel('Cosine Similarity')
+        
+        # Add colorbar and legend
+        add_colorbar_legend(ax, fig)
+        
+        # Spine and grid styling
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_linewidth(0.5)
+        ax.spines['bottom'].set_linewidth(0.5)
+        ax.grid(True, linewidth=0.5, alpha=0.7, axis='y')
+        
+        # X-axis ticks
+        ax.xaxis.set_ticks(range(N_LAYERS+1))
+        
+        plt.tight_layout()
+        # Save in multiple formats
+        for ext in ['pdf', 'png', 'svg']:
+            plt.savefig(f'neurips_cosine_similarity_line.{ext}', format=ext, bbox_inches='tight', dpi=300)
+        plt.show()
 
 def count_non_zero_gradient():
-    fig, axs = plt.subplots(nrows=1, ncols=1)
+    fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
     data_models = []
     for i, grads in enumerate(all_grads):
         data = []
         for j, grad in enumerate(grads):
             grad = grad.detach().numpy().reshape(N_SAMPLES,-1)
-            # calculate the cosine similarity between the gradients of the high slope model and the other models
-            # all gradients with magnituede < 1e-8 are considered zero
             grad[grad < 1e-18] = 0
             non_zero = np.count_nonzero(grad, axis=1)
-            # normalize by number of weights in layer
             non_zero = non_zero/(grad.shape[1])
             data.append(non_zero)
         data_models.append(data)
     
-    # calculate ranges for each layer
-    # create plot with on x-axis layer, on y-axis non zero gradients
-    # one line for each model, color coded
-    # represent ranges as a std around the line
     model_slopes = [1,10,25,50,100]
     for i, model_data in enumerate(data_models):
         means = [np.mean(layer_data) for layer_data in model_data]
         stds = [np.std(layer_data) for layer_data in model_data]
 
-        plt.plot(range(N_LAYERS+1), means, label=f'Slope {model_slopes[i]}')
-        # plt.fill_between(x, y-error, y+error)
-        plt.fill_between(range(N_LAYERS+1), np.array(means)-np.array(stds), np.array(means)+np.array(stds), alpha=0.5)
-        # axs.errorbar(range(N_LAYERS+1), means, yerr=stds, label=f'Model {2 + 5 * i}')
-    axs.legend(fontsize=17)
-    axs.xaxis.set_ticks(range(N_LAYERS+1))
-    axs.set_ylabel('Fraction of Non Zero Gradients', fontsize=19)
-    axs.set_xlabel('Layer', fontsize=19)
-    fig.suptitle('Fraction of Non Zero Gradients for Each Layer for Shallow to Steep Surrogate Gradient Slopes', fontsize=20)
-    # axs.set_xticklabels(['Input Layer'] + [f'Layer {i}' for i in range(N_LAYERS)])
-
-
-
-    # for j in range(N_LAYERS):
-    #     # gather data for layer j for each model
-    #     data_accross_batch = [model[j] for model in data_models]
-    #     # # add to boxplot
-    #     axs[j].violinplot(data_accross_batch,
-    #             showmeans=False,
-    #             showmedians=True)
-    #     axs[j].set_title(f'Layer {j} Non Zero Gradients')
-    #     axs[j].set_ylim(0,1)
-    # # make y axis same for every model
+        ax.plot(range(N_LAYERS+1), means, color=colors[i])
     
+    # Styling
+    ax.set_title('Fraction of Non Zero Gradients for Each Layer', pad=15)
+    ax.set_xlabel('Layer')
+    ax.set_ylabel('Fraction of Non Zero Gradients')
     
-        # plt.title("Cosine Similarity For Each Layer (1-N_LAYERS)")
+    # Add colorbar and legend
+    add_colorbar_legend(ax, fig)
+    
+    # Spine and grid styling
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_linewidth(0.5)
+    ax.spines['bottom'].set_linewidth(0.5)
+    ax.grid(True, linewidth=0.5, alpha=0.7, axis='y')
+    
+    # X-axis ticks
+    ax.xaxis.set_ticks(range(N_LAYERS+1))
+    
+    plt.tight_layout()
+    # Save in multiple formats
+    for ext in ['pdf', 'png', 'svg']:
+        plt.savefig(f'neurips_non_zero_gradients.{ext}', format=ext, bbox_inches='tight', dpi=300)
+    plt.show()
 
 def calculate_avg_grad_mag():
-    fig, axs = plt.subplots(nrows=1, ncols=1)
+    fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
     data_models = []
     for i, grads in enumerate(all_grads):
         data = []
         for j, grad in enumerate(grads):
             grad = grad.detach().numpy().reshape(N_SAMPLES,-1)
-            # calculate the cosine similarity between the gradients of the high slope model and the other models
-            # all gradients with magnituede < 1e-8 are considered zero
             grad[grad < 1e-18] = 0
             avg_mag = np.mean(np.abs(grad), axis=1)
             data.append(avg_mag)
         data_models.append(data)
-        model_slopes = [1,10,25,50,100]
+    
+    model_slopes = [1,10,25,50,100]
     for i, model_data in enumerate(data_models):
         means = [np.mean(layer_data) for layer_data in model_data]
         stds = [np.std(layer_data) for layer_data in model_data]
 
-        plt.plot(range(N_LAYERS+1), means, label=f'Model {model_slopes[i]}')
-        # plt.fill_between(x, y-error, y+error)
-        # plt.fill_between(range(N_LAYERS+1), np.array(means)-np.array(stds), np.array(means)+np.array(stds), alpha=0.5)
-        # axs.errorbar(range(N_LAYERS+1), means, yerr=stds, label=f'Model {2 + 5 * i}')
-    axs.legend(fontsize=17)
-    # set y to logscale
-    axs.set_yscale('log')
-    axs.xaxis.set_ticks(range(N_LAYERS+1))
-    axs.set_ylabel('Average Gradient Magnitude', fontsize=19)
-    axs.set_xlabel('Layer', fontsize=19)
-    fig.suptitle('Average Gradient Magnitude', fontsize=20)
+        ax.plot(range(N_LAYERS+1), means, color=colors[i])
     
+    # Styling
+    ax.set_title('Average Gradient Magnitude', pad=15)
+    ax.set_xlabel('Layer')
+    ax.set_ylabel('Average Gradient Magnitude')
     
-    # calculate_sign_reversal_accross_layer()
+    # Add colorbar and legend
+    add_colorbar_legend(ax, fig)
+    
+    # Spine and grid styling
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_linewidth(0.5)
+    ax.spines['bottom'].set_linewidth(0.5)
+    ax.grid(True, linewidth=0.5, alpha=0.7, axis='y')
+    
+    # Set y to logscale
+    ax.set_yscale('log')
+    
+    # X-axis ticks
+    ax.xaxis.set_ticks(range(N_LAYERS+1))
+    
+    plt.tight_layout()
+    # Save in multiple formats
+    for ext in ['pdf', 'png', 'svg']:
+        plt.savefig(f'neurips_avg_grad_magnitude.{ext}', format=ext, bbox_inches='tight', dpi=300)
+    plt.show()
+
 calculate_cosine_similarity(display='line')
 # count_non_zero_gradient()
 calculate_avg_grad_mag()
