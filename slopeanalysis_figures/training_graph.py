@@ -19,6 +19,8 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import seaborn as sns
 import numpy as np
+from matplotlib.colors import Normalize
+from matplotlib.cm import ScalarMappable
 
 # Set the style to match NeurIPS aesthetics
 plt.style.use('seaborn-v0_8-whitegrid')
@@ -178,6 +180,8 @@ def create_bar_plot(results: dict):
     import numpy as np
     import seaborn as sns
     import matplotlib as mpl
+    from matplotlib.colors import Normalize
+    from matplotlib.cm import ScalarMappable
 
     # === Set NeurIPS-style aesthetics ===
     plt.style.use('seaborn-v0_8-whitegrid')
@@ -192,30 +196,46 @@ def create_bar_plot(results: dict):
 
     # === Settings ===
     method = ['BC', 'TD3']
-    slopes = ['Slope: 2', 'Slope: 50', 'Slope: 100', 'Interval', 'Adaptive']
-    colors = sns.color_palette("colorblind", len(slopes))
+    numerical_slopes = ['Slope: 2', 'Slope: 50', 'Slope: 100']
+    schedule_methods = ['Interval', 'Adaptive']
+    all_labels = numerical_slopes + schedule_methods
+    
+    # Create sequential colors for numerical slopes
+    numerical_colors = plt.cm.viridis(np.linspace(0, 1, len(numerical_slopes)))
+    
+    # Use distinct colors for schedule methods
+    schedule_colors = ['#FF9999', '#66B2FF']  # Light red and light blue
+    
+    # Combine all colors
+    all_colors = list(numerical_colors) + schedule_colors
 
     # === Extract data ===
-    time_to_100_data = {m: {s: results[m][s][0] if s in results[m] else 0 for s in slopes} for m in method}
-    best_perf_data = {m: {s: results[m][s][1] if s in results[m] else 0 for s in slopes} for m in method}
+    time_to_100_data = {m: {s: results[m][s][0] if s in results[m] else 0 for s in all_labels} for m in method}
+    best_perf_data = {m: {s: results[m][s][1] if s in results[m] else 0 for s in all_labels} for m in method}
 
     def plot_grouped_bar(data, title, ylabel, filename):
         bar_width = 0.15
         index = np.arange(len(method))
         fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
 
-        for i, slope in enumerate(slopes):
+        # Plot numerical slopes with sequential colors
+        for i, (slope, color) in enumerate(zip(numerical_slopes, numerical_colors)):
             values = [data[m][slope] for m in method]
-            ax.bar(index + i * bar_width, values, width=bar_width, label=slope, color=colors[i])
+            ax.bar(index + i * bar_width, values, width=bar_width, label=slope, color=color)
+
+        # Plot schedule methods with distinct colors
+        for i, (schedule, color) in enumerate(zip(schedule_methods, schedule_colors)):
+            values = [data[m][schedule] for m in method]
+            ax.bar(index + (len(numerical_slopes) + i) * bar_width, values, width=bar_width, label=schedule, color=color)
 
         # X-axis and Labels
-        ax.set_xticks(index + (len(slopes)/2 - 0.5) * bar_width)
+        ax.set_xticks(index + (len(all_labels)/2 - 0.5) * bar_width)
         ax.set_xticklabels(method)
         ax.set_ylabel(ylabel, weight='bold')
         ax.set_title(title, pad=15)
 
         # Legend styling
-        ax.legend(title="Slope", loc='best', frameon=True, framealpha=0.95, edgecolor='lightgray', fancybox=False)
+        ax.legend(title="Methods", loc='best', frameon=True, framealpha=0.95, edgecolor='lightgray', fancybox=False)
 
         # Spine and grid styling
         ax.spines['top'].set_visible(False)
