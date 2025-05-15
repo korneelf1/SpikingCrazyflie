@@ -20,13 +20,14 @@ from matplotlib.colors import Normalize
 # Set NeurIPS-style aesthetics
 plt.style.use('seaborn-v0_8-whitegrid')
 mpl.rcParams['font.family'] = 'Arial'
-mpl.rcParams['font.size'] = 15
-mpl.rcParams['axes.labelsize'] = 17
-mpl.rcParams['axes.titlesize'] = 17
-mpl.rcParams['xtick.labelsize'] = 13
-mpl.rcParams['ytick.labelsize'] = 13
-mpl.rcParams['legend.fontsize'] = 13
-mpl.rcParams['figure.titlesize'] = 20
+mpl.rcParams['font.size'] = 24
+mpl.rcParams['axes.labelsize'] = 28
+mpl.rcParams['axes.titlesize'] = 28
+mpl.rcParams['xtick.labelsize'] = 22
+mpl.rcParams['ytick.labelsize'] = 22
+mpl.rcParams['legend.fontsize'] = 22
+mpl.rcParams['figure.titlesize'] = 32
+# mpl.rcParams['axes.colorbar.labelsize'] = 24
 
 # Create a sequential colormap for slopes
 slopes = [1, 10, 25, 50, 100]
@@ -70,18 +71,20 @@ model_50 = Wrapper(SMLP(INPUT_SIZE,HIDDEN_SIZE, HIDDEN_LAYER_LST, slope=50))
 model_100 = Wrapper(SMLP(INPUT_SIZE,HIDDEN_SIZE, HIDDEN_LAYER_LST, slope=100))
 print(model_1)
 
-def add_colorbar_legend(ax, fig):
+def add_colorbar_legend(ax, fig, dirac_delta=True, add_colorbar=True):
     # Add colorbar
-    cbar = fig.colorbar(sm, ax=ax, pad=0.1)
-    cbar.set_label('Slope Value', fontsize=13)
-    cbar.ax.tick_params(labelsize=11)
+    if add_colorbar:
+        cbar = fig.colorbar(sm, ax=ax, pad=0.1)
+        cbar.set_label('Slope Value', fontsize=24)
+        cbar.ax.tick_params(labelsize=22)
     
     # Add individual slope markers
     for slope in slopes:
         ax.plot([], [], 'o', color=sm.to_rgba(slope), label=f'Slope {slope}')
     
     # Add Dirac Delta marker
-    ax.plot([], [], 'k-', linewidth=4, label='Dirac Delta')
+    if dirac_delta:
+        ax.plot([], [], 'k-', linewidth=4, label='Dirac Delta')
     
     # Create legend
     ax.legend(title="Slope Values", loc='best', frameon=True, framealpha=0.95, 
@@ -109,7 +112,7 @@ def plot_surrogate_gradients():
     ax.set_ylabel('Gradient')
     
     # Add colorbar and legend
-    add_colorbar_legend(ax, fig)
+    add_colorbar_legend(ax, fig, add_colorbar=False)
     
     # Spine and grid styling
     ax.spines['top'].set_visible(False)
@@ -127,7 +130,7 @@ def plot_surrogate_gradients():
     # Save in multiple formats
     for ext in ['pdf', 'png', 'svg']:
         plt.savefig(f'neurips_surrogate_gradients.{ext}', format=ext, bbox_inches='tight', dpi=300)
-    plt.show()
+    # plt.show()
 
 plot_surrogate_gradients()
 
@@ -397,7 +400,7 @@ def calculate_cosine_similarity(display='violin'):
         ax.set_ylabel('Cosine Similarity')
         
         # Add colorbar and legend
-        add_colorbar_legend(ax, fig)
+        add_colorbar_legend(ax, fig, dirac_delta=False)
         
         # Spine and grid styling
         ax.spines['top'].set_visible(False)
@@ -413,7 +416,7 @@ def calculate_cosine_similarity(display='violin'):
         # Save in multiple formats
         for ext in ['pdf', 'png', 'svg']:
             plt.savefig(f'neurips_cosine_similarity_line.{ext}', format=ext, bbox_inches='tight', dpi=300)
-        plt.show()
+        # plt.show()
 
 def count_non_zero_gradient():
     fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
@@ -484,7 +487,7 @@ def calculate_avg_grad_mag():
     ax.set_ylabel('Average Gradient Magnitude')
     
     # Add colorbar and legend
-    add_colorbar_legend(ax, fig)
+    add_colorbar_legend(ax, fig, dirac_delta=False, add_colorbar=False)
     
     # Spine and grid styling
     ax.spines['top'].set_visible(False)
@@ -503,7 +506,7 @@ def calculate_avg_grad_mag():
     # Save in multiple formats
     for ext in ['pdf', 'png', 'svg']:
         plt.savefig(f'neurips_avg_grad_magnitude.{ext}', format=ext, bbox_inches='tight', dpi=300)
-    plt.show()
+    # plt.show()
 
 calculate_cosine_similarity(display='line')
 # count_non_zero_gradient()
