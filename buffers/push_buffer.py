@@ -28,7 +28,7 @@ def upload_buffer_to_hf(buffer_file_path, repo_id, path_in_repo=None, token=None
     print(f"Uploaded {buffer_file_path} to {repo_id}/{path_in_repo}")
 
 
-def download_buffer_from_hf(repo_id = "korneelf1/neurips", filename = "l2f_buffer_1996.hdf5", local_dir=".", token=None, revision="main"):
+def download_buffer_from_hf(repo_id = "korneelf1/neurips", filename = "l2f_buffer_1996.hdf5", local_dir=".", token=None, revision="main", repo_type="dataset"):
     """
     Downloads a buffer file from a Hugging Face Hub repository.
 
@@ -38,15 +38,16 @@ def download_buffer_from_hf(repo_id = "korneelf1/neurips", filename = "l2f_buffe
         local_dir (str): Directory to save the downloaded file.
         token (str, optional): Hugging Face token. If None, uses default.
         revision (str): Branch or commit to download from.
+        repo_type (str): Type of repository ("model" or "dataset").
     Returns:
         str: Local path to the downloaded file.
     """
     try:
-        print(f"Attempting to download {filename} from {repo_id}...")
+        print(f"Attempting to download {filename} from {repo_id} ({repo_type})...")
         local_path = hf_hub_download(
             repo_id=repo_id,
             filename=filename,
-            repo_type="model",
+            repo_type=repo_type,
             cache_dir=local_dir,
             token=token,
             revision=revision
@@ -56,31 +57,32 @@ def download_buffer_from_hf(repo_id = "korneelf1/neurips", filename = "l2f_buffe
     except Exception as e:
         print(f"Error downloading {filename} from {repo_id}: {e}")
         print(f"Please check:")
-        print(f"  1. Repository exists: https://huggingface.co/{repo_id}")
+        print(f"  1. Repository exists: https://huggingface.co/{repo_type}s/{repo_id}")
         print(f"  2. File exists in the repository")
         print(f"  3. You have access to the repository (if private)")
         print(f"  4. Your HuggingFace token is valid (if required)")
         raise
 
-def check_repo_exists(repo_id, token=None):
+def check_repo_exists(repo_id, token=None, repo_type="dataset"):
     """
     Checks if a Hugging Face Hub repository exists.
 
     Args:
         repo_id (str): Hugging Face repo id, e.g. "username/repo_name".
         token (str, optional): Hugging Face token. If None, uses default.
+        repo_type (str): Type of repository ("model" or "dataset").
     Returns:
         bool: True if repository exists, False otherwise.
     """
     try:
-        info = repo_info(repo_id=repo_id, repo_type="model", token=token)
-        print(f"Repository {repo_id} exists and is accessible.")
+        info = repo_info(repo_id=repo_id, repo_type=repo_type, token=token)
+        print(f"Repository {repo_id} ({repo_type}) exists and is accessible.")
         return True
     except Exception as e:
-        print(f"Repository {repo_id} does not exist or is not accessible: {e}")
+        print(f"Repository {repo_id} ({repo_type}) does not exist or is not accessible: {e}")
         return False
 
-def list_repo_contents(repo_id, token=None, revision="main"):
+def list_repo_contents(repo_id, token=None, revision="main", repo_type="dataset"):
     """
     Lists all files in a Hugging Face Hub repository.
 
@@ -88,12 +90,13 @@ def list_repo_contents(repo_id, token=None, revision="main"):
         repo_id (str): Hugging Face repo id, e.g. "username/repo_name".
         token (str, optional): Hugging Face token. If None, uses default.
         revision (str): Branch or commit to list from.
+        repo_type (str): Type of repository ("model" or "dataset").
     """
     try:
-        print(f"Listing files in {repo_id}...")
+        print(f"Listing files in {repo_id} ({repo_type})...")
         files = list_repo_files(
             repo_id=repo_id,
-            repo_type="model",
+            repo_type=repo_type,
             token=token,
             revision=revision
         )
@@ -122,6 +125,7 @@ if __name__ == "__main__":
     parser.add_argument("--local_dir", type=str, default=".", help="Local directory to save the buffer")
     parser.add_argument("--token", type=str, default=None, help="HuggingFace token")
     parser.add_argument("--revision", type=str, default="main", help="Repo revision (branch/commit)")
+    parser.add_argument("--repo_type", type=str, default="dataset", choices=["model", "dataset"], help="Type of repository (model or dataset)")
 
     args = parser.parse_args()
 
@@ -132,7 +136,8 @@ if __name__ == "__main__":
             filename=args.filename,
             local_dir=args.local_dir,
             token=args.token,
-            revision=args.revision
+            revision=args.revision,
+            repo_type=args.repo_type
         )
     elif args.upload:
         print("Uploading buffer to HuggingFace Hub...")
@@ -150,13 +155,15 @@ if __name__ == "__main__":
         list_repo_contents(
             repo_id=args.repo_id,
             token=args.token,
-            revision=args.revision
+            revision=args.revision,
+            repo_type=args.repo_type
         )
     elif args.check:
         print("Checking if HuggingFace Hub repository exists...")
         check_repo_exists(
             repo_id=args.repo_id,
-            token=args.token
+            token=args.token,
+            repo_type=args.repo_type
         )
     else:
         print("Please specify one of: --download, --upload, --list, or --check")
