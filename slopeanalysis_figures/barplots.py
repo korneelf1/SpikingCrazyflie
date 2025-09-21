@@ -121,7 +121,7 @@ def interpolate_dataframe_with_groups(
     else:
         return pd.DataFrame()
 
-def extract_data(file_path: str) -> pd.DataFrame:
+def extract_data(file_path: str, with_min_max: bool = False) -> pd.DataFrame:
         # load BC_wand_exports/BC-16-16.CSV
     df_bc = pd.read_csv(file_path)
 
@@ -129,11 +129,12 @@ def extract_data(file_path: str) -> pd.DataFrame:
     # keep only columns that contain test reward and the epoch
     df_bc = df_bc.filter(regex='test reward|epoch')
 
-    # remove cols with MIN or MAX in the name
-    df_bc = df_bc.filter(regex='^(?!.*(MIN|MAX)$).*')
-
     # cut at 300 epochs
     df_bc = df_bc[df_bc["epoch"] <= 300]
+
+    if not with_min_max:
+        # remove cols with MIN or MAX in the name
+        df_bc = df_bc.filter(regex='^(?!.*(MIN|MAX)$).*')
 
     # interpolate such that epochs step size is 1
     df = interpolate_dataframe(df_bc, "epoch", target_step_size=1)
