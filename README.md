@@ -27,6 +27,7 @@ conda activate spiking_cf
 3. Install the requirements:
 ```bash
 pip install -r requirements.txt
+python buffers/push_buffer.py --download
 ```
 
 4. Install the tianshou package from github:
