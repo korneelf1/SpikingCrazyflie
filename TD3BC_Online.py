@@ -521,7 +521,10 @@ if __name__ == "__main__":
     import torch.nn as nn
 
     # set working directory as file directory
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    os.chdir(script_dir)
+    print(f"Working directory set to: {os.getcwd()}")
+    print(f"Script directory: {script_dir}")
 
     def get_args() -> argparse.Namespace:
         parser = argparse.ArgumentParser()
@@ -592,7 +595,21 @@ if __name__ == "__main__":
 
 
     # prepare the data
-    buffer = ReplayBuffer.load_hdf5('buffers/l2f_buffer_1996.hdf5')
+    buffer_path = 'buffers/l2f_buffer_1996.hdf5'
+    print(f"Looking for buffer file at: {buffer_path}")
+    print(f"Absolute path: {os.path.abspath(buffer_path)}")
+    print(f"File exists: {os.path.exists(buffer_path)}")
+    
+    if not os.path.exists(buffer_path):
+        print("Buffer file not found! Available files in buffers/ directory:")
+        if os.path.exists('buffers/'):
+            print(os.listdir('buffers/'))
+        else:
+            print("buffers/ directory does not exist!")
+        raise FileNotFoundError(f"Buffer file not found: {buffer_path}")
+    
+    buffer = ReplayBuffer.load_hdf5(buffer_path)
+    print(f"Successfully loaded buffer with {len(buffer)} samples")
     # buffer = ReplayBuffer(size=20000)
     # buffer.update(bufferog)
     env = Learning2Fly(fast_learning=False)
