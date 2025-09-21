@@ -520,6 +520,9 @@ if __name__ == "__main__":
     import wandb
     import torch.nn as nn
 
+    # set working directory as file directory
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
     def get_args() -> argparse.Namespace:
         parser = argparse.ArgumentParser()
         parser.add_argument("--task", type=str, default="l2f")
