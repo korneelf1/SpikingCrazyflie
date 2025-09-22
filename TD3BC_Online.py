@@ -509,6 +509,7 @@ if __name__ == "__main__":
     from tianshou.utils.net.common import Net
     from tianshou.utils.net.continuous import ActorProb, Critic
     from tianshou.env import DummyVectorEnv
+
     from l2f_gym import Learning2Fly
 
     # spiking neural network specific:
@@ -586,6 +587,7 @@ if __name__ == "__main__":
         parser.add_argument("--bc-val", type=float, default=0.2, help="Behavioral cloning factor")
         # Use 'store_true' for interval if you want it as a flag, or use 'type=int' if it's an integer
         parser.add_argument("--interval", type=int, default=1, help="Interval flag")
+        parser.add_argument("--ablation", type=str, default=None)
         return parser.parse_args()
 
 
@@ -644,6 +646,7 @@ if __name__ == "__main__":
     wandb.config.update({"curriculum":args.curriculum})
     wandb.config.update({"bc_factor":args.bc_factor})
     wandb.config.update({"jumpstart":args.jumpstart})
+    wandb.config.update({"ablation":args.ablation})
     # args.surrogate_scheduling = True
 
 
