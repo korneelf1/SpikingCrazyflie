@@ -27,7 +27,7 @@ conda activate spiking_cf
 3. Install the requirements:
 ```bash
 pip install -r requirements.txt
-python buffers/push_buffer.py --download
+hf download korneelf1/neurips --include "l2f_buffer_1996.hdf5" --local-dir buffers --repo-type dataset
 ```
 
 4. Install the tianshou package from github:

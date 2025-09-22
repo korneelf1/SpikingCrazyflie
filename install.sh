@@ -99,7 +99,8 @@ install_requirements() {
 # Function to install tianshou from GitHub
 install_tianshou() {
     print_status "Installing tianshou from GitHub..."
-    pip install git+https://github.com/korneelf1/tianshou-1.2.0-dev.git --upgrade
+    pip install git+cls
+     --upgrade
     print_success "Tianshou installed successfully"
 }
 
@@ -117,8 +118,15 @@ install_l2f() {
         git clone https://github.com/korneelf1/l2f_thesis.git
     fi
     
-    print_status "Installing l2f package..."
+    print_status "Installing l2f package dependencies..."
+    # Install rl_tools first as it's a dependency for l2f
+    pip install rl_tools
+    
+    print_status "Checking out to_server branch for l2f..."
     cd "$l2f_dir"
+    git checkout to_server
+    
+    print_status "Installing l2f package..."
     pip install -e .
     cd ..
     print_success "l2f package installed successfully"
@@ -126,8 +134,8 @@ install_l2f() {
 
 # Function to download buffer data
 download_buffer() {
-    print_status "Downloading buffer data..."
-    python buffers/push_buffer.py --download
+    print_status "Downloading buffer data from Hugging Face..."
+    hf download korneelf1/neurips --include "l2f_buffer_1996.hdf5" --local-dir buffers --repo-type dataset
     print_success "Buffer data downloaded successfully"
 }
 
