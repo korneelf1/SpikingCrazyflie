@@ -32,7 +32,7 @@ python buffers/push_buffer.py --download
 
 4. Install the tianshou package from github:
 ```bash
-pip install git+https://github.com/thu-ml/tianshou.git@master --upgrade
+pip install git+https://github.com/korneelf1/tianshou.git@v1.2.0-dev --upgrade
 ```
 
 5. install my l2f gym package from github:
