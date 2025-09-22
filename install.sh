@@ -99,7 +99,7 @@ install_requirements() {
 # Function to install tianshou from GitHub
 install_tianshou() {
     print_status "Installing tianshou from GitHub..."
-    pip install git+https://github.com/korneelf1/tianshou.git@v1.2.0-dev --upgrade
+    pip install git+https://github.com/korneelf1/tianshou-1.2.0-dev.git --upgrade
     print_success "Tianshou installed successfully"
 }
 

@@ -32,7 +32,7 @@ python buffers/push_buffer.py --download
 
 4. Install the tianshou package from github:
 ```bash
-pip install git+https://github.com/korneelf1/tianshou.git@v1.2.0-dev --upgrade
+pip install git+https://github.com/korneelf1/tianshou-1.2.0-dev.git --upgrade
 ```
 
 5. install my l2f gym package from github:
@@ -59,7 +59,7 @@ NOTE: as of Nov 2024, the learning to fly package supports CUDA operations, whic
 To use the training methods in this repository, you'll need to install tianshou directly from GitHub to ensure you have access to all required features:
 
 ```bash
-pip install git+https://github.com/thu-ml/tianshou.git@master --upgrade
+pip install git+https://github.com/korneelf1/tianshou-1.2.0-dev.git --upgrade
 ```
 
 This installation method is required to access the high-level package features used by our logger.
