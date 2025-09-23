@@ -9,6 +9,7 @@ from tianshou.data import Batch,to_torch_as
 from tqdm import tqdm
 import torch.nn.functional as F
 from torch import nn
+from utils.directory_manager import save_checkpoint
 
 class TD3BC_Online:
     def __init__(self, 
@@ -34,7 +35,7 @@ class TD3BC_Online:
         self.critic2 = critic2.to(device)
         self.critic1_optimizer = critic1_optimizer
         self.critic2_optimizer = critic2_optimizer
-        self.optimizer = optimizer.to(device)
+        self.optimizer = optimizer
         self.buffer = buffer
         self.curriculum = curriculum  
         self.timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
@@ -66,6 +67,7 @@ class TD3BC_Online:
         self.bc_coeff = bc_val
         self.bc_factor = bc_factor
 
+
         self.last_test_rew = 0 # used for adaptive scheduling of slopes
         self.best_test = 0
         self.envsteps = 0
@@ -74,6 +76,7 @@ class TD3BC_Online:
         # TD3 adds noise to the target_q actions and evaluates using CURRENT policy! Seems to improve training
         self.policy_noise = 0.2 
         self.noise_clip = 0.5
+
 
     def test(self, 
              n_episodes:int = 30,
@@ -95,8 +98,8 @@ class TD3BC_Online:
                     obs = torch.tensor(obs,device=self.device)
                     action = self.model(obs[:18])
                 
-                actions.append(action.detach())  # Keep on GPU
-                obs, rew, done, done, info = self.env.step(actions[-1].cpu().numpy())
+                actions.append(action.detach().cpu())
+                obs, rew, done, done, info = self.env.step(np.array(action.detach().cpu()))
                 t+=1
                 total_rew+= rew
             avg_rew+= total_rew
@@ -104,13 +107,11 @@ class TD3BC_Online:
             # print("Flying for: ",t)
             # plot the actions
         if viz:
-            # Convert to numpy only once for visualization
-            actions_tensor = torch.stack(actions, dim=0)
-            actions_np = actions_tensor.cpu().numpy()
+            actions = np.vstack(actions)
             fig, axs = plt.subplots(4,1,figsize=(10,10))
             for i in range(4):
                 plt.subplot(4,1,i+1)
-                plt.plot(actions_np[:,i])
+                plt.plot(actions[:,i])
                 plt.ylabel(f"Action {i}")
             # plt.show()
             wandb.log({"img": [wandb.Image(fig, caption=f"BC Learning")]})
@@ -129,12 +130,9 @@ class TD3BC_Online:
             outputs = torch.stack(outputs, dim=1).to(torch.float32)
             t = np.linspace(0,502,501)
             fig, ax = plt.subplots(4, 1)
-            # Convert to numpy only once for plotting
-            actions_cpu = actions.cpu().detach().numpy()
-            outputs_cpu = outputs.cpu().detach().numpy()
             for i in range(4):
-                ax[i].plot(t,actions_cpu[0,:,i], c='g')
-                ax[i].plot(t,outputs_cpu[0,:,i], c='r')
+                ax[i].plot(t,actions.cpu().detach().numpy()[0,:,i], c='g')
+                ax[i].plot(t,outputs.cpu().detach().numpy()[0,:,i], c='r')
             
             # plt.show()
             wandb.log({"img": [wandb.Image(fig, caption=f"Compared to true")]})
@@ -144,8 +142,8 @@ class TD3BC_Online:
         if self.last_test_rew > self.best_test:
             self.best_test = self.last_test_rew
             filename = f"TD3BC_Online_TEMP_{self.timestamp}.pth"
-            torch.save(self.model.state_dict(), filename)
-            wandb.run.log_artifact(filename, name='policy_streaming', type='model')
+            checkpoint_path = save_checkpoint(self.model.state_dict(), filename)
+            wandb.run.log_artifact(checkpoint_path, name='policy_streaming', type='model')
 
     def _target_q(self, 
                   buffer: ReplayBuffer, 
@@ -248,10 +246,7 @@ class TD3BC_Online:
         actions = batch.obs[:,:, 146:150]
         rewards = batch.obs[:,:, 150]
         terminated = batch.obs[:,:, 151]
-        # Use torch.cat instead of np.hstack for GPU operations
-        # Convert to tensor first to get device and dtype - use default dtype to match model
-        obs_tensor = torch.tensor(batch.obs, device=self.device)
-        observations_next = torch.cat([obs_tensor[:,1:,:146], torch.zeros(obs_tensor.shape[0],1,146, device=obs_tensor.device, dtype=obs_tensor.dtype)], dim=1)
+        observations_next = np.hstack((batch.obs[:,1:, :146], np.zeros((batch.obs.shape[0],1, 146))),dtype=np.float32)
 
         
 
@@ -301,7 +296,7 @@ class TD3BC_Online:
             outputs = []
             # hidden = None
             # print(self.model.device)
-            priv_obs = batch.obs[:,:, :18].clone().detach().requires_grad_(True).to(self.device)
+            priv_obs = batch.obs[:,:, :18].clone().detach().requires_grad_(True).to(self.device).to(torch.float32)
             for t in range(observations.shape[1]):
                 mu = self.model(priv_obs[:, t])
                 output = mu # actor
@@ -314,10 +309,8 @@ class TD3BC_Online:
             q_value = q_value[:,self.warmup:]
             act = act[:,self.warmup:]
             lmbda = self._alpha / q_value.abs().mean().detach()
-            # Ensure batch.act is on the same device as act to avoid redundant to_torch_as
-            target_actions = batch.act[:,self.warmup:].to(act.device)
             actor_loss = -lmbda * q_value.mean() + self.bc_coeff*F.mse_loss(
-                act, target_actions
+                act, to_torch_as(batch.act[:,self.warmup:], act)
             )
             actor_loss.backward()
             self._last = actor_loss.item()
@@ -387,11 +380,11 @@ class TD3BC_Online:
                     else:
                         action = self.model(obs[:18])
                     # action = model(obs)
-                    obs_lst.append(obs)  # Keep as tensor on GPU
-                    obs, rewards, dones,_, info = env.step(action.detach().cpu().numpy()) 
+                    obs_lst.append(obs.cpu().numpy())
+                    obs, rewards, dones,_, info = env.step(action.cpu().detach().numpy()) 
 
                     obs_next_lst.append(obs)
-                    action_lst.append(action.detach())  # Keep as tensor on GPU
+                    action_lst.append(action.cpu().detach().numpy().reshape(4,))
                     rewards_lst.append(rewards)
                     dones_lst.append(dones)
 
@@ -403,21 +396,15 @@ class TD3BC_Online:
                         # if our rollout crashses before 2x warmup, we discard it, it is not worth to warmup the model for only a few timesteps
                         # if our rollout crashes after rolloutlen - 2x warmup, we also wouldnt have at least the warmup length to trian on
                         if (self.warmup*2<i):
-                            # Convert tensors to numpy only once for buffer storage
-                            obs_np = torch.stack(obs_lst).cpu().numpy()
-                            action_np = torch.stack(action_lst).cpu().numpy()
-                            rewards_np = np.array(rewards_lst).reshape(-1,1)
-                            dones_np = np.array(dones_lst).reshape(-1,1)
-                            
-                            obs_stack = np.hstack((obs_np, action_np, rewards_np, dones_np))
+                            obs_stack = np.hstack((np.array(obs_lst), np.array(action_lst), np.array(rewards_lst).reshape(-1,1), np.array(dones_lst).reshape(-1,1)))
                             # add the rollout to the buffer
                             # chop up in 100 step sequences with step size of 50 (0-100,50-150,100-200,150-250,...)
                             for j in range(0,obs_stack.shape[0]-100,50):
-                                buffer.add(Batch({'obs':obs_stack[j:j+100],'act':action_np[j+99],'rew':rewards_np[j+99],'terminated': dones_np[j+99],'truncated': dones_np[j+99]}))
+                                buffer.add(Batch({'obs':obs_stack[j:j+100],'act':np.array(action_lst[j+99]),'rew':np.array(rewards_lst[j+99]),'terminated': np.array(dones_lst[j+99]).reshape(-1,1),'truncated': np.array(dones_lst)[j+99].reshape(-1,1)}))
 
                             # now add the last bit obs_stack.shape[0]%100 to the buffer
                             if obs_stack.shape[0]%100>0:
-                                buffer.add(Batch({'obs':obs_stack[-100:],'act':action_np[-1],'rew':rewards_np[-1],'terminated': dones_np[-1],'truncated': dones_np[-1]}))
+                                buffer.add(Batch({'obs':obs_stack[-100:],'act':np.array(action_lst[-1]),'rew':np.array(rewards_lst[-1]),'terminated': np.array(dones_lst[-1]).reshape(-1,1),'truncated': np.array(dones_lst)[-1].reshape(-1,1)}))
                             # buffer.add(Batch({'obs':obs_stack,'act':np.array(action_lst[-1]),'rew':np.array(rewards_lst[-1]),'terminated': np.array(dones_lst[-1]).reshape(-1,1),'truncated': np.array(dones_lst)[-1].reshape(-1,1)}))
                             # buffer.add(Batch({'obs':obs_stack}))
                         else:
@@ -470,7 +457,7 @@ class TD3BC_Online:
             n_epochs_tot+=50
             cur_epoch+=50
             filename = f"TD3BC_Online_TEMP_{self.timestamp}_epoch_{cur_epoch}.pth"
-            torch.save(self.model.state_dict(), filename)
+            save_checkpoint(self.model.state_dict(), filename)
             wandb.run.log_artifact(filename, name='policy_streaming', type='model')
             if self.curriculum:
                 self.env.update_curriculum()
@@ -624,6 +611,22 @@ if __name__ == "__main__":
     
     buffer = ReplayBuffer.load_hdf5(buffer_path)
     print(f"Successfully loaded buffer with {len(buffer)} samples")
+    
+    # Debug: Check the structure of the original buffer
+    if len(buffer) > 0:
+        sample = buffer[0]
+        print(f"Original buffer sample shapes:")
+        print(f"  obs shape: {sample.obs.shape}")
+        print(f"  act shape: {sample.act.shape}")
+        print(f"  rew shape: {sample.rew.shape}")
+        print(f"  done shape: {sample.done.shape}")
+        print(f"  terminated shape: {sample.terminated.shape}")
+        print(f"  truncated shape: {sample.truncated.shape}")
+        
+        # Check if there are any extra dimensions
+        print(f"  rew dtype: {type(sample.rew)}")
+        print(f"  terminated dtype: {type(sample.terminated)}")
+        print(f"  truncated dtype: {type(sample.truncated)}")
     # buffer = ReplayBuffer(size=20000)
     # buffer.update(bufferog)
     env = Learning2Fly(fast_learning=False)
@@ -631,8 +634,8 @@ if __name__ == "__main__":
     print("Available devices:",torch.cuda.device_count())
     # for macos
     
-    # print(torch.device("cuda:1"))
-    # device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+    # print(torch.device("cuda"))
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     args = get_args()
     device = args.device
@@ -732,4 +735,4 @@ if __name__ == "__main__":
     wandb.run.finish()
     timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
 
-    torch.save(model.state_dict(),f'TD3BC_ONLINE_STABLE_{timestamp}.pth')
+    save_checkpoint(model.state_dict(), f'TD3BC_ONLINE_STABLE_{timestamp}.pth')

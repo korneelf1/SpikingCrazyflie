@@ -383,7 +383,7 @@ if __name__ == "__main__":
         parser.add_argument(
             "--device",
             type=str,
-            default="cuda:1" if torch.cuda.is_available() else "cpu",
+            default="cuda" if torch.cuda.is_available() else "cpu",
         )
         parser.add_argument("--resume-path", type=str, default=None)
         parser.add_argument("--resume-id", type=str, default=None)
@@ -472,8 +472,8 @@ if __name__ == "__main__":
     env = Learning2Fly(fast_learning=False, manual_curriculum=True)
     # list all availabel devices
     print("Available devices:",torch.cuda.device_count())
-    # print(torch.device("cuda:1"))
-    # device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+    # print(torch.device("cuda"))
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     
     device = args.device
