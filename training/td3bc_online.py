@@ -243,7 +243,10 @@ class TD3BC_Online:
         actions = batch.obs[:,:, 146:150]
         rewards = batch.obs[:,:, 150]
         terminated = batch.obs[:,:, 151]
-        observations_next = np.hstack((batch.obs[:,1:, :146], np.zeros((batch.obs.shape[0],1, 146))),dtype=np.float32)
+        # Use torch.cat instead of np.hstack for GPU operations
+        # Convert to tensor first to get device and dtype - use default dtype to match model
+        obs_tensor = torch.tensor(batch.obs, device=self.device)
+        observations_next = torch.cat([obs_tensor[:,1:,:146], torch.zeros(obs_tensor.shape[0],1,146, device=obs_tensor.device, dtype=obs_tensor.dtype)], dim=1)
 
         
 
@@ -306,8 +309,10 @@ class TD3BC_Online:
             q_value = q_value[:,self.warmup:]
             act = act[:,self.warmup:]
             lmbda = self._alpha / q_value.abs().mean().detach()
+            # Ensure batch.act is on the same device as act to avoid redundant to_torch_as
+            target_actions = batch.act[:,self.warmup:].to(act.device)
             actor_loss = -lmbda * q_value.mean() + self.bc_coeff*F.mse_loss(
-                act, to_torch_as(batch.act[:,self.warmup:], act)
+                act, target_actions
             )
             actor_loss.backward()
             self._last = actor_loss.item()
@@ -377,11 +382,11 @@ class TD3BC_Online:
                     else:
                         action = self.model(obs[:18])
                     # action = model(obs)
-                    obs_lst.append(obs.cpu().numpy())
-                    obs, rewards, dones,_, info = env.step(action.cpu().detach().numpy()) 
+                    obs_lst.append(obs)  # Keep as tensor on GPU
+                    obs, rewards, dones,_, info = env.step(action.detach().cpu().numpy()) 
 
                     obs_next_lst.append(obs)
-                    action_lst.append(action.cpu().detach().numpy().reshape(4,))
+                    action_lst.append(action.detach())  # Keep as tensor on GPU
                     rewards_lst.append(rewards)
                     dones_lst.append(dones)
 
@@ -393,15 +398,21 @@ class TD3BC_Online:
                         # if our rollout crashses before 2x warmup, we discard it, it is not worth to warmup the model for only a few timesteps
                         # if our rollout crashes after rolloutlen - 2x warmup, we also wouldnt have at least the warmup length to trian on
                         if (self.warmup*2<i):
-                            obs_stack = np.hstack((np.array(obs_lst), np.array(action_lst), np.array(rewards_lst).reshape(-1,1), np.array(dones_lst).reshape(-1,1)))
+                            # Convert tensors to numpy only once for buffer storage
+                            obs_np = torch.stack(obs_lst).cpu().numpy()
+                            action_np = torch.stack(action_lst).cpu().numpy()
+                            rewards_np = np.array(rewards_lst).reshape(-1,1)
+                            dones_np = np.array(dones_lst).reshape(-1,1)
+                            
+                            obs_stack = np.hstack((obs_np, action_np, rewards_np, dones_np))
                             # add the rollout to the buffer
                             # chop up in 100 step sequences with step size of 50 (0-100,50-150,100-200,150-250,...)
                             for j in range(0,obs_stack.shape[0]-100,50):
-                                buffer.add(Batch({'obs':obs_stack[j:j+100],'act':np.array(action_lst[j+99]),'rew':np.array(rewards_lst[j+99]),'terminated': np.array(dones_lst[j+99]).reshape(-1,1),'truncated': np.array(dones_lst)[j+99].reshape(-1,1)}))
+                                buffer.add(Batch({'obs':obs_stack[j:j+100],'act':action_np[j+99],'rew':rewards_np[j+99],'terminated': dones_np[j+99],'truncated': dones_np[j+99]}))
 
                             # now add the last bit obs_stack.shape[0]%100 to the buffer
                             if obs_stack.shape[0]%100>0:
-                                buffer.add(Batch({'obs':obs_stack[-100:],'act':np.array(action_lst[-1]),'rew':np.array(rewards_lst[-1]),'terminated': np.array(dones_lst[-1]).reshape(-1,1),'truncated': np.array(dones_lst)[-1].reshape(-1,1)}))
+                                buffer.add(Batch({'obs':obs_stack[-100:],'act':action_np[-1],'rew':rewards_np[-1],'terminated': dones_np[-1],'truncated': dones_np[-1]}))
                             # buffer.add(Batch({'obs':obs_stack,'act':np.array(action_lst[-1]),'rew':np.array(rewards_lst[-1]),'terminated': np.array(dones_lst[-1]).reshape(-1,1),'truncated': np.array(dones_lst)[-1].reshape(-1,1)}))
                             # buffer.add(Batch({'obs':obs_stack}))
                         else:

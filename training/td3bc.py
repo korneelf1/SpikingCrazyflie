@@ -207,7 +207,10 @@ class TD3BC:
         actions = batch.obs[:,:, 146:150]
         rewards = batch.obs[:,:, 150]
         terminated = batch.obs[:,:, 151]
-        observations_next = np.hstack((batch.obs[:,1:, :146], np.zeros((batch.obs.shape[0],1, 146))),dtype=np.float32)
+        # Use torch.cat instead of np.hstack for GPU operations
+        # Convert to tensor first to get device and dtype - use default dtype to match model
+        obs_tensor = torch.tensor(batch.obs, device=self.device)
+        observations_next = torch.cat([obs_tensor[:,1:,:146], torch.zeros(obs_tensor.shape[0],1,146, device=obs_tensor.device, dtype=obs_tensor.dtype)], dim=1)
 
         
 
@@ -272,8 +275,10 @@ class TD3BC:
             q_value = q_value[:,self.warmup:]
             act = act[:,self.warmup:]
             lmbda = self._alpha / q_value.abs().mean().detach()
+            # Ensure batch.act is on the same device as act to avoid redundant to_torch_as
+            target_actions = batch.act[:,self.warmup:].to(act.device)
             actor_loss = -lmbda * q_value.mean() + F.mse_loss(
-                act, to_torch_as(batch.act[:,self.warmup:], act)
+                act, target_actions
             )
             actor_loss.backward()
             self._last = actor_loss.item()

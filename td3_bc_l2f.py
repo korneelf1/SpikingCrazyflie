@@ -130,7 +130,12 @@ def gather_buffer(model, name='l2f_controller_buffer_short', size = 10, step_len
                     partial_rollout = True
         
     
-        obs_stack = np.hstack((np.array(obs_lst), np.array(action_lst), np.array(rewards_lst).reshape(-1,1), np.array(dones_lst).reshape(-1,1)))
+        # Convert tensors to numpy only once for buffer storage
+        obs_np = torch.stack(obs_lst).cpu().numpy()
+        action_np = torch.stack(action_lst).cpu().numpy()
+        rewards_np = np.array(rewards_lst).reshape(-1,1)
+        dones_np = np.array(dones_lst).reshape(-1,1)
+        obs_stack = np.hstack((obs_np, action_np, rewards_np, dones_np))
         # add the rollout to the buffer
         buffer.add(Batch({'obs':obs_stack,'act':np.array(action_lst[-1]),'rew':np.array(rewards_lst[-1]),'terminated': np.array(dones_lst[-1]).reshape(-1,1),'truncated': np.array(dones_lst)[-1].reshape(-1,1)}))
         # buffer.add(Batch({'obs':obs_stack}))
@@ -249,7 +254,10 @@ class TD3BCPolicy(TD3Policy):
         actions = batch.obs[:,:, 146:150]
         rewards = batch.obs[:,:, 150]
         terminated = batch.obs[:,:, 151]
-        observations_next = np.hstack((batch.obs[:,1:, :146], np.zeros((batch_size,1, 146))))
+        # Use torch.cat instead of np.hstack for GPU operations
+        # Convert to tensor first to get device and dtype - use default dtype to match model
+        obs_tensor = torch.tensor(batch.obs, device=self.device)
+        observations_next = torch.cat([obs_tensor[:,1:,:146], torch.zeros(obs_tensor.shape[0],1,146, device=obs_tensor.device, dtype=obs_tensor.dtype)], dim=1)
 
         # compute returns
         # modified batch

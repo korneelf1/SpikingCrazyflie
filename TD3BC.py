@@ -53,11 +53,10 @@ class TD3BC:
             t = 0
             actions = []
             while not done:
-                obs = torch.tensor(obs[:18], device=self.device, dtype=torch.float32)
+                obs = torch.tensor(obs[:18], device=self.device)
                 action = self.model(obs)
-                action_np = action.detach().cpu().numpy()
-                actions.append(action_np)
-                obs, rew, done, done, info = self.env.step(action_np)
+                actions.append(action.detach())  # Keep as tensor
+                obs, rew, done, done, info = self.env.step(action.detach().cpu().numpy())
                 t+=1
                 total_rew+= rew
             avg_rew+= total_rew
@@ -65,17 +64,19 @@ class TD3BC:
             # print("Flying for: ",t)
             # plot the actions
         if viz:
-            actions = np.vstack(actions)
+            # Convert to numpy only once for visualization
+            actions_tensor = torch.stack(actions, dim=0)
+            actions_np = actions_tensor.cpu().numpy()
             fig, axs = plt.subplots(4,1,figsize=(10,10))
             for i in range(4):
                 plt.subplot(4,1,i+1)
-                plt.plot(actions[:,i])
+                plt.plot(actions_np[:,i])
                 plt.ylabel(f"Action {i}")
             # plt.show()
             wandb.log({"img": [wandb.Image(fig, caption=f"BC Learning")]})
             batch = self.buffer.sample(1)[0]
-            observations = torch.tensor(batch.obs[:,:, :18], dtype=torch.float32, device=self.device)
-            actions = torch.as_tensor(batch.obs[:,:,146:150], dtype=torch.float32, device=self.device)
+            observations = torch.tensor(batch.obs[:,:, :18], device=self.device)
+            actions = torch.as_tensor(batch.obs[:,:,146:150], device=self.device)
 
             
             outputs = []
@@ -89,9 +90,12 @@ class TD3BC:
             outputs = torch.stack(outputs, dim=1)
             t = np.linspace(0,502,501)
             fig, ax = plt.subplots(4, 1)
+            # Convert to numpy only once for plotting
+            actions_cpu = actions.cpu().detach().numpy()
+            outputs_cpu = outputs.cpu().detach().numpy()
             for i in range(4):
-                ax[i].plot(t,actions.cpu().detach().numpy()[0,:,i], c='g')
-                ax[i].plot(t,outputs.cpu().detach().numpy()[0,:,i], c='r')
+                ax[i].plot(t,actions_cpu[0,:,i], c='g')
+                ax[i].plot(t,outputs_cpu[0,:,i], c='r')
             
             # plt.show()
             wandb.log({"img": [wandb.Image(fig, caption=f"Compared to true")]})
@@ -191,7 +195,7 @@ class TD3BC:
             rewards[:, t] = self.env._reward(obs_cpu[:, t], act_cpu[:, t])
 
         # Move back to torch with proper device and dtype
-        batch.rew = torch.as_tensor(rewards, device=self.device, dtype=torch.float32)
+        batch.rew = torch.as_tensor(rewards, device=self.device)
 
     def learn_batch(self, batch, length = 100):
         # create batch from first observations
@@ -207,7 +211,10 @@ class TD3BC:
         actions = batch.obs[:,:, 146:150]
         rewards = batch.obs[:,:, 150]
         terminated = batch.obs[:,:, 151]
-        observations_next = np.hstack((batch.obs[:,1:, :146], np.zeros((batch.obs.shape[0],1, 146))),dtype=np.float32)
+        # Use torch.cat instead of np.hstack for GPU operations
+        # Convert to tensor first to get device and dtype - use default dtype to match model
+        obs_tensor = torch.tensor(batch.obs, device=self.device)
+        observations_next = torch.cat([obs_tensor[:,1:,:146], torch.zeros(obs_tensor.shape[0],1,146, device=obs_tensor.device, dtype=obs_tensor.dtype)], dim=1)
 
         
 
@@ -259,7 +266,7 @@ class TD3BC:
             outputs = []
             # hidden = None
             # print(self.model.device)
-            priv_obs = batch.obs[:,:, :18].clone().detach().requires_grad_(True)
+            priv_obs = batch.obs[:,:, :18].clone().detach().requires_grad_(True).to(self.device)
             for t in range(observations.shape[1]):
                 mu = self.model(priv_obs[:, t])
                 output = mu # actor
@@ -272,8 +279,10 @@ class TD3BC:
             q_value = q_value[:,self.warmup:]
             act = act[:,self.warmup:]
             lmbda = self._alpha / q_value.abs().mean().detach()
+            # Ensure batch.act is on the same device as act to avoid redundant to_torch_as
+            target_actions = batch.act[:,self.warmup:].to(act.device)
             actor_loss = -lmbda * q_value.mean() + F.mse_loss(
-                act, to_torch_as(batch.act[:,self.warmup:], act)
+                act, target_actions
             )
             actor_loss.backward()
             self._last = actor_loss.item()
