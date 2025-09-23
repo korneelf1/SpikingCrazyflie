@@ -566,7 +566,7 @@ if __name__ == "__main__":
             default="tensorboard",
             choices=["tensorboard", "wandb"],
         )
-        parser.add_argument("--wandb-project", type=str, default="offline_l2f.benchmark")
+        parser.add_argument("--wandb-project", type=str, default="l2f_bc")
         parser.add_argument(
             "--watch",
             default=False,
@@ -643,7 +643,7 @@ if __name__ == "__main__":
     # device = torch.device("cpu")
     # Initialize WandB
     wandb_args = {"spiking":True, 'Slope': args.slope,'Schedule': args.surrogate_scheduling, 'Algo':'TD3BC_JS_Online', 'fast_learning':False, 'curriculum':args.curriculum}
-    wandb.init(project="l2f_bc", config=wandb_args)
+    wandb.init(project=args.wandb_project, config=wandb_args)
 
     wandb.define_metric("*", step_metric="epoch")
 

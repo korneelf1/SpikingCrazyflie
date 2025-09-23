@@ -393,7 +393,7 @@ if __name__ == "__main__":
             default="tensorboard",
             choices=["tensorboard", "wandb"],
         )
-        parser.add_argument("--wandb-project", type=str, default="offline_l2f.benchmark")
+        parser.add_argument("--wandb-project", type=str, default="l2f_bc")
         parser.add_argument(
             "--watch",
             default=False,
@@ -478,7 +478,7 @@ if __name__ == "__main__":
     
     device = args.device
     wandb_args = {"spiking":True, 'Slope': args.slope,'Schedule': args.slope_schedule, 'Algo':'TD3BC', 'fast_learning':False, 'scheduling_order':args.scheduling_order}
-    wandb.init(project="l2f_bc", config=wandb_args)
+    wandb.init(project=args.wandb_project, config=wandb_args)
     # wandb.init(mode="disabled")
 
     wandb.define_metric("*", step_metric="epoch")
