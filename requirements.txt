@@ -18,3 +18,5 @@ pandas>=2.2.2
 
 # Development dependencies
 pytest>=7.0.0
+psutil>=6.0.0
+seaborn>=0.13.2

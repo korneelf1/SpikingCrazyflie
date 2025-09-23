@@ -458,7 +458,8 @@ if __name__ == "__main__":
             # return self.preprocess.to(device)
 
         
-
+    # get args
+    args = get_args()
 
     
     # buffer_real = ReplayBuffer.load_hdf5('real_data_buffer_no_zeros.hdf5')
@@ -474,7 +475,7 @@ if __name__ == "__main__":
     # print(torch.device("cuda:1"))
     # device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
     
-    args = get_args()
+    
     device = args.device
     wandb_args = {"spiking":True, 'Slope': args.slope,'Schedule': args.slope_schedule, 'Algo':'TD3BC', 'fast_learning':False, 'scheduling_order':args.scheduling_order}
     wandb.init(project="l2f_bc", config=wandb_args)
