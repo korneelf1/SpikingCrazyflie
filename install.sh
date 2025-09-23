@@ -126,13 +126,34 @@ install_l2f() {
     if [ -d "$l2f_dir" ]; then
         print_warning "l2f_thesis directory already exists. Updating..."
         cd "$l2f_dir"
-        git checkout to_server
+        git checkout last_working
         git pull
+        git submodule update --init --recursive external/rl-tools
+        cd external/rl-tools
+        mkdir -p build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Release
+        make -j$(sysctl -n hw.ncpu) 
         cd ..
+        python setup.py build_ext --inplace
+
+        # test examples/test.py
+        python examples/test.py
     else
         print_status "Cloning l2f_thesis repository..."
         git clone https://github.com/korneelf1/l2f_thesis.git
-        git checkout to_server
+        git checkout last_working
+        git submodule update --init --recursive external/rl-tools
+        cd external/rl-tools
+        mkdir -p build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Release
+        make -j$(sysctl -n hw.ncpu) 
+        cd ..
+        python setup.py build_ext --inplace
+
+        # test examples/test.py
+        python examples/test.py
     fi
     
 
@@ -284,6 +305,13 @@ main() {
     echo ""
     print_status "You can now start using SpikingCrazyflie!"
     print_status "Check the README.md for usage examples and training scripts."
+    
+    # Activate the virtual environment at the end if it was created
+    if [ "$create_venv_flag" = true ]; then
+        print_status "Activating virtual environment for current session..."
+        source "$venv_name/bin/activate"
+        print_success "Virtual environment is now active!"
+    fi
 }
 
 # Run main function with all arguments
