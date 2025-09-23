@@ -262,9 +262,9 @@ class Learning2Fly(gym.Env):
         self.step_count += 1
         
         # Print thread usage every N steps
-        if self.step_count % self.thread_monitor_interval == 0:
-            print(f"=== Step {self.step_count} Thread Usage ===")
-            print_thread_usage()
+        # if self.step_count % self.thread_monitor_interval == 0:
+        #     print(f"=== Step {self.step_count} Thread Usage ===")
+        #     print_thread_usage()
 
         done = self._check_done()
         # print("Step: ", self.t, "Done: ", done)
@@ -281,8 +281,8 @@ class Learning2Fly(gym.Env):
         self.t = 0
         self.step_count = 0  # Reset step counter
         
-        print("=== Environment Reset - Thread Usage ===")
-        print_thread_usage()
+        # print("=== Environment Reset - Thread Usage ===")
+        # print_thread_usage()
         
         return self.obs, {}
     
