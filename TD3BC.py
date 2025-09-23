@@ -9,6 +9,7 @@ from tianshou.data import Batch,to_torch_as
 from tqdm import tqdm
 import torch.nn.functional as F
 from torch import nn
+from utils.directory_manager import save_checkpoint
 
 class TD3BC:
     def __init__(self, env, model, optimizer,critic1, critic1_optimizer, critic2, critic2_optimizer, buffer, batch_size=256, warmup=50, device='cpu', curriculum=False, recompute_rewards_curr=False):
@@ -36,12 +37,27 @@ class TD3BC:
         self.curriculum = curriculum  
         self.recompute_rewards_curr = recompute_rewards_curr  
 
+        # Determine model dtype once and store it
+        self.model_dtype = self._get_model_dtype()
+        
         # create deep copies of the critic networks and move to device
         self.critic1_old = deepcopy(critic1).to(device)
         self.critic2_old = deepcopy(critic2).to(device)
 
         self.best_test = 0
         self.last_test_reward = 0
+
+    def _get_model_dtype(self):
+        """Determine the model's dtype by checking its parameters."""
+        if hasattr(self.model, 'preprocess') and hasattr(self.model.preprocess, 'layer0'):
+            return next(self.model.preprocess.layer0.parameters()).dtype
+        elif hasattr(self.model, 'layer0'):
+            return next(self.model.layer0.parameters()).dtype
+        elif hasattr(self.model, 'preprocess') and hasattr(self.model.preprocess, 'layer_in'):
+            return next(self.model.preprocess.layer_in.parameters()).dtype
+        else:
+            # Fallback to default dtype
+            return torch.get_default_dtype()
     def test(self, n_episodes=20,viz=True):
         avg_rew = 0
         avg_len = 0
@@ -53,7 +69,7 @@ class TD3BC:
             t = 0
             actions = []
             while not done:
-                obs = torch.tensor(obs[:18], device=self.device)
+                obs = torch.tensor(obs[:18], device=self.device, dtype=self.model_dtype)
                 action = self.model(obs)
                 actions.append(action.detach())  # Keep as tensor
                 obs, rew, done, done, info = self.env.step(action.detach().cpu().numpy())
@@ -75,8 +91,8 @@ class TD3BC:
             # plt.show()
             wandb.log({"img": [wandb.Image(fig, caption=f"BC Learning")]})
             batch = self.buffer.sample(1)[0]
-            observations = torch.tensor(batch.obs[:,:, :18], device=self.device)
-            actions = torch.as_tensor(batch.obs[:,:,146:150], device=self.device)
+            observations = torch.tensor(batch.obs[:,:, :18], device=self.device, dtype=self.model_dtype)
+            actions = torch.as_tensor(batch.obs[:,:,146:150], device=self.device, dtype=self.model_dtype)
 
             
             outputs = []
@@ -104,8 +120,8 @@ class TD3BC:
         self.last_test_reward = avg_rew/n_episodes
         if avg_rew/n_episodes > self.best_test:
             self.best_test = avg_rew/n_episodes
-            torch.save(self.model.state_dict(), 'TD3BC_TEMP.pth')
-            wandb.run.log_artifact("TD3BC_TEMP.pth", name='policy_streaming', type='model')
+            checkpoint_path = save_checkpoint(self.model.state_dict(), 'TD3BC_TEMP.pth')
+            wandb.run.log_artifact(checkpoint_path, name='policy_streaming', type='model')
 
     def compute_returns(self,batch, nstep=1):
         '''Compute returns from rewards using discounted rewards:
@@ -195,7 +211,7 @@ class TD3BC:
             rewards[:, t] = self.env._reward(obs_cpu[:, t], act_cpu[:, t])
 
         # Move back to torch with proper device and dtype
-        batch.rew = torch.as_tensor(rewards, device=self.device)
+        batch.rew = torch.as_tensor(rewards, device=self.device, dtype=self.model_dtype)
 
     def learn_batch(self, batch, length = 100):
         # create batch from first observations
@@ -212,8 +228,8 @@ class TD3BC:
         rewards = batch.obs[:,:, 150]
         terminated = batch.obs[:,:, 151]
         # Use torch.cat instead of np.hstack for GPU operations
-        # Convert to tensor first to get device and dtype - use default dtype to match model
-        obs_tensor = torch.tensor(batch.obs, device=self.device)
+        # Convert to tensor first with model dtype
+        obs_tensor = torch.tensor(batch.obs, device=self.device, dtype=self.model_dtype)
         observations_next = torch.cat([obs_tensor[:,1:,:146], torch.zeros(obs_tensor.shape[0],1,146, device=obs_tensor.device, dtype=obs_tensor.dtype)], dim=1)
 
         
@@ -228,7 +244,19 @@ class TD3BC:
             obs_next=observations_next,
             returns=np.empty((1,),dtype=np.float32)
         )
-        batch = to_torch_as(batch, torch.zeros((1,), device=self.device, dtype=torch.float32))
+        # Ensure all numpy arrays are converted to the correct dtype
+        if self.model_dtype == torch.float32:
+            if hasattr(batch.obs, 'astype'):  # Check if it's a numpy array
+                batch.obs = batch.obs.astype(np.float32)
+            if hasattr(batch.act, 'astype'):
+                batch.act = batch.act.astype(np.float32)
+            if hasattr(batch.rew, 'astype'):
+                batch.rew = batch.rew.astype(np.float32)
+            if hasattr(batch.done, 'astype'):
+                batch.done = batch.done.astype(np.float32)
+            if hasattr(batch.obs_next, 'astype'):
+                batch.obs_next = batch.obs_next.astype(np.float32)
+        batch = to_torch_as(batch, torch.zeros((1,), device=self.device, dtype=self.model_dtype))
         # if curriculum, we need to recompute the rewards
         if self.curriculum and self.recompute_rewards_curr:
             self.recompute_rewards(batch)
@@ -266,7 +294,8 @@ class TD3BC:
             outputs = []
             # hidden = None
             # print(self.model.device)
-            priv_obs = batch.obs[:,:, :18].clone().detach().requires_grad_(True).to(self.device)
+            # Ensure priv_obs matches the model's dtype
+            priv_obs = batch.obs[:,:, :18].clone().detach().requires_grad_(True).to(self.device, dtype=self.model_dtype)
             for t in range(observations.shape[1]):
                 mu = self.model(priv_obs[:, t])
                 output = mu # actor
@@ -379,6 +408,7 @@ if __name__ == "__main__":
         
         # Use 'store_true' for interval if you want it as a flag, or use 'type=int' if it's an integer
         parser.add_argument("--interval", type=int, default=1, help="Interval flag")
+        parser.add_argument("--buffer-path", type=str, default='buffers/l2f_buffer_1996.hdf5', help="Buffer path")
         return parser.parse_args()
 
 
@@ -430,11 +460,13 @@ if __name__ == "__main__":
         
 
 
-    # prepare the data
-    buffer_sim = ReplayBuffer.load_hdf5('buffers/l2f_buffer_1996.hdf5')
+    
     # buffer_real = ReplayBuffer.load_hdf5('real_data_buffer_no_zeros.hdf5')
     buffer = ReplayBuffer(size=20000)
-    buffer.update(buffer_sim)
+    if args.buffer_path:
+        # prepare the data
+        buffer_sim = ReplayBuffer.load_hdf5(args.buffer_path)
+        buffer.update(buffer_sim)
     # buffer.update(buffer_real)
     env = Learning2Fly(fast_learning=False, manual_curriculum=True)
     # list all availabel devices
@@ -520,4 +552,4 @@ if __name__ == "__main__":
     wandb.run.finish()
     timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
 
-    torch.save(model.state_dict(),f'td3bc_{timestamp}.pth')
+    save_checkpoint(model.state_dict(), f'td3bc_{timestamp}.pth')
