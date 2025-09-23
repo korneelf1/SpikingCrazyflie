@@ -98,11 +98,24 @@ install_requirements() {
 
 # Function to install tianshou from GitHub
 install_tianshou() {
+    local tianshou_dir="tianshou-1.2.0-dev"
+    
+    if [ -d "$tianshou_dir" ]; then
+        print_warning "tianshou-1.2.0-dev directory already exists. Updating..."
+        cd "$tianshou_dir"
+        git pull
+        pip install -e .
+        cd ..
+    else
+        print_status "Cloning tianshou-1.2.0-dev repository..."
+        cd ..
     print_status "Installing tianshou from GitHub..."
-    git clone https://github.com/korneelf1/tianshou-1.2.0-dev.git
-    cd tianshou-1.2.0-dev
-    pip install -e .
-    cd ..
+        print_status "Cloning tianshou-1.2.0-dev repository..."
+        git clone https://github.com/korneelf1/tianshou-1.2.0-dev.git
+        cd tianshou-1.2.0-dev
+        pip install -e .
+        cd ..
+    fi
     print_success "Tianshou installed successfully"
 }
 
