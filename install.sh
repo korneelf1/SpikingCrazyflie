@@ -99,8 +99,10 @@ install_requirements() {
 # Function to install tianshou from GitHub
 install_tianshou() {
     print_status "Installing tianshou from GitHub..."
-    pip install git+cls
-     --upgrade
+    git clone https://github.com/korneelf1/tianshou-1.2.0-dev.git
+    cd tianshou-1.2.0-dev
+    pip install -e .
+    cd ..
     print_success "Tianshou installed successfully"
 }
 
@@ -111,21 +113,17 @@ install_l2f() {
     if [ -d "$l2f_dir" ]; then
         print_warning "l2f_thesis directory already exists. Updating..."
         cd "$l2f_dir"
+        git checkout to_server
         git pull
         cd ..
     else
         print_status "Cloning l2f_thesis repository..."
         git clone https://github.com/korneelf1/l2f_thesis.git
+        git checkout to_server
     fi
     
-    print_status "Installing l2f package dependencies..."
-    # Install rl_tools first as it's a dependency for l2f
-    pip install rl_tools
-    
-    print_status "Checking out to_server branch for l2f..."
+
     cd "$l2f_dir"
-    git checkout to_server
-    
     print_status "Installing l2f package..."
     pip install -e .
     cd ..
