@@ -338,7 +338,7 @@ class TD3BC_Online:
                 self.learn_batch(batch)
 
 
-            if n%10==0:
+            if n%3==0:
                 self.test(viz=False)
 
     def gather_buffer(self, 
