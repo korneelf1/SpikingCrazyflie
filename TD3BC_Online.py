@@ -601,7 +601,8 @@ if __name__ == "__main__":
         parser.add_argument("--stable_flight", action='store_true', help="Enable stable flight")
         return parser.parse_args()
 
-
+    args = get_args()
+    
     from l2f_agent import ConvertedModel
     controller = ConvertedModel()
     controller.load_state_dict(torch.load("l2f_agent.pth", map_location="cpu"))
@@ -616,7 +617,7 @@ if __name__ == "__main__":
     # print(torch.device("cuda"))
     # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    args = get_args()
+    
     buffer = ReplayBuffer(size=args.buffer_size)
     buffer_pre = ReplayBuffer.load_hdf5(buffer_path)
     buffer.update(buffer_pre)
