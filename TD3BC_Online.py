@@ -547,6 +547,7 @@ if __name__ == "__main__":
         parser.add_argument("--n-step", type=int, default=3)
         parser.add_argument("--batch-size", type=int, default=256)
         parser.add_argument("--buffer-size", type=int, default=10000, help="Buffer size")
+        parser.add_argument("--buffer-preload", type=bool, default=True, help="Buffer preload")
 
         parser.add_argument("--alpha", type=float, default=2.5)
         parser.add_argument("--exploration-noise", type=float, default=0.1)
@@ -620,10 +621,11 @@ if __name__ == "__main__":
     print(f"Looking for buffer file at: {buffer_path}")
     print(f"Absolute path: {os.path.abspath(buffer_path)}")
     print(f"File exists: {os.path.exists(buffer_path)}")
-    
+
     buffer = ReplayBuffer(size=args.buffer_size)
-    buffer_pre = ReplayBuffer.load_hdf5(buffer_path)
-    buffer.update(buffer_pre)
+    if args.buffer_preload:
+        buffer_pre = ReplayBuffer.load_hdf5(buffer_path)
+        buffer.update(buffer_pre)
     print(f"Successfully loaded buffer with {len(buffer)} samples")
     # prepare the data
     
