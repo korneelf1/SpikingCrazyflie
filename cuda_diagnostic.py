@@ -147,6 +147,78 @@ def monitor_gpu_usage():
     torch.cuda.empty_cache()
     print(f"Memory after cleanup: {torch.cuda.memory_allocated(device) / 1024**2:.1f} MB")
 
+def load_large_tensor_test():
+    """Load a large 16GB tensor and wait for user input to unload."""
+    print("\n=== Large Tensor Load Test (16GB) ===")
+    if not torch.cuda.is_available():
+        print("CUDA not available, skipping large tensor test")
+        return
+    
+    device = torch.device('cuda')
+    
+    # Get GPU memory info
+    total_memory = torch.cuda.get_device_properties(device).total_memory
+    print(f"Total GPU memory: {total_memory / 1024**3:.1f} GB")
+    
+    # Calculate tensor size for ~16GB (leaving some headroom)
+    # Each float32 element is 4 bytes
+    target_size_gb = 16
+    target_size_bytes = target_size_gb * 1024**3
+    elements_needed = target_size_bytes // 4  # 4 bytes per float32
+    
+    # Create a 2D tensor with roughly the right number of elements
+    # Find dimensions that give us close to 16GB
+    import math
+    side_length = int(math.sqrt(elements_needed))
+    print(f"Creating tensor of shape ({side_length}, {side_length})")
+    print(f"Expected size: {side_length * side_length * 4 / 1024**3:.2f} GB")
+    
+    # Get initial memory
+    torch.cuda.empty_cache()
+    initial_memory = torch.cuda.memory_allocated(device)
+    print(f"Memory before loading: {initial_memory / 1024**2:.1f} MB")
+    
+    try:
+        print("\nLoading large tensor...")
+        start_time = time.time()
+        large_tensor = torch.randn(side_length, side_length, device=device, dtype=torch.float32)
+        torch.cuda.synchronize()
+        load_time = time.time() - start_time
+        
+        current_memory = torch.cuda.memory_allocated(device)
+        memory_used = current_memory - initial_memory
+        
+        print(f"✓ Large tensor loaded successfully!")
+        print(f"  Load time: {load_time:.2f} seconds")
+        print(f"  Memory used: {memory_used / 1024**2:.1f} MB ({memory_used / 1024**3:.2f} GB)")
+        print(f"  Total GPU memory used: {current_memory / 1024**2:.1f} MB ({current_memory / 1024**3:.2f} GB)")
+        print(f"  Tensor shape: {large_tensor.shape}")
+        print(f"  Tensor device: {large_tensor.device}")
+        print(f"  Tensor dtype: {large_tensor.dtype}")
+        
+        print(f"\n{'='*60}")
+        print("🎯 NOW CHECK YOUR GPU USAGE!")
+        print("Run this command in another terminal:")
+        print("  watch -n 1 nvidia-smi")
+        print("or just run: nvidia-smi")
+        print(f"{'='*60}")
+        
+        input("\nPress ENTER when you've checked GPU usage to unload the tensor...")
+        
+        print("\nUnloading large tensor...")
+        del large_tensor
+        torch.cuda.empty_cache()
+        
+        final_memory = torch.cuda.memory_allocated(device)
+        print(f"✓ Tensor unloaded!")
+        print(f"  Memory after cleanup: {final_memory / 1024**2:.1f} MB ({final_memory / 1024**3:.2f} GB)")
+        print(f"  Memory freed: {(current_memory - final_memory) / 1024**2:.1f} MB")
+        
+    except RuntimeError as e:
+        print(f"✗ Failed to load large tensor: {e}")
+        print("This might be due to insufficient GPU memory.")
+        print(f"Available memory: {(total_memory - torch.cuda.memory_allocated(device)) / 1024**3:.2f} GB")
+
 def check_system_resources():
     """Check system resources."""
     print("\n=== System Resources ===")
@@ -180,6 +252,7 @@ def main():
         test_gpu_computation()
         test_model_on_gpu()
         monitor_gpu_usage()
+        load_large_tensor_test()  # This will load 16GB and wait for user input
     else:
         print("\n=== Recommendations ===")
         print("1. Check if NVIDIA drivers are installed: nvidia-smi")
