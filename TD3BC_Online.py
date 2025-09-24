@@ -322,21 +322,19 @@ class TD3BC_Online:
 
     def learn(self, 
               epoch:int = 0, 
-              end_epoch:int = 50):
+              end_epoch:int = 10):
         loss = np.inf
         self.epoch += end_epoch
         for n in tqdm(range(epoch, end_epoch)):
             wandb.log({"epoch":n})
             losses=[]
             self.model.to(device)
-            for _ in range(5): # perform 5 updates for each epoch
-                # print(self.model.device)
-                for _ in range(int(len(self.buffer)//self.batch_size)):
-                    self.model.preprocess.reset(current_epoch = n,
-                                                last_test_rew = self.last_test_rew) # pass last test reward and current epoch to reset (used for adaptive scheduling and interval based scheduling  of slopes, respectively)
-                    batch = self.buffer.sample(self.batch_size)[0]
-                    
-                    self.learn_batch(batch)
+            for _ in range(int(len(self.buffer)//self.batch_size)):
+                self.model.preprocess.reset(current_epoch = n,
+                                            last_test_rew = self.last_test_rew) # pass last test reward and current epoch to reset (used for adaptive scheduling and interval based scheduling  of slopes, respectively)
+                batch = self.buffer.sample(self.batch_size)[0]
+                
+                self.learn_batch(batch)
 
 
             if n%10==0:
@@ -349,9 +347,9 @@ class TD3BC_Online:
                       jump_start_len:int|None = None,
                       keep_og:bool = False):
         print("Gathering buffer...")
-        # gather new buffer
-        buffer = ReplayBuffer(size=size)
-        n_rollouts = int(size//(rollout_len/100) )
+        # gather new buffer - size should be large enough to hold all rollout data
+        buffer = ReplayBuffer(size=size * rollout_len/100) # each sample is 100 in length
+        n_rollouts = size  # number of rollouts to collect
         js = jump_start_len if jump_start_len is not None else 0
         for _ in tqdm(range(n_rollouts), desc="Gathering buffer"):
             # assure that we get usable sequences, by discarding rollouts that crash too fast or all the way at the end
@@ -379,7 +377,7 @@ class TD3BC_Online:
                         _ = self.model(obs[:18])
                     else:
                         action = self.model(obs[:18])
-                    # action = model(obs)
+
                     obs_lst.append(obs.cpu().numpy())
                     obs, rewards, dones,_, info = env.step(action.cpu().detach().numpy()) 
 
@@ -405,12 +403,9 @@ class TD3BC_Online:
                             # now add the last bit obs_stack.shape[0]%100 to the buffer
                             if obs_stack.shape[0]%100>0:
                                 buffer.add(Batch({'obs':obs_stack[-100:],'act':np.array(action_lst[-1]),'rew':np.array(rewards_lst[-1]),'terminated': np.array(dones_lst[-1]).reshape(-1,1),'truncated': np.array(dones_lst)[-1].reshape(-1,1)}))
-                            # buffer.add(Batch({'obs':obs_stack,'act':np.array(action_lst[-1]),'rew':np.array(rewards_lst[-1]),'terminated': np.array(dones_lst[-1]).reshape(-1,1),'truncated': np.array(dones_lst)[-1].reshape(-1,1)}))
-                            # buffer.add(Batch({'obs':obs_stack}))
+
                         else:
-                            partial_rollout = True
-                        # partial_rollout = True
-            
+                            partial_rollout = True            
 
         # create buffer with old and new data
         self.buffer.update(buffer)
@@ -419,7 +414,8 @@ class TD3BC_Online:
         return buffer
     
     def run(self, 
-            jumpstart:bool = False,):
+            jumpstart:bool = False,
+            n_rollouts_per_gather:int = 200):
         """
         This function is used to run the training.
         It will gather data from the environment and train the model.
@@ -434,33 +430,41 @@ class TD3BC_Online:
         cur_epoch = 0
         # self.gather_buffer(jump_start_len=490, size=1000)
         n_epochs_tot = 0
-        iterator = range(50,1000,25)
-        n_curriculum_epochs = len(iterator)//6
-        last_curr_update = 0
+        max_epochs = 300
+        epochs_per_gather = 10
+        iterator = range(0,max_epochs,epochs_per_gather)
+        factor_i = 500/0.8/max_epochs # we want to be fully relying on the model by 80 percent of the end of the training
+        # Update curriculum every 6 training cycles (more intuitive than len(iterator)//6)
+        curriculum_interval = 6
+        curriculum_update_count = 0
         for i in iterator:
             if jumpstart:
-                self.gather_buffer(jump_start_len=500-i, size=50)
+                self.gather_buffer(jump_start_len=500-i*factor_i, size=n_rollouts_per_gather)
                 wandb.log({"jump start steps (500 - n)": i})
             else:
-                self.gather_buffer(size=50)
+                self.gather_buffer(size=n_rollouts_per_gather)
             wandb.log({"behavorial cloning coefficient": self.bc_coeff})
-            self.learn(epoch=cur_epoch, end_epoch=cur_epoch+50)
-            n_epochs_tot+=50
+            self.learn(epoch=cur_epoch, end_epoch=cur_epoch+epochs_per_gather)
+            n_epochs_tot+=10
             self.bc_coeff *= self.bc_factor
-            cur_epoch+=50
+            cur_epoch+=epochs_per_gather
             
-            if self.curriculum and i-last_curr_update >n_curriculum_epochs: # 
+            # Update curriculum every curriculum_interval training cycles
+            if self.curriculum and curriculum_update_count % curriculum_interval == 0 and curriculum_update_count > 0:
                 self.env.update_curriculum()
-                last_curr_update = i
-        while n_epochs_tot<1000:
-            self.learn(epoch=cur_epoch, end_epoch=cur_epoch+50)
-            n_epochs_tot+=50
-            cur_epoch+=50
+                print(f"Curriculum updated at training cycle {curriculum_update_count}")
+            curriculum_update_count += 1
+        while n_epochs_tot<max_epochs:
+            self.learn(epoch=cur_epoch, end_epoch=cur_epoch+epochs_per_gather)
+            n_epochs_tot+=epochs_per_gather
+            cur_epoch+=epochs_per_gather
             filename = f"TD3BC_Online_TEMP_{self.timestamp}_epoch_{cur_epoch}.pth"
             save_checkpoint(self.model.state_dict(), filename)
             wandb.run.log_artifact(filename, name='policy_streaming', type='model')
-            if self.curriculum:
+            # Update curriculum every 6 epochs in the final training phase
+            if self.curriculum and (cur_epoch // epochs_per_gather) % curriculum_interval == 0 and cur_epoch > 0:
                 self.env.update_curriculum()
+                print(f"Curriculum updated at epoch {cur_epoch}")
             self.gather_buffer()
 SIGMA_MIN = 1e-3
 SIGMA_MAX = .2
@@ -587,6 +591,7 @@ if __name__ == "__main__":
         # Use 'store_true' for interval if you want it as a flag, or use 'type=int' if it's an integer
         parser.add_argument("--interval", type=int, default=1, help="Interval flag")
         parser.add_argument("--ablation", type=str, default=None)
+        parser.add_argument("--n_rollouts_per_gather", type=int, default=500, help="Number of rollouts per gather")
         return parser.parse_args()
 
 
@@ -685,8 +690,7 @@ if __name__ == "__main__":
 
     print(model)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-    # prepare the BC
-        # critic network
+
     net_c1 = Net(
         state_shape=146,
         action_shape=4,
@@ -707,30 +711,20 @@ if __name__ == "__main__":
     critic2_optim = torch.optim.Adam(critic2.parameters(), lr=args.critic_lr)
 
     controller.to(device)
-    bc = TD3BC_Online(env,model, optimizer,
+    trainer = TD3BC_Online(env,model, optimizer,
                controller=controller,
                critic1=critic,
                 critic1_optimizer=critic_optim,
                 critic2=critic2,
                 critic2_optimizer=critic2_optim,
                 buffer=buffer,
-                batch_size=350, device=device,
+                batch_size=1024 , device=device,
                 curriculum=args.curriculum,
                 bc_val=args.bc_val,
                 bc_factor=args.bc_factor,)
-    # # first gather model and append it with expert data ( real data )
-    # buffer_og= bc.gather_buffer(size=2500)
-    # buffer_len = len(buffer_og)
-    # # buffer_real = ReplayBuffer.load_hdf5('real_data_buffer_no_zeros_full.hdf5')
-    # # buffer_real_len = len(buffer_real)
-    # buffer = ReplayBuffer(size=(buffer_len)*4)
-    # buffer.update(bufferog)
-    # bc.buffer = buffer
-    # buffer_og.save_hdf5("buffer_fully_sim.hdf5")
+
     # learn the model
-    bc.run(jumpstart=args.jumpstart)
-    # loss = bc.learn(epoch=250)
-    # print(loss)
+    trainer.run(jumpstart=args.jumpstart, n_rollouts_per_gather=args.n_rollouts_per_gather)
     
     wandb.run.finish()
     timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
