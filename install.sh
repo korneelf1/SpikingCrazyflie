@@ -335,6 +335,7 @@ echo "Cloning and installing l2f_thesis package..."
 echo "==============================================="
 git clone https://github.com/korneelf1/l2f_thesis.git || echo "Warning: l2f_thesis repo already exists or failed to clone"
 cd l2f_thesis 2>/dev/null || cd l2f_thesis || echo "Warning: could not cd into l2f_thesis"
+git checkout last_working
 echo "Initializing submodules for l2f_thesis..."
 git submodule update --init --recursive external/rl-tools || echo "Warning: git submodule update failed"
 echo "Installing l2f_thesis in editable mode..."

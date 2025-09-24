@@ -5,6 +5,7 @@ gymnasium>=0.28.1
 snntorch>=0.9.1
 wandb>=0.17.3
 huggingface_hub[cli]>=0.26.0
+hf_transfer>=0.2.2
 
 # Simulation dependencies
 numba>=0.57.1
