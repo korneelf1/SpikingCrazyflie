@@ -416,7 +416,10 @@ class TD3BC_Online:
     
     def run(self, 
             jumpstart:bool = False,
-            n_rollouts_per_gather:int = 200):
+            n_rollouts_per_gather:int = 200,
+            max_epochs:int = 300,
+            epochs_per_gather:int = 10
+            ):
         """
         This function is used to run the training.
         It will gather data from the environment and train the model.
@@ -544,6 +547,7 @@ if __name__ == "__main__":
         parser.add_argument("--step-per-epoch", type=int, default=5000)
         parser.add_argument("--n-step", type=int, default=3)
         parser.add_argument("--batch-size", type=int, default=256)
+        parser.add_argument("--buffer-size", type=int, default=10000, help="Buffer size")
 
         parser.add_argument("--alpha", type=float, default=2.5)
         parser.add_argument("--exploration-noise", type=float, default=0.1)
@@ -582,7 +586,8 @@ if __name__ == "__main__":
         parser.add_argument("--surrogate-scheduling", type=str, default='adaptive', help="Enable surrogate scheduling, options: fixed, interval, adaptive")
         parser.add_argument("--curriculum", action='store_true', help="Enable reward curriculum scheduling")
         parser.add_argument("--jumpstart", action='store_true', help="JumpStartScheduling")
-
+        parser.add_argument("--max_epochs", type=int, default=300, help="Max epochs")
+        parser.add_argument("--epochs_per_gather", type=int, default=10, help="Epochs per gather")
         parser.add_argument("--slope", type=int, default=2, help="Slope value")
         parser.add_argument("--slope_schedule", type=str, default='adaptive')
         parser.add_argument("--scheduling_order", type=int, default=3)
@@ -593,6 +598,7 @@ if __name__ == "__main__":
         parser.add_argument("--interval", type=int, default=1, help="Interval flag")
         parser.add_argument("--ablation", type=str, default=None)
         parser.add_argument("--n_rollouts_per_gather", type=int, default=500, help="Number of rollouts per gather")
+        parser.add_argument("--stable_flight", action='store_true', help="Enable stable flight")
         return parser.parse_args()
 
 
@@ -615,8 +621,7 @@ if __name__ == "__main__":
             print("buffers/ directory does not exist!")
         raise FileNotFoundError(f"Buffer file not found: {buffer_path}")
     
-    buffer = ReplayBuffer.load_hdf5(buffer_path)
-    print(f"Successfully loaded buffer with {len(buffer)} samples")
+    
     
     # Debug: Check the structure of the original buffer
     if len(buffer) > 0:
@@ -635,7 +640,7 @@ if __name__ == "__main__":
         print(f"  truncated dtype: {type(sample.truncated)}")
     # buffer = ReplayBuffer(size=20000)
     # buffer.update(bufferog)
-    env = Learning2Fly(fast_learning=False)
+    env = Learning2Fly(fast_learning=False, stable_flight=args.stable_flight)
     # list all availabel devices
     print("Available devices:",torch.cuda.device_count())
     # for macos
@@ -644,6 +649,10 @@ if __name__ == "__main__":
     # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     args = get_args()
+    buffer = ReplayBuffer(size=args.buffer_size)
+    buffer_pre = ReplayBuffer.load_hdf5(buffer_path)
+    buffer.update(buffer_pre)
+    print(f"Successfully loaded buffer with {len(buffer)} samples")
     device = args.device
     # device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     # device = torch.device("cpu")
@@ -725,7 +734,10 @@ if __name__ == "__main__":
                 bc_factor=args.bc_factor,)
 
     # learn the model
-    trainer.run(jumpstart=args.jumpstart, n_rollouts_per_gather=args.n_rollouts_per_gather)
+    trainer.run(jumpstart=args.jumpstart, 
+    n_rollouts_per_gather=args.n_rollouts_per_gather,
+    max_epochs=args.max_epochs,
+    epochs_per_gather=args.epochs_per_gather)
     
     wandb.run.finish()
     timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
