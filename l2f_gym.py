@@ -250,9 +250,8 @@ class Learning2Fly(gym.Env):
         return np.array(self.observation.observation,dtype=np.float32)
 
     def step(self, action):
-        # self.action = power_distribution_force_torque(action.reshape((4,)))
         self.action.motor_command = action.reshape((4,))
-        # print(self.action)
+
         step(self.device, self.env, self.params, self.state, self.action, self.next_state, self.rng)
         self.state = self.next_state
 
@@ -260,16 +259,10 @@ class Learning2Fly(gym.Env):
 
         self.t += 1
         self.step_count += 1
-        
-        # Print thread usage every N steps
-        # if self.step_count % self.thread_monitor_interval == 0:
-        #     print(f"=== Step {self.step_count} Thread Usage ===")
-        #     print_thread_usage()
 
         done = self._check_done()
-        # print("Step: ", self.t, "Done: ", done)
         reward = self._reward()
-        # print(self.obs)
+
         return self.obs, reward, done,done, {}
     
     def reset(self,seed=None):
@@ -280,9 +273,6 @@ class Learning2Fly(gym.Env):
         observe(self.device, self.env, self.params, self.state, self.observation, self.rng)
         self.t = 0
         self.step_count = 0  # Reset step counter
-        
-        # print("=== Environment Reset - Thread Usage ===")
-        # print_thread_usage()
         
         return self.obs, {}
     

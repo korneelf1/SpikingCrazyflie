@@ -2,6 +2,7 @@
 import numpy as np
 import torch
 from copy import deepcopy
+import datetime
 
 from tianshou.data import ReplayBuffer
 import matplotlib.pyplot as plt
@@ -328,7 +329,7 @@ class TD3BC_Online:
         for n in tqdm(range(epoch, end_epoch)):
             wandb.log({"epoch":n})
             losses=[]
-            self.model.to(device)
+            self.model.to(self.device)
             for _ in range(int(len(self.buffer)//self.batch_size)):
                 self.model.preprocess.reset(current_epoch = n,
                                             last_test_rew = self.last_test_rew) # pass last test reward and current epoch to reset (used for adaptive scheduling and interval based scheduling  of slopes, respectively)
@@ -491,7 +492,7 @@ class Wrapper(nn.Module):
         if hasattr(self.preprocess, 'reset'):
             self.preprocess.reset(current_epoch=current_epoch)
     def to_cuda(self):
-        return self.preprocess.to(device)
+        return self.preprocess.to(self.device)
 
   
 if __name__ == "__main__":

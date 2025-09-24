@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import struct
+from utils.directory_manager import save_checkpoint
 
 # Example byte array
 byte_array = [196, 144, 96, 61, 46, 25, 238, 61, 128, 237, 203, 59, 144, 63, 23, 61]
@@ -49,4 +50,4 @@ model.layer1.bias.data = torch.tensor(bias1)
 model.layer2.weight.data = torch.tensor(weights2).reshape(4, 64)
 model.layer2.bias.data = torch.tensor(bias2)
 
-torch.save(model.state_dict(), "l2f_agent.pth")
+save_checkpoint(model.state_dict(), "l2f_agent.pth")
