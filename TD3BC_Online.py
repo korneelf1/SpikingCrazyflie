@@ -607,6 +607,20 @@ if __name__ == "__main__":
     controller.load_state_dict(torch.load("l2f_agent.pth", map_location="cpu"))
 
 
+    
+    env = Learning2Fly(fast_learning=False, stable_flight=args.stable_flight)
+    # list all availabel devices
+    print("Available devices:",torch.cuda.device_count())
+    # for macos
+    
+    # print(torch.device("cuda"))
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    args = get_args()
+    buffer = ReplayBuffer(size=args.buffer_size)
+    buffer_pre = ReplayBuffer.load_hdf5(buffer_path)
+    buffer.update(buffer_pre)
+    print(f"Successfully loaded buffer with {len(buffer)} samples")
     # prepare the data
     buffer_path = 'buffers/l2f_buffer_1996.hdf5'
     print(f"Looking for buffer file at: {buffer_path}")
@@ -640,19 +654,6 @@ if __name__ == "__main__":
         print(f"  truncated dtype: {type(sample.truncated)}")
     # buffer = ReplayBuffer(size=20000)
     # buffer.update(bufferog)
-    env = Learning2Fly(fast_learning=False, stable_flight=args.stable_flight)
-    # list all availabel devices
-    print("Available devices:",torch.cuda.device_count())
-    # for macos
-    
-    # print(torch.device("cuda"))
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    args = get_args()
-    buffer = ReplayBuffer(size=args.buffer_size)
-    buffer_pre = ReplayBuffer.load_hdf5(buffer_path)
-    buffer.update(buffer_pre)
-    print(f"Successfully loaded buffer with {len(buffer)} samples")
     device = args.device
     # device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     # device = torch.device("cpu")
