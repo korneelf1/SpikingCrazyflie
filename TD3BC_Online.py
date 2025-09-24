@@ -539,7 +539,6 @@ if __name__ == "__main__":
         parser.add_argument("--task", type=str, default="l2f")
         parser.add_argument("--seed", type=int, default=0)
         parser.add_argument("--expert-data-task", type=str, default="halfcheetah-expert-v2")
-        parser.add_argument("--buffer-size", type=int, default=1000000)
         parser.add_argument("--hidden-sizes", type=int, nargs="*", default=[256,128])
         parser.add_argument("--actor-lr", type=float, default=3e-4)
         parser.add_argument("--critic-lr", type=float, default=3e-4)
@@ -602,7 +601,7 @@ if __name__ == "__main__":
         return parser.parse_args()
 
     args = get_args()
-    
+
     from l2f_agent import ConvertedModel
     controller = ConvertedModel()
     controller.load_state_dict(torch.load("l2f_agent.pth", map_location="cpu"))
@@ -617,16 +616,17 @@ if __name__ == "__main__":
     # print(torch.device("cuda"))
     # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
+    buffer_path = 'buffers/l2f_buffer_1996.hdf5'
+    print(f"Looking for buffer file at: {buffer_path}")
+    print(f"Absolute path: {os.path.abspath(buffer_path)}")
+    print(f"File exists: {os.path.exists(buffer_path)}")
     
     buffer = ReplayBuffer(size=args.buffer_size)
     buffer_pre = ReplayBuffer.load_hdf5(buffer_path)
     buffer.update(buffer_pre)
     print(f"Successfully loaded buffer with {len(buffer)} samples")
     # prepare the data
-    buffer_path = 'buffers/l2f_buffer_1996.hdf5'
-    print(f"Looking for buffer file at: {buffer_path}")
-    print(f"Absolute path: {os.path.abspath(buffer_path)}")
-    print(f"File exists: {os.path.exists(buffer_path)}")
+    
     
     if not os.path.exists(buffer_path):
         print("Buffer file not found! Available files in buffers/ directory:")
