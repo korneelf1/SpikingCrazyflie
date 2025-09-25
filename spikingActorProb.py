@@ -162,7 +162,7 @@ class SlopeScheduler:
                  max_epochs: int=1000,
                  n_intervals: int=20,
                  reward_range: tuple[float, float]=(0,1), 
-                 max_slope: float=100, 
+                 max_slope: float=50, 
                  start_epoch: int=0,
                  update_interval: int=1,
                  verbose: bool=False):

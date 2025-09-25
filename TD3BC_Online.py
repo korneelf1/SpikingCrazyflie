@@ -544,7 +544,7 @@ if __name__ == "__main__":
         parser.add_argument("--critic-lr", type=float, default=3e-4)
         parser.add_argument("--epoch", type=int, default=150)
         parser.add_argument("--step-per-epoch", type=int, default=5000)
-        parser.add_argument("--n-step", type=int, default=3)
+        parser.add_argument("--n-step", type=int, default=1)
         parser.add_argument("--batch-size", type=int, default=256)
         parser.add_argument("--buffer-size", type=int, default=10000, help="Buffer size")
         parser.add_argument("--buffer-preload", type=bool, default=True, help="Buffer preload")
@@ -695,7 +695,7 @@ if __name__ == "__main__":
                                 schedule=args.slope_schedule,
                                 order=args.scheduling_order,
                                 reward_range=(-400,400),
-                                max_slope=100,
+                                max_slope=50,
                                 verbose=True).to(device)
     
     # Initialize the wrapper
