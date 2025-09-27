@@ -349,7 +349,7 @@ class TD3BC_Online:
                       keep_og:bool = False):
         print("Gathering buffer...")
         # gather new buffer - size should be large enough to hold all rollout data
-        buffer = ReplayBuffer(size=size * rollout_len/100) # each sample is 100 in length
+        buffer = ReplayBuffer(size=size * (rollout_len/100)*2) # each sample is 100 in length
         n_rollouts = size  # number of rollouts to collect
         js = jump_start_len if jump_start_len is not None else 0
         for _ in tqdm(range(n_rollouts), desc="Gathering buffer"):
@@ -363,13 +363,15 @@ class TD3BC_Online:
                 action_lst = []
                 rewards_lst = []
                 dones_lst = []
-                obs_next_lst = []
+                # obs_next_lst = []
 
                 returns = []
                 obs = env.reset()[0]
                 partial_rollout = False # assume full rollout unless dones before end of range
                 t_warmup = 0 # timestep in rollout (used after crash)
-                for i in range(rollout_len):
+                i = 0
+                dones = False
+                while i < rollout_len and not dones:
                     
                     obs = torch.tensor(obs,device=self.device)
                     if t_warmup<max(self.warmup,js):
@@ -382,31 +384,72 @@ class TD3BC_Online:
                     obs_lst.append(obs.cpu().numpy())
                     obs, rewards, dones,_, info = env.step(action.cpu().detach().numpy()) 
 
-                    obs_next_lst.append(obs)
+                    # obs_next_lst.append(obs)
                     action_lst.append(action.cpu().detach().numpy().reshape(4,))
                     rewards_lst.append(rewards)
                     dones_lst.append(dones)
+                    i += 1
 
 
-                    if dones:
-                        obs = env.reset()[0]
+                   
+                obs = env.reset()[0]
 
-                        t_warmup = 0
-                        # if our rollout crashses before 2x warmup, we discard it, it is not worth to warmup the model for only a few timesteps
-                        # if our rollout crashes after rolloutlen - 2x warmup, we also wouldnt have at least the warmup length to trian on
-                        if (self.warmup*2<i):
-                            obs_stack = np.hstack((np.array(obs_lst), np.array(action_lst), np.array(rewards_lst).reshape(-1,1), np.array(dones_lst).reshape(-1,1)))
-                            # add the rollout to the buffer
-                            # chop up in 100 step sequences with step size of 50 (0-100,50-150,100-200,150-250,...)
-                            for j in range(0,obs_stack.shape[0]-100,50):
-                                buffer.add(Batch({'obs':obs_stack[j:j+100],'act':np.array(action_lst[j+99]),'rew':np.array(rewards_lst[j+99]),'terminated': np.array(dones_lst[j+99]).reshape(-1,1),'truncated': np.array(dones_lst)[j+99].reshape(-1,1)}))
+                t_warmup = 0
+                # if our rollout crashses before 2x warmup, we discard it, it is not worth to warmup the model for only a few timesteps
+                # if our rollout crashes after rolloutlen - 2x warmup, we also wouldnt have at least the warmup length to trian on
+                if (self.warmup*2<i):
+                    obs_stack = np.hstack((np.array(obs_lst), np.array(action_lst), np.array(rewards_lst).reshape(-1,1), np.array(dones_lst).reshape(-1,1)))
+                    partial_rollout = False
+                    # once stacked, remove original lists to save memory
+                    obs_lst.clear()
+                    action_lst.clear()
+                    rewards_lst.clear()
+                    dones_lst.clear()
+                    # obs_next_lst.clear()
+                    
+                    # add the rollout to the buffer
+                    # chop up in 100 step sequences with step size of 50 (0-100,50-150,100-200,150-250,...)
+                    for j in range(0,obs_stack.shape[0]-100,50):
+                        # Extract data from obs_stack: obs (0:146), actions (146:150), rewards (150:151), dones (151:152)
+                        # NOTE only obs_stack is used, rest is saved for compatibility purposes
+                        buffer.add(Batch({
+                            'obs': obs_stack[j:j+100],
+                            'act': obs_stack[j:j+100, 146:150][-1],
+                            'rew': float(obs_stack[j:j+100, 150:151][-1].item()),
+                            'terminated': bool(obs_stack[j:j+100, 151:152][-1].item()),
+                            'truncated': bool(obs_stack[j:j+100, 151:152][-1].item())
+                        }))
 
-                            # now add the last bit obs_stack.shape[0]%100 to the buffer
-                            if obs_stack.shape[0]%100>0:
-                                buffer.add(Batch({'obs':obs_stack[-100:],'act':np.array(action_lst[-1]),'rew':np.array(rewards_lst[-1]),'terminated': np.array(dones_lst[-1]).reshape(-1,1),'truncated': np.array(dones_lst)[-1].reshape(-1,1)}))
+                    # now add the last bit obs_stack.shape[0]%100 to the buffer
+                    if obs_stack.shape[0]%100>0:
+                        # Extract data from the last 100 elements of obs_stack
+                        buffer.add(Batch({
+                            'obs': obs_stack[-100:],
+                            'act': obs_stack[-100:, 146:150][-1],
+                            'rew': float(obs_stack[-100:, 150:151][-1].item()),
+                            'terminated': bool(obs_stack[-100:, 151:152][-1].item()),
+                            'truncated': bool(obs_stack[-100:, 151:152][-1].item())
+                        }))
+                else:
+                    partial_rollout = True    
+                    obs_lst.clear()
+                    action_lst.clear()
+                    rewards_lst.clear()
+                    dones_lst.clear()
+                    # obs_next_lst.clear()
 
-                        else:
-                            partial_rollout = True            
+                    # creates lists
+                    obs_lst = []
+                    action_lst = []
+                    rewards_lst = []
+                    dones_lst = []
+                    # obs_next_lst = []
+
+                    returns = []
+                    obs = env.reset()[0]
+                    t_warmup = 0 # timestep in rollout (used after crash)
+                            
+                    
 
         # create buffer with old and new data
         self.buffer.update(buffer)
@@ -546,7 +589,7 @@ if __name__ == "__main__":
         parser.add_argument("--step-per-epoch", type=int, default=5000)
         parser.add_argument("--n-step", type=int, default=1)
         parser.add_argument("--batch-size", type=int, default=256)
-        parser.add_argument("--buffer-size", type=int, default=10000, help="Buffer size")
+        parser.add_argument("--buffer-size", type=int, default=20000, help="Buffer size")
         parser.add_argument("--buffer-preload", type=bool, default=True, help="Buffer preload")
 
         parser.add_argument("--alpha", type=float, default=2.5)
