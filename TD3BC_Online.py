@@ -38,6 +38,18 @@ class TD3BC_Online:
         self.critic2_optimizer = critic2_optimizer
         self.optimizer = optimizer
         self.buffer = buffer
+
+        self.term_size = buffer.terminated.shape
+        # if terminated, truncated, dones and actions are 3 dims, squash to 2
+        if len(buffer._meta.terminated.shape) == 3:
+            buffer._meta.terminated = buffer.terminated[:,0,0]
+        if len(buffer._meta.truncated.shape) == 3:
+            buffer._meta.truncated = buffer.truncated[:,0,0]
+        if len(buffer._meta.done.shape) == 3:
+            buffer._meta.done = buffer.done[:,0,0]
+        if len(buffer._meta.act.shape) == 3:
+            buffer._meta.act = buffer.act[:,0]
+
         self.curriculum = curriculum  
         self.timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
         # create copy of first 30 percent of replay buffer with expert data
@@ -640,7 +652,7 @@ if __name__ == "__main__":
         # Use 'store_true' for interval if you want it as a flag, or use 'type=int' if it's an integer
         parser.add_argument("--interval", type=int, default=1, help="Interval flag")
         parser.add_argument("--ablation", type=str, default=None)
-        parser.add_argument("--n_rollouts_per_gather", type=int, default=500, help="Number of rollouts per gather")
+        parser.add_argument("--n_rollouts_per_gather", type=int, default=10, help="Number of rollouts per gather")
         parser.add_argument("--stable_flight", action='store_true', help="Enable stable flight")
         return parser.parse_args()
 
