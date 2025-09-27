@@ -39,16 +39,17 @@ class TD3BC_Online:
         self.optimizer = optimizer
         self.buffer = buffer
 
-        self.term_size = buffer.terminated.shape
-        # if terminated, truncated, dones and actions are 3 dims, squash to 2
-        if len(buffer._meta.terminated.shape) == 3:
-            buffer._meta.terminated = buffer.terminated[:,0,0]
-        if len(buffer._meta.truncated.shape) == 3:
-            buffer._meta.truncated = buffer.truncated[:,0,0]
-        if len(buffer._meta.done.shape) == 3:
-            buffer._meta.done = buffer.done[:,0,0]
-        if len(buffer._meta.act.shape) == 3:
-            buffer._meta.act = buffer.act[:,0]
+        if "terminated" in buffer._meta:
+            self.term_size = buffer.terminated.shape
+            # if terminated, truncated, dones and actions are 3 dims, squash to 2
+            if len(buffer._meta.terminated.shape) == 3:
+                buffer._meta.terminated = buffer.terminated[:,0,0]
+            if len(buffer._meta.truncated.shape) == 3:
+                buffer._meta.truncated = buffer.truncated[:,0,0]
+            if len(buffer._meta.done.shape) == 3:
+                buffer._meta.done = buffer.done[:,0,0]
+            if len(buffer._meta.act.shape) == 3:
+                buffer._meta.act = buffer.act[:,0]
 
         self.curriculum = curriculum  
         self.timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
