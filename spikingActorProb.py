@@ -162,7 +162,7 @@ class SlopeScheduler:
                  max_epochs: int=1000,
                  n_intervals: int=20,
                  reward_range: tuple[float, float]=(0,1), 
-                 max_slope: float=50, 
+                 max_slope: float=20, 
                  start_epoch: int=0,
                  update_interval: int=1,
                  verbose: bool=False):
@@ -207,6 +207,9 @@ class SlopeScheduler:
 
     
     def _first_order_score(self, normalized_score: float, long_term_history: bool=False):
+        '''
+
+        '''
         self.history.append(normalized_score)
         # smoothed avg slope of score history
         if len(self.history) > 1:
@@ -232,11 +235,15 @@ class SlopeScheduler:
         # #     return self.slope - self.max_slope/10
         # else:
         if long_term_history:
-            return self.slope + (avg_increase_long*.5 + avg_increase_short*.5)*self.max_slope
+            return (avg_increase_long*.5 + avg_increase_short*.5)*self.max_slope
         else:
-            return self.slope + (avg_increase_short)*self.max_slope # expect good behavior to be between 0.1 and 0.9 and if 0 we should reduce slope
+            # bias to have pos slope
+            return self.slope + (avg_increase_short - 0.05)*self.max_slope # expect good behavior to be between 0.1 and 0.9 and if 0 we should reduce slope
         
     def _second_order_score(self, normalized_score: float):
+        '''
+
+        '''
         self._first_order_score(normalized_score)
         if len(self.first_order_history) > 1:
             self.second_order_history.append(self.first_order_history[-1] - self.first_order_history[-2])
@@ -331,8 +338,8 @@ class SlopeScheduler:
                     score_based = self.slope_init + normalized_score*self.max_slope
                     # W1 = normalized_score
                     # W2 = 1 - normalized_score
-                    W1 = .5
-                    W2 = .5
+                    W1 = .2
+                    W2 = .8
                     slope_based = self._first_order_score(normalized_score)
                     self._update_slope(score_based*W1 + slope_based*W2)
                 elif self.order == 4:
