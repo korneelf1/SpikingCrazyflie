@@ -601,7 +601,7 @@ if __name__ == "__main__":
         parser.add_argument("--n-step", type=int, default=1)
         parser.add_argument("--batch-size", type=int, default=256)
         parser.add_argument("--buffer-size", type=int, default=20000, help="Buffer size")
-        parser.add_argument("--buffer-preload", type=bool, default=True, help="Buffer preload")
+        parser.add_argument("--buffer-preload", type=bool, store_true, help="Buffer preload")
 
         parser.add_argument("--alpha", type=float, default=2.5)
         parser.add_argument("--exploration-noise", type=float, default=0.1)
@@ -749,7 +749,7 @@ if __name__ == "__main__":
                                 schedule=args.slope_schedule,
                                 order=args.scheduling_order,
                                 reward_range=(-400,400),
-                                max_slope=50,
+                                max_slope=20,
                                 verbose=True).to(device)
     
     # Initialize the wrapper
