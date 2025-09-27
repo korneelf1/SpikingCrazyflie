@@ -490,7 +490,6 @@ class TD3BC_Online:
         # self.gather_buffer(jump_start_len=490, size=1000)
         n_epochs_tot = 0
         max_epochs = 300
-        epochs_per_gather = 10
         iterator = range(0,max_epochs,epochs_per_gather)
         factor_i = 500/0.8/max_epochs # we want to be fully relying on the model by 80 percent of the end of the training
         # Update curriculum every 6 training cycles (more intuitive than len(iterator)//6)
@@ -642,7 +641,7 @@ if __name__ == "__main__":
         parser.add_argument("--curriculum", action='store_true', help="Enable reward curriculum scheduling")
         parser.add_argument("--jumpstart", action='store_true', help="JumpStartScheduling")
         parser.add_argument("--max_epochs", type=int, default=300, help="Max epochs")
-        parser.add_argument("--epochs_per_gather", type=int, default=10, help="Epochs per gather")
+        parser.add_argument("--epochs_per_gather", type=int, default=20, help="Epochs per gather")
         parser.add_argument("--slope", type=int, default=2, help="Slope value")
         parser.add_argument("--slope_schedule", type=str, default='adaptive')
         parser.add_argument("--scheduling_order", type=int, default=3)
