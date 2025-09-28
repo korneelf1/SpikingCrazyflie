@@ -488,6 +488,8 @@ class TD3BC_Online:
 
         """
         cur_epoch = 0
+        filename = f"TD3BC_Online_TEMP_{self.timestamp}_epoch_{cur_epoch}.pth"
+        checkpoint_path = save_checkpoint(self.model.state_dict(), filename)
         # self.gather_buffer(jump_start_len=490, size=1000)
         n_epochs_tot = 0
         max_epochs = 300
@@ -519,7 +521,7 @@ class TD3BC_Online:
             cur_epoch+=epochs_per_gather
             filename = f"TD3BC_Online_TEMP_{self.timestamp}_epoch_{cur_epoch}.pth"
             checkpoint_path = save_checkpoint(self.model.state_dict(), filename)
-            wandb.run.log_artifact(checkpoint_path, name='policy_streaming', type='model')
+            # wandb.run.log_artifact(checkpoint_path, name='policy_streaming', type='model')
             # Update curriculum every 6 epochs in the final training phase
             if self.curriculum and (cur_epoch // epochs_per_gather) % curriculum_interval == 0 and cur_epoch > 0:
                 self.env.update_curriculum()
