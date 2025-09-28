@@ -503,7 +503,7 @@ class TD3BC_Online:
         iterator = range(0,max_epochs,epochs_per_gather)
         factor_i = 500/0.8/max_epochs # we want to be fully relying on the model by 80 percent of the end of the training
         # Update curriculum every 6 training cycles (more intuitive than len(iterator)//6)
-        curriculum_interval = 2
+        curriculum_interval = 15
         curriculum_update_count = 0
         for i in iterator:
             if jumpstart:
