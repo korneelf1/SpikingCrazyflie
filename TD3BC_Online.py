@@ -369,8 +369,8 @@ class TD3BC_Online:
         # at least batch_size or size * (rollout_len/100)*2
         # gather new buffer - size should be large enough to hold all rollout data
         samples_per_rollout = int(rollout_len/sequence_length)*sequence_length/slicing_interval # best case scenario
-        samples_per_rollout_worst = int(sequence_length)*sequence_length/slicing_interval # worst case scenario
-        n_rollouts = max(np.ceil(self.batch_size/samples_per_rollout), np.ceil(size / samples_per_rollout_worst))
+        samples_per_rollout_worst = sequence_length/slicing_interval # worst case scenario
+        n_rollouts = max(np.ceil(self.batch_size/samples_per_rollout_worst), np.ceil(size / samples_per_rollout_worst))
 
         buffer = ReplayBuffer(size=size) # each sample is 100 in length
         js = jump_start_len if jump_start_len is not None else 0
