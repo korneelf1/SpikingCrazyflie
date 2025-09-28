@@ -21,10 +21,6 @@ python TD3BC_Online.py --slope 2 --hidden-sizes 256 128 --curriculum --slope_sch
 echo "Running Configuration 4: bc_val=0, jumpstart=False"
 python TD3BC_Online.py --slope 2 --hidden-sizes 256 128 --curriculum --slope_schedule 'adaptive' --scheduling_order 3 --bc-val 0.0 --wandb-project neurips_ablation --ablation "bc_val_0_jumpstart_false_no_preloa" --batch-size 2048 --buffer-size 25000 --n_rollouts_per_gather 5000 --epochs_per_gather 20 --max_epochs 500
 
-# configuration 5: normal td3bc online with jump start only for warmup
-echo "Running Configuration 5: Normal TD3BC_Online (bc_val=0.2, jumpstart=True)"
-python TD3BC_Online.py --slope 2 --hidden-sizes 256 128 --curriculum --slope_schedule 'adaptive' --scheduling_order 3 --bc-val 0.2 --jumpstart --wandb-project neurips_ablation --ablation "normal_td3bc_online_no_preload" --batch-size 2048 --buffer-size 25000 --n_rollouts_per_gather 5000 --epochs_per_gather 20 --max_epochs 500
-
 echo "Running Configuration 1: Normal TD3BC_Online (bc_val=0.2, jumpstart=True)"
 python TD3BC_Online.py --slope 2 --hidden-sizes 256 128 --curriculum --slope_schedule 'adaptive' --scheduling_order 3 --bc-val 0.2 --jumpstart --wandb-project neurips_ablation --ablation "normal_td3bc_online_no_preload" --batch-size 2048 --buffer-size 25000 --n_rollouts_per_gather 5000 --epochs_per_gather 20 --max_epochs 500
 
