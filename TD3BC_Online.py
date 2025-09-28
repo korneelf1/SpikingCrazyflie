@@ -71,7 +71,7 @@ class TD3BC_Online:
         self.alpha = 2.5
         self._alpha = 2.5
         self.gamma = 0.99
-        self.tau = 0.005
+        self.tau = 0.001
         self._freq = 1
         self._cnt = 0
         self.controller = controller
@@ -329,7 +329,9 @@ class TD3BC_Online:
             actor_loss.backward()
             self._last = actor_loss.item()
             self.optimizer.step()
+
             self.sync_weight()
+            
             wandb.log({"actor_loss": actor_loss.item()})
             wandb.log({"critic_loss": critic_loss.item()})
             wandb.log({"critic2_loss": critic2_loss.item()})
@@ -349,23 +351,28 @@ class TD3BC_Online:
                 batch = self.buffer.sample(self.batch_size)[0]
                 
                 self.learn_batch(batch)
-
-
+ 
             if n%3==0:
+                # self.sync_weight()
                 self.test(viz=False)
 
     def gather_buffer(self, 
                       name:str ='l2f_controller_buffer_in_ru ', 
-                      size:int = 200, 
+                      size:int = 2500, 
                       rollout_len:int = 501, 
                       jump_start_len:int|None = None,
-                      keep_og:bool = False):
+                      keep_og:bool = False,
+                      slicing_interval:int = 50,
+                      sequence_length:int = 100):
         print("Gathering buffer...")
+        # at least batch_size or size * (rollout_len/100)*2
         # gather new buffer - size should be large enough to hold all rollout data
-        buffer = ReplayBuffer(size=size * (rollout_len/100)*2) # each sample is 100 in length
-        n_rollouts = size  # number of rollouts to collect
+        samples_per_rollout = int(rollout_len/sequence_length)*sequence_length/slicing_interval
+        n_rollouts = max(np.ceil(self.batch_size/samples_per_rollout), np.ceil(size / samples_per_rollout))
+
+        buffer = ReplayBuffer(size=size) # each sample is 100 in length
         js = jump_start_len if jump_start_len is not None else 0
-        for _ in tqdm(range(n_rollouts), desc="Gathering buffer"):
+        for _ in tqdm(range(int(n_rollouts)), desc="Gathering buffer"):
             # assure that we get usable sequences, by discarding rollouts that crash too fast or all the way at the end
             partial_rollout = True
             
@@ -421,28 +428,30 @@ class TD3BC_Online:
                     # obs_next_lst.clear()
                     
                     # add the rollout to the buffer
-                    # chop up in 100 step sequences with step size of 50 (0-100,50-150,100-200,150-250,...)
-                    for j in range(0,obs_stack.shape[0]-100,50):
+                    # chop up in sequence_length step sequences with step size of 50 (0-sequence_length,50-150,sequence_length-200,150-250,...)
+                    for j in range(0,obs_stack.shape[0]-sequence_length,slicing_interval):
                         # Extract data from obs_stack: obs (0:146), actions (146:150), rewards (150:151), dones (151:152)
                         # NOTE only obs_stack is used, rest is saved for compatibility purposes
                         buffer.add(Batch({
-                            'obs': obs_stack[j:j+100],
-                            'act': obs_stack[j:j+100, 146:150][-1],
-                            'rew': float(obs_stack[j:j+100, 150:151][-1].item()),
-                            'terminated': bool(obs_stack[j:j+100, 151:152][-1].item()),
-                            'truncated': bool(obs_stack[j:j+100, 151:152][-1].item())
+                            'obs': obs_stack[j:j+sequence_length],
+                            'act': obs_stack[j:j+sequence_length, 146:150][-1],
+                            'rew': float(obs_stack[j:j+sequence_length, 150:151][-1].item()),
+                            'terminated': bool(obs_stack[j:j+sequence_length, 151:152][-1].item()),
+                            'truncated': bool(obs_stack[j:j+sequence_length, 151:152][-1].item())
                         }))
 
-                    # now add the last bit obs_stack.shape[0]%100 to the buffer
-                    if obs_stack.shape[0]%100>0:
-                        # Extract data from the last 100 elements of obs_stack
+                    # now add the last bit obs_stack.shape[0]%sequence_length to the buffer
+                    if obs_stack.shape[0]%sequence_length>0:
+                        # Extract data from the last sequence_length elements of obs_stack
                         buffer.add(Batch({
-                            'obs': obs_stack[-100:],
-                            'act': obs_stack[-100:, 146:150][-1],
-                            'rew': float(obs_stack[-100:, 150:151][-1].item()),
-                            'terminated': bool(obs_stack[-100:, 151:152][-1].item()),
-                            'truncated': bool(obs_stack[-100:, 151:152][-1].item())
+                            'obs': obs_stack[-sequence_length:],
+                            'act': obs_stack[-sequence_length:, 146:150][-1],
+                            'rew': float(obs_stack[-sequence_length:, 150:151][-1].item()),
+                            'terminated': bool(obs_stack[-sequence_length:, 151:152][-1].item()),
+                            'truncated': bool(obs_stack[-sequence_length:, 151:152][-1].item())
                         }))
+                    self.envsteps+=obs_stack.shape[0]
+                    wandb.log({'environment interactions': self.envsteps})
                 else:
                     partial_rollout = True    
                     obs_lst.clear()
@@ -466,13 +475,12 @@ class TD3BC_Online:
 
         # create buffer with old and new data
         self.buffer.update(buffer)
-        self.envsteps+=size*rollout_len
-        wandb.log({'environment interactions': self.envsteps})
+        
         return buffer
     
     def run(self, 
             jumpstart:bool = False,
-            n_rollouts_per_gather:int = 200,
+            n_samples_per_gather:int = 200,
             max_epochs:int = 300,
             epochs_per_gather:int = 10
             ):
@@ -492,18 +500,17 @@ class TD3BC_Online:
         checkpoint_path = save_checkpoint(self.model.state_dict(), filename)
         # self.gather_buffer(jump_start_len=490, size=1000)
         n_epochs_tot = 0
-        max_epochs = 300
         iterator = range(0,max_epochs,epochs_per_gather)
         factor_i = 500/0.8/max_epochs # we want to be fully relying on the model by 80 percent of the end of the training
         # Update curriculum every 6 training cycles (more intuitive than len(iterator)//6)
-        curriculum_interval = 6
+        curriculum_interval = 2
         curriculum_update_count = 0
         for i in iterator:
             if jumpstart:
-                self.gather_buffer(jump_start_len=500-i*factor_i, size=n_rollouts_per_gather)
+                self.gather_buffer(jump_start_len=500-i*factor_i, size=n_samples_per_gather, slicing_interval=25, sequence_length=100)
                 wandb.log({"jump start steps (500 - n)": i})
             else:
-                self.gather_buffer(size=n_rollouts_per_gather)
+                self.gather_buffer(size=n_samples_per_gather, slicing_interval=25, sequence_length=100)
             wandb.log({"behavorial cloning coefficient": self.bc_coeff})
             self.learn(epoch=cur_epoch, end_epoch=cur_epoch+epochs_per_gather)
             n_epochs_tot+=10
@@ -602,7 +609,7 @@ if __name__ == "__main__":
         parser.add_argument("--epoch", type=int, default=150)
         parser.add_argument("--step-per-epoch", type=int, default=5000)
         parser.add_argument("--n-step", type=int, default=1)
-        parser.add_argument("--batch-size", type=int, default=256)
+        parser.add_argument("--batch-size", type=int, default=10)
         parser.add_argument("--buffer-size", type=int, default=20000, help="Buffer size")
         parser.add_argument("--buffer-preload", action='store_true', help="Buffer preload")
 
@@ -789,14 +796,14 @@ if __name__ == "__main__":
                 critic2=critic2,
                 critic2_optimizer=critic2_optim,
                 buffer=buffer,
-                batch_size=1024 , device=device,
+                batch_size=args.batch_size , device=device,
                 curriculum=args.curriculum,
                 bc_val=args.bc_val,
                 bc_factor=args.bc_factor,)
 
     # learn the model
     trainer.run(jumpstart=args.jumpstart, 
-    n_rollouts_per_gather=args.n_rollouts_per_gather,
+    n_samples_per_gather=args.n_rollouts_per_gather,
     max_epochs=args.max_epochs,
     epochs_per_gather=args.epochs_per_gather)
     
