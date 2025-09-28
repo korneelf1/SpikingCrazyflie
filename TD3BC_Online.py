@@ -28,7 +28,8 @@ class TD3BC_Online:
                  controller:nn.Module|None = None, 
                  curriculum:bool = False,
                  bc_val:float = 0.2,
-                 bc_factor:float = 0.95):
+                 bc_factor:float = 0.95,
+                 jumpstart_only_for_warmup:bool = False):
         self.env = env
         self.device = device
         self.model = model
@@ -80,7 +81,7 @@ class TD3BC_Online:
         self.critic2_old = deepcopy(critic2).to(device)
         self.bc_coeff = bc_val
         self.bc_factor = bc_factor
-
+        self.jumpstart_only_for_warmup = jumpstart_only_for_warmup
 
         self.last_test_rew = 0 # used for adaptive scheduling of slopes
         self.best_test = 0
@@ -367,8 +368,9 @@ class TD3BC_Online:
         print("Gathering buffer...")
         # at least batch_size or size * (rollout_len/100)*2
         # gather new buffer - size should be large enough to hold all rollout data
-        samples_per_rollout = int(rollout_len/sequence_length)*sequence_length/slicing_interval
-        n_rollouts = max(np.ceil(self.batch_size/samples_per_rollout), np.ceil(size / samples_per_rollout))
+        samples_per_rollout = int(rollout_len/sequence_length)*sequence_length/slicing_interval # best case scenario
+        samples_per_rollout_worst = int(sequence_length)*sequence_length/slicing_interval # worst case scenario
+        n_rollouts = max(np.ceil(self.batch_size/samples_per_rollout), np.ceil(size / samples_per_rollout_worst))
 
         buffer = ReplayBuffer(size=size) # each sample is 100 in length
         js = jump_start_len if jump_start_len is not None else 0
@@ -377,7 +379,10 @@ class TD3BC_Online:
             partial_rollout = True
             
             # make sure to gather full rollouts
-            while partial_rollout:
+            if len(buffer) >= size:
+                print("Buffer is full, stopping rollout")
+                break
+            while partial_rollout and len(buffer) < size:
                 # creates lists
                 obs_lst = []
                 action_lst = []
@@ -506,9 +511,12 @@ class TD3BC_Online:
         curriculum_interval = 15
         curriculum_update_count = 0
         for i in iterator:
-            if jumpstart:
+            if jumpstart and not self.jumpstart_only_for_warmup:
                 self.gather_buffer(jump_start_len=500-i*factor_i, size=n_samples_per_gather, slicing_interval=25, sequence_length=100)
                 wandb.log({"jump start steps (500 - n)": i})
+            elif self.jumpstart_only_for_warmup:
+                self.gather_buffer(jump_start_len=100, size=n_samples_per_gather, slicing_interval=25, sequence_length=100)
+                wandb.log({"jump start steps (100)": 100})
             else:
                 self.gather_buffer(size=n_samples_per_gather, slicing_interval=25, sequence_length=100)
             wandb.log({"behavorial cloning coefficient": self.bc_coeff})
@@ -658,6 +666,7 @@ if __name__ == "__main__":
         parser.add_argument("--bc-factor", type=float, default=0.99, help="Behavioral cloning factor")
         
         parser.add_argument("--bc-val", type=float, default=0.2, help="Behavioral cloning factor")
+        parser.add_argument("--jumpstart_only_for_warmup", action='store_true', help="JumpStartScheduling only for warmup")
         # Use 'store_true' for interval if you want it as a flag, or use 'type=int' if it's an integer
         parser.add_argument("--interval", type=int, default=1, help="Interval flag")
         parser.add_argument("--ablation", type=str, default=None)
@@ -736,6 +745,7 @@ if __name__ == "__main__":
     print("Hidden sizes:",args.hidden_sizes)
     print("Curriculum:",args.curriculum)
     print("Jumpstart:",args.jumpstart)
+    print("Jumpstart only for warmup:",args.jumpstart_only_for_warmup)
     args.jumpstart = True
     wandb.config.update({"device":device})
     wandb.config.update({"slope":args.slope})
@@ -745,6 +755,7 @@ if __name__ == "__main__":
     wandb.config.update({"bc_factor":args.bc_factor})
     wandb.config.update({"jumpstart":args.jumpstart})
     wandb.config.update({"ablation":args.ablation})
+    wandb.config.update({"jumpstart_only_for_warmup":args.jumpstart_only_for_warmup})
     # args.surrogate_scheduling = True
 
 
@@ -799,7 +810,8 @@ if __name__ == "__main__":
                 batch_size=args.batch_size , device=device,
                 curriculum=args.curriculum,
                 bc_val=args.bc_val,
-                bc_factor=args.bc_factor,)
+                bc_factor=args.bc_factor,
+                jumpstart_only_for_warmup=args.jumpstart_only_for_warmup,)
 
     # learn the model
     trainer.run(jumpstart=args.jumpstart, 
