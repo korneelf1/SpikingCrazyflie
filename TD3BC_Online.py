@@ -180,44 +180,85 @@ class TD3BC_Online:
     def compute_returns(self,
                         batch, 
                         nstep:int = 1, 
-                        recompute_with_current_policy:bool = False):
+                        recompute_with_current_policy:bool = True) -> tuple[torch.Tensor, torch.Tensor]:
         '''Compute returns from rewards using discounted rewards:
         R_t = r_t + gamma * r_{t+1} + gamma^2 * r_{t+2} + ... + gamma^{T-t} * r_T
         where T is the last timestep of the episode
         recompute_with_current_policy: bool, if True, recompute the actions using the current policy, which makes te return estimate more accurate
         '''
         gamma = self.gamma
-        rewards = batch.rew
-        dones = batch.done
-        returns = torch.zeros_like(rewards)
-        running_returns = 0
-        actions = batch.act
-        observations = batch.obs
-        
-        #torch.min(
-        #     self.critic1_old(obs_next_batch.obs, act_),
-        #     self.critic2_old(obs_next_batch.obs, act_),
-        # )
-        running_returns = 0
-        # compute returns with Bellman equation and critics as value functin
-        for t in reversed(range(rewards.shape[-1])):
-            if t<rewards.shape[-1]-nstep-1:
-                act_  = actions[:,t+2]
-                noise = torch.randn(size=act_.shape, device=act_.device) * self.policy_noise
-                if self.noise_clip > 0.0:
-                    noise = noise.clamp(-self.noise_clip, self.noise_clip)
-                act_ += noise
-                running_returns = rewards[:,t] + gamma*rewards[:,t+1]+\
-                gamma**2 * torch.min(self.critic1_old(observations[:,t+2],act_),
-                              self.critic2_old(observations[:,t+2],act_)).squeeze(-1) * (1 - dones[:,t+2])
-            else:
-                running_returns = rewards[:,t] + gamma*running_returns * (1 - dones[:,t])
-            returns[:,t] = running_returns.detach()
 
-        # for t in reversed(range(len(rewards))):
-        #     running_returns = rewards[t] + gamma * running_returns * (1 - dones[t])
-        #     returns[t] = running_returns
-        return returns
+        obs = batch.obs             # [B, seq_len, obs_dim]
+        next_obs = batch.obs_next   # [B, seq_len, obs_dim]
+        rewards = batch.rew         # [B, seq_len]
+        dones = batch.done          # [B, seq_len]
+
+        B, T, obs_dim = next_obs.shape
+        next_obs_flat = next_obs.reshape(-1, obs_dim)
+
+        with torch.no_grad():
+            # Choose actor: target or current
+            if recompute_with_current_policy:
+                next_actions_flat = self.model(next_obs_flat[:, :18])  # if your actor only uses 18-dim input
+            else:
+                next_actions_flat = self.model_old(next_obs_flat[:, :18])
+
+            next_actions = next_actions_flat.reshape(B, T, -1)
+
+            # Add clipped noise (policy smoothing)
+            noise = (torch.randn_like(next_actions) * self.policy_noise).clamp(-self.noise_clip, self.noise_clip)
+            next_actions = (next_actions + noise).clamp(-1, 1)
+
+            # Target Q-values
+            q1_target = self.critic1_old(next_obs_flat, next_actions.reshape(-1, next_actions.shape[-1]))
+            q2_target = self.critic2_old(next_obs_flat, next_actions.reshape(-1, next_actions.shape[-1]))
+            q_target = torch.min(q1_target, q2_target).reshape(B, T)
+
+            # Bellman backup
+            returns = rewards + gamma * (1 - dones) * q_target
+
+        return returns, next_actions
+
+        # gamma = self.gamma
+        # rewards = batch.rew
+        # dones = batch.done
+        # returns = torch.zeros_like(rewards)
+        # running_returns = 0
+        # actions = batch.act
+        # observations = batch.obs
+        # obs_next = batch.obs_next
+        # actions_recomputed = torch.zeros_like(actions)
+        # #torch.min(
+        # #     self.critic1_old(obs_next_batch.obs, act_),
+        # #     self.critic2_old(obs_next_batch.obs, act_),
+        # # )
+        # running_returns = 0
+
+        # # recompute actions with current policy
+        # if recompute_with_current_policy:
+        #     for t in range(obs_next.shape[1]):
+        #         actions = self.model(obs_next[:, t,:18])
+        #         actions_recomputed[:, t] = actions
+
+        # # compute returns with Bellman equation and critics as value functin
+        # for t in reversed(range(rewards.shape[-1])):
+        #     if t<rewards.shape[-1]-nstep-1:
+        #         act_  = actions[:,t+2]
+        #         noise = torch.randn(size=act_.shape, device=act_.device) * self.policy_noise
+        #         if self.noise_clip > 0.0:
+        #             noise = noise.clamp(-self.noise_clip, self.noise_clip)
+        #         act_ += noise
+        #         running_returns = rewards[:,t] + gamma*rewards[:,t+1]+\
+        #         gamma**2 * torch.min(self.critic1_old(observations[:,t+2],act_),
+        #                       self.critic2_old(observations[:,t+2],act_)).squeeze(-1) * (1 - dones[:,t+2])
+        #     else:
+        #         running_returns = rewards[:,t] + gamma*running_returns * (1 - dones[:,t])
+        #     returns[:,t] = running_returns.detach()
+
+        # # for t in reversed(range(len(rewards))):
+        # #     running_returns = rewards[t] + gamma * running_returns * (1 - dones[t])
+        # #     returns[t] = running_returns
+        # return returns
     
     def _mse_optimizer(
             self,
@@ -276,25 +317,25 @@ class TD3BC_Online:
             returns=np.empty((1,),dtype=np.float32)
         )
         batch = to_torch_as(batch,torch.zeros((1,),device=self.device,dtype=torch.float32))
-        compute_returns = self.compute_returns(batch)
+        compute_returns, actions_recomputed = self.compute_returns(batch)
         batch.returns = compute_returns
 
         # reshape them where now (batch, t, features) -> (batch*500/length, length, features)
-        observations = batch.obs.reshape(-1,length,146)
-        actions = batch.act.reshape(-1,length,4)
-        rewards = batch.rew.reshape(-1,length)
-        terminated = batch.done.reshape(-1,length)
-        observations_next = batch.obs_next.reshape(-1,length,146)
-        returns = batch.returns.reshape(-1,length)
+        # observations = batch.obs.reshape(-1,length,146)
+        # actions = batch.act.reshape(-1,length,4)
+        # rewards = batch.rew.reshape(-1,length)
+        # terminated = batch.done.reshape(-1,length)
+        # observations_next = batch.obs_next.reshape(-1,length,146)
+        # returns = batch.returns.reshape(-1,length)
 
-        batch = Batch(
-            obs=observations,
-            act=actions,
-            rew=rewards,
-            done=terminated,
-            obs_next=observations_next,
-            returns=returns
-        )
+        # batch = Batch(
+        #     obs=observations,
+        #     act=actions,
+        #     rew=rewards,
+        #     done=terminated,
+        #     obs_next=observations_next,
+        #     returns=returns
+        # )
 
         # learn critics
         td1, critic_loss = self._mse_optimizer(
@@ -319,13 +360,13 @@ class TD3BC_Online:
 
             act = torch.stack(outputs, dim=1)
                 
-            q_value = self.critic1(batch.obs.reshape(-1,146), batch.act.reshape(-1,4)).reshape(-1,length)
+            q_value = self.critic1(batch.obs.reshape(-1,146), act.reshape(-1,4)).reshape(-1,length)
             # after warmup
             q_value = q_value[:,self.warmup:]
             act = act[:,self.warmup:]
             lmbda = self._alpha / q_value.abs().mean().detach()
             actor_loss = -lmbda * q_value.mean() + self.bc_coeff*F.mse_loss(
-                act, to_torch_as(batch.act[:,self.warmup:], act)
+                act, to_torch_as(actions_recomputed[:,self.warmup:], act)
             )
             actor_loss.backward()
             self._last = actor_loss.item()
@@ -372,7 +413,8 @@ class TD3BC_Online:
         samples_per_rollout_worst = sequence_length/slicing_interval # worst case scenario
         n_rollouts = max(np.ceil(self.batch_size/samples_per_rollout_worst), np.ceil(size / samples_per_rollout_worst))
 
-        buffer = ReplayBuffer(size=size) # each sample is 100 in length
+        buffer_size = self.batch_size if self.batch_size > size + len(self.buffer) else size
+        buffer = ReplayBuffer(size=buffer_size) # each sample is 100 in length
         js = jump_start_len if jump_start_len is not None else 0
         for _ in tqdm(range(int(n_rollouts)), desc="Gathering buffer"):
             # assure that we get usable sequences, by discarding rollouts that crash too fast or all the way at the end
