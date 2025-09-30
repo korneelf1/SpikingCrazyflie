@@ -607,7 +607,7 @@ class TD3BC_Online:
         iterator = range(0,max_epochs,epochs_per_gather)
         factor_i = 500/0.8/max_epochs # we want to be fully relying on the model by 80 percent of the end of the training
         # Update curriculum every 6 training cycles (more intuitive than len(iterator)//6)
-        curriculum_interval = 15
+        curriculum_interval = 1e4
         curriculum_update_count = 0
         for i in iterator:
             if jumpstart and not self.jumpstart_only_for_warmup:
@@ -625,10 +625,11 @@ class TD3BC_Online:
             cur_epoch+=epochs_per_gather
             
             # Update curriculum every curriculum_interval training cycles
-            if self.curriculum and curriculum_update_count % curriculum_interval == 0 and curriculum_update_count > 0:
+            if self.curriculum and curriculum_update_count - curriculum_interval > 0 and curriculum_update_count > 0:
                 self.env.update_curriculum()
                 print(f"Curriculum updated at training cycle {curriculum_update_count}")
-            curriculum_update_count += 1
+                curriculum_update_count = 0
+            curriculum_update_count += n_samples_per_gather
         while n_epochs_tot<max_epochs:
             self.learn(epoch=cur_epoch, end_epoch=cur_epoch+epochs_per_gather)
             n_epochs_tot+=epochs_per_gather
