@@ -37,10 +37,11 @@ class TD3BC_Online:
                  jumpstart_only_for_warmup:bool = False,
                  wandb_run=None, 
                  policy_noise:float = 0.2,
-                 noise_clip:float = 0.5):
+                 noise_clip:float = 0.5,
+                 alpha:float = 5):
         self.env = env
         self.device = device
-        self.model = model
+        self.actor = model
         self.actor_obs_size = actor_obs_size
         self.priveliged_obs_size = priveliged_obs_size
         self.action_size = action_size
@@ -82,16 +83,17 @@ class TD3BC_Online:
         if device == 'mps':
             torch.set_default_dtype(torch.float32)
 
-        self.alpha = 2.5
-        self._alpha = 2.5
+        self.alpha = alpha
+        self._alpha = alpha
         self.gamma = 0.99
-        self.tau = 0.001
+        self.tau = 0.005
         self._freq = 1
         self._cnt = 0
         self.controller = controller
         # create deep copies of the critic networks
         self.critic1_old = deepcopy(critic1).to(device)
         self.critic2_old = deepcopy(critic2).to(device)
+        self.actor_old = deepcopy(model).to(device)
         self.bc_coeff = bc_val
         self.bc_factor = bc_factor
         self.jumpstart_only_for_warmup = jumpstart_only_for_warmup
@@ -121,10 +123,10 @@ class TD3BC_Online:
                 if t< self.warmup:
                     obs = torch.tensor(obs,device=self.device, dtype=torch.float32)
                     action = self.controller(obs)
-                    self.model(obs[:self.actor_obs_size]) # warmup the model
+                    self.actor(obs[:self.actor_obs_size]) # warmup the model
                 else:
                     obs = torch.tensor(obs,device=self.device, dtype=torch.float32)
-                    action = self.model(obs[:self.actor_obs_size])
+                    action = self.actor(obs[:self.actor_obs_size])
                     action = action.reshape(self.action_size,)
                 
                 actions.append(action.detach().cpu())
@@ -151,9 +153,9 @@ class TD3BC_Online:
             
             outputs = []
             # hidden = None
-            # print(self.model.device)
+            # print(self.actor.device)
             for t in range(observations.shape[1]):
-                mu = self.model(observations[:, t])
+                mu = self.actor(observations[:, t])
                 output = mu # actor
                 outputs.append(output)
 
@@ -172,31 +174,16 @@ class TD3BC_Online:
         if self.last_test_rew > self.best_test:
             self.best_test = self.last_test_rew
             filename = f"TD3BC_Online_TEMP_{self.timestamp}.pth"
-            checkpoint_path = save_checkpoint(self.model.state_dict(), filename)
+            checkpoint_path = save_checkpoint(self.actor.state_dict(), filename)
             self.wandb_run.log_artifact(checkpoint_path, name='policy_streaming', type='model')
 
-    def _target_q(self, 
-                  buffer: ReplayBuffer, 
-                  indices: np.ndarray) -> torch.Tensor:
-        obs_next_batch = Batch(
-            obs=buffer[indices].obs_next,
-            info=[None] * len(indices),
-        )  # obs_next: s_{t+n}
-        act_ = self(obs_next_batch, model="actor_old").act
-        noise = torch.randn(size=act_.shape, device=act_.device) * self.policy_noise
-        if self.noise_clip > 0.0:
-            noise = noise.clamp(-self.noise_clip, self.noise_clip)
-        act_ += noise
-        return torch.min(
-            self.critic_old(obs_next_batch.obs, act_),
-            self.critic2_old(obs_next_batch.obs, act_),
-        )
-    
-    def compute_returns(self, batch, actions_recomputed, recompute_with_current_policy=True):
-        '''Compute returns from rewards using discounted rewards:
-        R_t = r_t + gamma * r_{t+1} + gamma^2 * r_{t+2} + ... + gamma^{T-t} * r_T
-        where T is the last timestep of the episode
-        recompute_with_current_policy: bool, if True, recompute the actions using the current policy, which makes te return estimate more accurate
+    def compute_returns(self, batch, actions_current, use_next_actions=False):
+        '''Compute returns from rewards using discounted rewards with bootstrapping.
+        
+        Args:
+            batch: Batch containing obs, obs_next, rew, done
+            actions_current: Actions for current states (buffer actions)
+            use_next_actions: If False, compute next actions from current policy
         '''
         gamma = self.gamma
         obs_next = batch.obs_next     # [B, T, obs_dim]
@@ -206,67 +193,30 @@ class TD3BC_Online:
         B, T, obs_dim = obs_next.shape
         obs_next_flat = obs_next.reshape(B * T, obs_dim).to(self.device)
 
-        # Shift actions_recomputed to align with next_obs
-        next_actions = torch.cat([actions_recomputed[:, 1:], actions_recomputed[:, -1:]], dim=1)
-        next_actions_flat = next_actions.reshape(B * T, -1)
-
         with torch.no_grad():
+            # Compute NEXT actions using current policy (for bootstrapping)
+            next_actions = []
+            for t in range(T):
+                action = self.actor_old(obs_next[:, t, :self.actor_obs_size])
+                next_actions.append(action)
+            next_actions = torch.stack(next_actions, dim=1)
+            next_actions_flat = next_actions.reshape(B * T, -1)
+            
             # Policy smoothing
             noise = (
                 torch.randn_like(next_actions_flat) * self.policy_noise
             ).clamp(-self.noise_clip, self.noise_clip)
             next_actions_flat = (next_actions_flat + noise).clamp(-1, 1)
 
-            # Target Q
+            # Target Q using NEXT state and NEXT actions
             q1_target = self.critic1_old(obs_next_flat, next_actions_flat).view(B, T)
             q2_target = self.critic2_old(obs_next_flat, next_actions_flat).view(B, T)
             q_target = torch.min(q1_target, q2_target)
 
-            # Bellman backup
+            # Bellman backup: r_t + γ * Q(s_{t+1}, π(s_{t+1}))
             returns = rewards.to(self.device) + gamma * (1 - dones.to(self.device)) * q_target
 
         return returns
-
-        # gamma = self.gamma
-        # rewards = batch.rew
-        # dones = batch.done
-        # returns = torch.zeros_like(rewards)
-        # running_returns = 0
-        # actions = batch.act
-        # observations = batch.obs
-        # obs_next = batch.obs_next
-        # actions_recomputed = torch.zeros_like(actions)
-        # #torch.min(
-        # #     self.critic1_old(obs_next_batch.obs, act_),
-        # #     self.critic2_old(obs_next_batch.obs, act_),
-        # # )
-        # running_returns = 0
-
-        # # recompute actions with current policy
-        # if recompute_with_current_policy:
-        #     for t in range(obs_next.shape[1]):
-        #         actions = self.model(obs_next[:, t,:self.actor_obs_size])
-        #         actions_recomputed[:, t] = actions
-
-        # # compute returns with Bellman equation and critics as value functin
-        # for t in reversed(range(rewards.shape[-1])):
-        #     if t<rewards.shape[-1]-nstep-1:
-        #         act_  = actions[:,t+2]
-        #         noise = torch.randn(size=act_.shape, device=act_.device) * self.policy_noise
-        #         if self.noise_clip > 0.0:
-        #             noise = noise.clamp(-self.noise_clip, self.noise_clip)
-        #         act_ += noise
-        #         running_returns = rewards[:,t] + gamma*rewards[:,t+1]+\
-        #         gamma**2 * torch.min(self.critic1_old(observations[:,t+2],act_),
-        #                       self.critic2_old(observations[:,t+2],act_)).squeeze(-1) * (1 - dones[:,t+2])
-        #     else:
-        #         running_returns = rewards[:,t] + gamma*running_returns * (1 - dones[:,t])
-        #     returns[:,t] = running_returns.detach()
-
-        # # for t in reversed(range(len(rewards))):
-        # #     running_returns = rewards[t] + gamma * running_returns * (1 - dones[t])
-        # #     returns[t] = running_returns
-        # return returns
     
     def _mse_optimizer(
             self,
@@ -284,6 +234,8 @@ class TD3BC_Online:
         critic_loss = (current_q - target_q.detach()).pow(2).mean()
         optimizer.zero_grad()
         critic_loss.backward()
+        # clip gradients
+        torch.nn.utils.clip_grad_norm_(critic.parameters(), 1.0)
         optimizer.step()
         return td, critic_loss
     
@@ -295,87 +247,182 @@ class TD3BC_Online:
     def sync_weight(self) -> None:
         self.soft_update(self.critic1_old, self.critic1, self.tau)
         self.soft_update(self.critic2_old, self.critic2, self.tau)
-        # self.soft_update(self.actor_old, self.actor, self.tau)
+        self.soft_update(self.actor_old, self.actor, self.tau)
 
-    def learn_batch(self, 
-                    batch,):
-        if batch.obs.shape[1]%self.sequence_length!=0:
-            # print("Batch length not divisible by length, cutting original batch")
-            batch.obs = batch.obs[:,:-(batch.obs.shape[1]%self.sequence_length)]
+    # def learn_batch(self, 
+    #                 batch,):
+    #     if batch.obs.shape[1]%self.sequence_length!=0:
+    #         # print("Batch length not divisible by length, cutting original batch")
+    #         batch.obs = batch.obs[:,:-(batch.obs.shape[1]%self.sequence_length)]
         
             
-        # create batch from first observations
-        batch_size = batch.obs.shape[0]*batch.obs.shape[1]//self.sequence_length
-        observations = batch.obs[:,:, :self.priveliged_obs_size]
-        actions = batch.obs[:,:, self.priveliged_obs_size:self.priveliged_obs_size+self.action_size]
-        rewards = batch.obs[:,:, self.priveliged_obs_size+self.action_size]
-        terminated = batch.obs[:,:, self.priveliged_obs_size+self.action_size+1]
-        observations_next = np.hstack((batch.obs[:,1:, :self.priveliged_obs_size], np.zeros((batch.obs.shape[0],1, self.priveliged_obs_size))),dtype=np.float32)
+    #     # create batch from first observations
+    #     batch_size = batch.obs.shape[0]*batch.obs.shape[1]//self.sequence_length
+    #     observations = batch.obs[:,:, :self.priveliged_obs_size]
+    #     actions = batch.obs[:,:, self.priveliged_obs_size:self.priveliged_obs_size+self.action_size]
+    #     rewards = batch.obs[:,:, self.priveliged_obs_size+self.action_size]
+    #     terminated = batch.obs[:,:, self.priveliged_obs_size+self.action_size+1]
+    #     observations_next = np.hstack((batch.obs[:,1:, :self.priveliged_obs_size], np.zeros((batch.obs.shape[0],1, self.priveliged_obs_size))),dtype=np.float32)
 
         
 
-        # compute returns
-        # modified batch
-        batch = Batch(
-            obs=observations,
-            act=actions,
-            rew=rewards,
-            done=terminated,
-            obs_next=observations_next,
-            returns=np.empty((1,),dtype=np.float32)
-        )
-        batch = to_torch_as(batch,torch.zeros((1,),device=self.device,dtype=torch.float32))
-        # recompute actions
-        actions_recomputed = torch.zeros_like(torch.tensor(actions))
-        for t in range(observations.shape[1]):
-            actions_recomputed[:, t] = self.model(observations[:, t, :self.actor_obs_size])
+    #     # compute returns
+    #     # modified batch
+    #     batch = Batch(
+    #         obs=observations,
+    #         act=actions,
+    #         rew=rewards,
+    #         done=terminated,
+    #         obs_next=observations_next,
+    #         returns=np.empty((1,),dtype=np.float32)
+    #     )
+    #     batch = to_torch_as(batch,torch.zeros((1,),device=self.device,dtype=torch.float32))
+    #     # recompute actions
+    #     actions_recomputed = []
+    #     for t in range(observations.shape[1]):
+    #         action = self.actor(observations[:, t, :self.actor_obs_size])
+    #         actions_recomputed.append(action)
+    #     actions_recomputed = torch.stack(actions_recomputed, dim=1)
+
+    #     compute_returns = self.compute_returns(batch, actions_recomputed)
+    #     batch.returns = compute_returns
+
+
+    #     # learn critics
+    #     td1, critic_loss = self._mse_optimizer(
+    #         batch, self.critic1, self.critic1_optimizer
+    #     )
+    #     td2, critic2_loss = self._mse_optimizer(
+    #         batch, self.critic2, self.critic2_optimizer
+    #     )
+    #     batch.weight = (td1 + td2) / 2.0  # prio-buffer
+    #     # actor
+    #     if self._cnt % self._freq == 0:
+    #         self._cnt+=1
+    #         self.optimizer.zero_grad()
+    #         # hidden = None
+    #         # print(self.actor.device)
             
-        compute_returns = self.compute_returns(batch, actions_recomputed)
-        batch.returns = compute_returns
+    #         # NOTE moved recomputing outputs to compute_returns
+    #         # priv_obs = batch.obs[:,:, :self.actor_obs_size].clone().detach().requires_grad_(True).to(self.device).to(torch.float32)
+    #         # for t in range(observations.shape[1]):
+    #         #     mu = self.actor(priv_obs[:, t])
+    #         #     output = mu # actor
+    #         #     outputs.append(output)
 
+    #         # act = torch.stack(outputs, dim=1)
+                
+    #         q_value = self.critic1(batch.obs.reshape(-1,self.priveliged_obs_size), actions_recomputed.reshape(-1,self.action_size)).reshape(-1,self.sequence_length)
+    #         # after warmup
+    #         q_value = q_value[:,self.warmup:]
+    #         act = batch.act[:,self.warmup:]
+    #         lmbda = self._alpha / q_value.abs().mean().detach()
+    #         actor_loss = -lmbda * q_value.mean() + self.bc_coeff*F.mse_loss(
+    #             act, to_torch_as(actions_recomputed[:,self.warmup:], actions_recomputed)
+    #         )
+    #         actor_loss.backward()
+    #         self._last = actor_loss.item()
+    #         self.optimizer.step()
 
-        # learn critics
+    #         self.sync_weight()
+            
+    #         self.wandb_run.log({"actor_loss": actor_loss.item()})
+    #         self.wandb_run.log({"critic_loss": critic_loss.item()})
+    #         self.wandb_run.log({"critic2_loss": critic2_loss.item()})
+    def learn_batch(self, batch):
+        if batch.obs.shape[1] % self.sequence_length != 0:
+            batch.obs = batch.obs[:, :-(batch.obs.shape[1] % self.sequence_length)]
+        
+        observations = torch.tensor(batch.obs[:, :, :self.priveliged_obs_size], device=self.device, dtype=torch.float32)
+        batch.act = actions = torch.tensor(batch.obs[:, :, self.priveliged_obs_size:self.priveliged_obs_size+self.action_size], device=self.device, dtype=torch.float32)
+        batch.rew = rewards = torch.tensor(batch.obs[:, :, self.priveliged_obs_size+self.action_size], device=self.device, dtype=torch.float32)
+        batch.done = terminated = torch.tensor(batch.obs[:, :, self.priveliged_obs_size+self.action_size+1], device=self.device, dtype=torch.float32)
+        batch.obs_next = observations_next = torch.hstack((observations[:, 1:, :self.priveliged_obs_size], 
+                                    torch.zeros((observations.shape[0], 1, self.priveliged_obs_size), dtype=torch.float32)))
+        batch.obs = observations
+        batch.act = actions
+        batch.rew = rewards
+        batch.done = terminated
+        batch.obs_next = observations_next
+        # batch = Batch(
+        #     obs=observations,
+        #     act=actions,  # Buffer actions
+        #     rew=rewards,
+        #     done=terminated,
+        #     obs_next=observations_next,
+        #     returns=np.empty((1,), dtype=np.float32)
+        # )
+        # batch = to_torch_as(batch, torch.zeros((1,), device=self.device, dtype=torch.float32))
+        
+        # target actions with clipped noise (policy smoothing)
+        with torch.no_grad():
+            target_actions_next = []
+            for t in range(batch.obs.shape[1]):
+                action_next = self.actor_old(observations_next[:, t, :self.actor_obs_size])
+                noise = torch.randn_like(action_next) * self.policy_noise
+                if self.noise_clip > 0.0:
+                    noise = noise.clamp(-self.noise_clip, self.noise_clip)
+                action_next += noise
+                # action_next = action_next
+                target_actions_next.append(action_next)
+            target_actions_next = torch.stack(target_actions_next, dim=1)
+            # Compute returns - this will compute next actions internally
+            # compute_returns = self.compute_returns(batch, batch.act)
+            # batch.returns = compute_returns
+            target_q1 = self.critic1_old(observations_next.reshape(-1, self.priveliged_obs_size), target_actions_next.reshape(-1, self.action_size))
+            target_q2 = self.critic2_old(observations_next.reshape(-1, self.priveliged_obs_size), target_actions_next.reshape(-1, self.action_size))
+            target_q = torch.min(target_q1, target_q2).reshape(-1, self.sequence_length)
+        batch.returns = rewards + self.gamma * (1 - terminated) * target_q
+        
+        # === CRITIC UPDATE ===
         td1, critic_loss = self._mse_optimizer(
             batch, self.critic1, self.critic1_optimizer
         )
         td2, critic2_loss = self._mse_optimizer(
             batch, self.critic2, self.critic2_optimizer
         )
-        batch.weight = (td1 + td2) / 2.0  # prio-buffer
-        # actor
+        batch.weight = (td1 + td2) / 2.0
+        
+        # === ACTOR UPDATE ===
         if self._cnt % self._freq == 0:
-            self._cnt+=1
             self.optimizer.zero_grad()
-            # hidden = None
-            # print(self.model.device)
             
-            # NOTE moved recomputing outputs to compute_returns
-            # priv_obs = batch.obs[:,:, :self.actor_obs_size].clone().detach().requires_grad_(True).to(self.device).to(torch.float32)
-            # for t in range(observations.shape[1]):
-            #     mu = self.model(priv_obs[:, t])
-            #     output = mu # actor
-            #     outputs.append(output)
-
-            # act = torch.stack(outputs, dim=1)
-                
-            q_value = self.critic1(batch.obs.reshape(-1,self.priveliged_obs_size), actions_recomputed.reshape(-1,self.action_size)).reshape(-1,self.sequence_length)
-            # after warmup
-            q_value = q_value[:,self.warmup:]
-            act = batch.act[:,self.warmup:]
+            # Compute current actions with gradients
+            current_actions = []
+            for t in range(batch.obs.shape[1]):
+                action = self.actor(batch.obs[:, t, :self.actor_obs_size])
+                current_actions.append(action)
+            current_actions = torch.stack(current_actions, dim=1)
+            
+            q_value = self.critic1(
+                batch.obs.reshape(-1, self.priveliged_obs_size), 
+                current_actions.reshape(-1, self.action_size)
+            ).reshape(-1, self.sequence_length)
+            
+            q_value = q_value[:, self.warmup:]
+            act = batch.act[:, self.warmup:]
+            current_actions_train = current_actions[:, self.warmup:]
+            
             lmbda = self._alpha / q_value.abs().mean().detach()
-            actor_loss = -lmbda * q_value.mean() + self.bc_coeff*F.mse_loss(
-                act, to_torch_as(actions_recomputed[:,self.warmup:], actions_recomputed)
-            )
+            bc_loss = F.mse_loss(current_actions_train, act)
+            actor_loss = lmbda * bc_loss - q_value.mean()
+            # actor_loss = -lmbda * q_value.mean() + self.bc_coeff * F.mse_loss(
+            #     current_actions_train, act
+            # )
             actor_loss.backward()
             self._last = actor_loss.item()
+            # clip gradients
+            torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
             self.optimizer.step()
-
+            
             self.sync_weight()
             
             self.wandb_run.log({"actor_loss": actor_loss.item()})
             self.wandb_run.log({"critic_loss": critic_loss.item()})
             self.wandb_run.log({"critic2_loss": critic2_loss.item()})
-
+        
+        self._cnt += 1
+    
     def learn(self, 
               epoch:int = 0, 
               end_epoch:int = 10):
@@ -384,9 +431,9 @@ class TD3BC_Online:
         for n in tqdm(range(epoch, end_epoch)):
             self.wandb_run.log({"epoch":n})
             losses=[]
-            self.model.to(self.device)
+            self.actor.to(self.device)
             for _ in range(int(len(self.buffer)//self.batch_size)):
-                self.model.reset(current_epoch = n,
+                self.actor.reset(current_epoch = n,
                                             last_test_rew = self.last_test_rew) # pass last test reward and current epoch to reset (used for adaptive scheduling and interval based scheduling  of slopes, respectively)
                 batch = self.buffer.sample(self.batch_size)[0]
                 
@@ -445,9 +492,9 @@ class TD3BC_Online:
                     if t_warmup<max(self.warmup,js):
                         t_warmup+=1
                         action = self.controller(obs)
-                        _ = self.model(obs[:self.actor_obs_size])
+                        _ = self.actor(obs[:self.actor_obs_size])
                     else:
-                        action = self.model(obs[:self.actor_obs_size])
+                        action = self.actor(obs[:self.actor_obs_size])
                         # reshape in place
                         action = action.reshape(self.action_size,)
                         # add noise
@@ -455,6 +502,7 @@ class TD3BC_Online:
                         if self.noise_clip > 0.0:
                             noise = noise.clamp(-self.noise_clip, self.noise_clip)
                         action += noise
+                        action = action.clamp(-2, 2)
 
                     obs_lst.append(obs.cpu().numpy())
                     obs, rewards, dones,_, info = self.env.step(action.cpu().detach().numpy()) 
@@ -553,7 +601,7 @@ class TD3BC_Online:
         """
         cur_epoch = 0
         filename = f"TD3BC_Online_TEMP_{self.timestamp}_epoch_{cur_epoch}.pth"
-        checkpoint_path = save_checkpoint(self.model.state_dict(), filename)
+        checkpoint_path = save_checkpoint(self.actor.state_dict(), filename)
         # self.gather_buffer(jump_start_len=490, size=1000)
         n_epochs_tot = 0
         iterator = range(0,max_epochs,epochs_per_gather)
@@ -586,7 +634,7 @@ class TD3BC_Online:
             n_epochs_tot+=epochs_per_gather
             cur_epoch+=epochs_per_gather
             filename = f"TD3BC_Online_TEMP_{self.timestamp}_epoch_{cur_epoch}.pth"
-            checkpoint_path = save_checkpoint(self.model.state_dict(), filename)
+            checkpoint_path = save_checkpoint(self.actor.state_dict(), filename)
             # self.wandb_run.log_artifact(checkpoint_path, name='policy_streaming', type='model')
             # Update curriculum every 6 epochs in the final training phase
             if self.curriculum and (cur_epoch // epochs_per_gather) % curriculum_interval == 0 and cur_epoch > 0:
