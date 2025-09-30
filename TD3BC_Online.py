@@ -15,31 +15,44 @@ from utils.directory_manager import save_checkpoint
 class TD3BC_Online:
     def __init__(self, 
                  env, 
-                 model, 
+                 model,                 
                  optimizer,
                  critic1, 
                  critic1_optimizer, 
                  critic2, 
                  critic2_optimizer, 
                  buffer, 
+                 actor_obs_size:int = 18, 
+                 priveliged_obs_size:int = 146,
+                 action_size:int = 4,
                  batch_size:int = 256, 
                  warmup:int = 50, 
+                 slicing_interval:int = 25,
+                 sequence_length:int = 100,
                  device:str = 'cpu', 
                  controller:nn.Module|None = None, 
                  curriculum:bool = False,
                  bc_val:float = 0.2,
                  bc_factor:float = 0.95,
-                 jumpstart_only_for_warmup:bool = False):
+                 jumpstart_only_for_warmup:bool = False,
+                 wandb_run=None, 
+                 policy_noise:float = 0.2,
+                 noise_clip:float = 0.5):
         self.env = env
         self.device = device
         self.model = model
+        self.actor_obs_size = actor_obs_size
+        self.priveliged_obs_size = priveliged_obs_size
+        self.action_size = action_size
         self.critic1 = critic1.to(device)
         self.critic2 = critic2.to(device)
         self.critic1_optimizer = critic1_optimizer
         self.critic2_optimizer = critic2_optimizer
         self.optimizer = optimizer
         self.buffer = buffer
-
+        self.wandb_run = wandb_run
+        self.slicing_interval = slicing_interval
+        self.sequence_length = sequence_length
         if "terminated" in buffer._meta:
             self.term_size = buffer.terminated.shape
             # if terminated, truncated, dones and actions are 3 dims, squash to 2
@@ -89,8 +102,8 @@ class TD3BC_Online:
         self.epoch = 0
 
         # TD3 adds noise to the target_q actions and evaluates using CURRENT policy! Seems to improve training
-        self.policy_noise = 0.2 
-        self.noise_clip = 0.5
+        self.policy_noise = policy_noise 
+        self.noise_clip = noise_clip
 
 
     def test(self, 
@@ -106,15 +119,17 @@ class TD3BC_Online:
             actions = []
             while not done:
                 if t< self.warmup:
-                    obs = torch.tensor(obs,device=self.device)
+                    obs = torch.tensor(obs,device=self.device, dtype=torch.float32)
                     action = self.controller(obs)
-                    self.model(obs[:18]) # warmup the model
+                    self.model(obs[:self.actor_obs_size]) # warmup the model
                 else:
-                    obs = torch.tensor(obs,device=self.device)
-                    action = self.model(obs[:18])
+                    obs = torch.tensor(obs,device=self.device, dtype=torch.float32)
+                    action = self.model(obs[:self.actor_obs_size])
+                    action = action.reshape(self.action_size,)
                 
                 actions.append(action.detach().cpu())
-                obs, rew, done, done, info = self.env.step(np.array(action.detach().cpu()))
+                obs, rew, done, term, info = self.env.step(np.array(action.detach().cpu()))
+                done = done or term
                 t+=1
                 total_rew+= rew
             avg_rew+= total_rew
@@ -129,10 +144,10 @@ class TD3BC_Online:
                 plt.plot(actions[:,i])
                 plt.ylabel(f"Action {i}")
             # plt.show()
-            wandb.log({"img": [wandb.Image(fig, caption=f"BC Learning")]})
+            self.wandb_run.log({"img": [wandb.Image(fig, caption=f"BC Learning")]})
             batch = self.buffer.sample(1)[0]
-            observations = torch.tensor(batch.obs[:,:, :18],dtype=torch.float32).to(self.device)
-            actions = torch.tensor(batch.obs[:,:, 146:150]).to(torch.float32).to(self.device)
+            observations = torch.tensor(batch.obs[:,:, :self.actor_obs_size],dtype=torch.float32).to(self.device)
+            actions = torch.tensor(batch.obs[:,:, self.actor_obs_size:self.actor_obs_size+self.action_size]).to(torch.float32).to(self.device)
             
             outputs = []
             # hidden = None
@@ -150,15 +165,15 @@ class TD3BC_Online:
                 ax[i].plot(t,outputs.cpu().detach().numpy()[0,:,i], c='r')
             
             # plt.show()
-            wandb.log({"img": [wandb.Image(fig, caption=f"Compared to true")]})
+            self.wandb_run.log({"img": [wandb.Image(fig, caption=f"Compared to true")]})
 
         self.last_test_rew = avg_rew/n_episodes
-        wandb.log({'test reward': self.last_test_rew,'test len': avg_len/n_episodes})
+        self.wandb_run.log({'test reward': self.last_test_rew,'test len': avg_len/n_episodes})
         if self.last_test_rew > self.best_test:
             self.best_test = self.last_test_rew
             filename = f"TD3BC_Online_TEMP_{self.timestamp}.pth"
             checkpoint_path = save_checkpoint(self.model.state_dict(), filename)
-            wandb.run.log_artifact(checkpoint_path, name='policy_streaming', type='model')
+            self.wandb_run.log_artifact(checkpoint_path, name='policy_streaming', type='model')
 
     def _target_q(self, 
                   buffer: ReplayBuffer, 
@@ -177,47 +192,40 @@ class TD3BC_Online:
             self.critic2_old(obs_next_batch.obs, act_),
         )
     
-    def compute_returns(self,
-                        batch, 
-                        nstep:int = 1, 
-                        recompute_with_current_policy:bool = True) -> tuple[torch.Tensor, torch.Tensor]:
+    def compute_returns(self, batch, actions_recomputed, recompute_with_current_policy=True):
         '''Compute returns from rewards using discounted rewards:
         R_t = r_t + gamma * r_{t+1} + gamma^2 * r_{t+2} + ... + gamma^{T-t} * r_T
         where T is the last timestep of the episode
         recompute_with_current_policy: bool, if True, recompute the actions using the current policy, which makes te return estimate more accurate
         '''
         gamma = self.gamma
+        obs_next = batch.obs_next     # [B, T, obs_dim]
+        rewards = batch.rew           # [B, T]
+        dones = batch.done            # [B, T]
 
-        obs = batch.obs             # [B, seq_len, obs_dim]
-        next_obs = batch.obs_next   # [B, seq_len, obs_dim]
-        rewards = batch.rew         # [B, seq_len]
-        dones = batch.done          # [B, seq_len]
+        B, T, obs_dim = obs_next.shape
+        obs_next_flat = obs_next.reshape(B * T, obs_dim).to(self.device)
 
-        B, T, obs_dim = next_obs.shape
-        next_obs_flat = next_obs.reshape(-1, obs_dim)
+        # Shift actions_recomputed to align with next_obs
+        next_actions = torch.cat([actions_recomputed[:, 1:], actions_recomputed[:, -1:]], dim=1)
+        next_actions_flat = next_actions.reshape(B * T, -1)
 
         with torch.no_grad():
-            # Choose actor: target or current
-            if recompute_with_current_policy:
-                next_actions_flat = self.model(next_obs_flat[:, :18])  # if your actor only uses 18-dim input
-            else:
-                next_actions_flat = self.model_old(next_obs_flat[:, :18])
+            # Policy smoothing
+            noise = (
+                torch.randn_like(next_actions_flat) * self.policy_noise
+            ).clamp(-self.noise_clip, self.noise_clip)
+            next_actions_flat = (next_actions_flat + noise).clamp(-1, 1)
 
-            next_actions = next_actions_flat.reshape(B, T, -1)
-
-            # Add clipped noise (policy smoothing)
-            noise = (torch.randn_like(next_actions) * self.policy_noise).clamp(-self.noise_clip, self.noise_clip)
-            next_actions = (next_actions + noise).clamp(-1, 1)
-
-            # Target Q-values
-            q1_target = self.critic1_old(next_obs_flat, next_actions.reshape(-1, next_actions.shape[-1]))
-            q2_target = self.critic2_old(next_obs_flat, next_actions.reshape(-1, next_actions.shape[-1]))
-            q_target = torch.min(q1_target, q2_target).reshape(B, T)
+            # Target Q
+            q1_target = self.critic1_old(obs_next_flat, next_actions_flat).view(B, T)
+            q2_target = self.critic2_old(obs_next_flat, next_actions_flat).view(B, T)
+            q_target = torch.min(q1_target, q2_target)
 
             # Bellman backup
-            returns = rewards + gamma * (1 - dones) * q_target
+            returns = rewards.to(self.device) + gamma * (1 - dones.to(self.device)) * q_target
 
-        return returns, next_actions
+        return returns
 
         # gamma = self.gamma
         # rewards = batch.rew
@@ -237,7 +245,7 @@ class TD3BC_Online:
         # # recompute actions with current policy
         # if recompute_with_current_policy:
         #     for t in range(obs_next.shape[1]):
-        #         actions = self.model(obs_next[:, t,:18])
+        #         actions = self.model(obs_next[:, t,:self.actor_obs_size])
         #         actions_recomputed[:, t] = actions
 
         # # compute returns with Bellman equation and critics as value functin
@@ -268,11 +276,12 @@ class TD3BC_Online:
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """A simple wrapper script for updating critic network."""
         weight = getattr(batch, "weight", 1.0)
-        current_q = critic(batch.obs.reshape(-1,146), batch.act.reshape(-1,4)).flatten()
+        current_q = critic(batch.obs.reshape(-1,self.priveliged_obs_size), batch.act.reshape(-1,self.action_size)).flatten()
         target_q = batch.returns.flatten()
-        td = current_q - target_q.clone().detach().requires_grad_(True).to(self.device)
+        td = (current_q - target_q.detach()).detach()  # TD error for logging/prioritization only
+
         # critic_loss = F.mse_loss(current_q1, target_q)
-        critic_loss = (td.pow(2) * weight).mean()
+        critic_loss = (current_q - target_q.detach()).pow(2).mean()
         optimizer.zero_grad()
         critic_loss.backward()
         optimizer.step()
@@ -289,20 +298,19 @@ class TD3BC_Online:
         # self.soft_update(self.actor_old, self.actor, self.tau)
 
     def learn_batch(self, 
-                    batch, 
-                    length:int = 100):
-        if batch.obs.shape[1]%length!=0:
+                    batch,):
+        if batch.obs.shape[1]%self.sequence_length!=0:
             # print("Batch length not divisible by length, cutting original batch")
-            batch.obs = batch.obs[:,:-(batch.obs.shape[1]%length)]
+            batch.obs = batch.obs[:,:-(batch.obs.shape[1]%self.sequence_length)]
         
             
         # create batch from first observations
-        batch_size = batch.obs.shape[0]*batch.obs.shape[1]//length
-        observations = batch.obs[:,:, :146]
-        actions = batch.obs[:,:, 146:150]
-        rewards = batch.obs[:,:, 150]
-        terminated = batch.obs[:,:, 151]
-        observations_next = np.hstack((batch.obs[:,1:, :146], np.zeros((batch.obs.shape[0],1, 146))),dtype=np.float32)
+        batch_size = batch.obs.shape[0]*batch.obs.shape[1]//self.sequence_length
+        observations = batch.obs[:,:, :self.priveliged_obs_size]
+        actions = batch.obs[:,:, self.priveliged_obs_size:self.priveliged_obs_size+self.action_size]
+        rewards = batch.obs[:,:, self.priveliged_obs_size+self.action_size]
+        terminated = batch.obs[:,:, self.priveliged_obs_size+self.action_size+1]
+        observations_next = np.hstack((batch.obs[:,1:, :self.priveliged_obs_size], np.zeros((batch.obs.shape[0],1, self.priveliged_obs_size))),dtype=np.float32)
 
         
 
@@ -317,25 +325,14 @@ class TD3BC_Online:
             returns=np.empty((1,),dtype=np.float32)
         )
         batch = to_torch_as(batch,torch.zeros((1,),device=self.device,dtype=torch.float32))
-        compute_returns, actions_recomputed = self.compute_returns(batch)
+        # recompute actions
+        actions_recomputed = torch.zeros_like(torch.tensor(actions))
+        for t in range(observations.shape[1]):
+            actions_recomputed[:, t] = self.model(observations[:, t, :self.actor_obs_size])
+            
+        compute_returns = self.compute_returns(batch, actions_recomputed)
         batch.returns = compute_returns
 
-        # reshape them where now (batch, t, features) -> (batch*500/length, length, features)
-        # observations = batch.obs.reshape(-1,length,146)
-        # actions = batch.act.reshape(-1,length,4)
-        # rewards = batch.rew.reshape(-1,length)
-        # terminated = batch.done.reshape(-1,length)
-        # observations_next = batch.obs_next.reshape(-1,length,146)
-        # returns = batch.returns.reshape(-1,length)
-
-        # batch = Batch(
-        #     obs=observations,
-        #     act=actions,
-        #     rew=rewards,
-        #     done=terminated,
-        #     obs_next=observations_next,
-        #     returns=returns
-        # )
 
         # learn critics
         td1, critic_loss = self._mse_optimizer(
@@ -349,24 +346,25 @@ class TD3BC_Online:
         if self._cnt % self._freq == 0:
             self._cnt+=1
             self.optimizer.zero_grad()
-            outputs = []
             # hidden = None
             # print(self.model.device)
-            priv_obs = batch.obs[:,:, :18].clone().detach().requires_grad_(True).to(self.device).to(torch.float32)
-            for t in range(observations.shape[1]):
-                mu = self.model(priv_obs[:, t])
-                output = mu # actor
-                outputs.append(output)
+            
+            # NOTE moved recomputing outputs to compute_returns
+            # priv_obs = batch.obs[:,:, :self.actor_obs_size].clone().detach().requires_grad_(True).to(self.device).to(torch.float32)
+            # for t in range(observations.shape[1]):
+            #     mu = self.model(priv_obs[:, t])
+            #     output = mu # actor
+            #     outputs.append(output)
 
-            act = torch.stack(outputs, dim=1)
+            # act = torch.stack(outputs, dim=1)
                 
-            q_value = self.critic1(batch.obs.reshape(-1,146), act.reshape(-1,4)).reshape(-1,length)
+            q_value = self.critic1(batch.obs.reshape(-1,self.priveliged_obs_size), actions_recomputed.reshape(-1,self.action_size)).reshape(-1,self.sequence_length)
             # after warmup
             q_value = q_value[:,self.warmup:]
-            act = act[:,self.warmup:]
+            act = batch.act[:,self.warmup:]
             lmbda = self._alpha / q_value.abs().mean().detach()
             actor_loss = -lmbda * q_value.mean() + self.bc_coeff*F.mse_loss(
-                act, to_torch_as(actions_recomputed[:,self.warmup:], act)
+                act, to_torch_as(actions_recomputed[:,self.warmup:], actions_recomputed)
             )
             actor_loss.backward()
             self._last = actor_loss.item()
@@ -374,9 +372,9 @@ class TD3BC_Online:
 
             self.sync_weight()
             
-            wandb.log({"actor_loss": actor_loss.item()})
-            wandb.log({"critic_loss": critic_loss.item()})
-            wandb.log({"critic2_loss": critic2_loss.item()})
+            self.wandb_run.log({"actor_loss": actor_loss.item()})
+            self.wandb_run.log({"critic_loss": critic_loss.item()})
+            self.wandb_run.log({"critic2_loss": critic2_loss.item()})
 
     def learn(self, 
               epoch:int = 0, 
@@ -384,11 +382,11 @@ class TD3BC_Online:
         loss = np.inf
         self.epoch += end_epoch
         for n in tqdm(range(epoch, end_epoch)):
-            wandb.log({"epoch":n})
+            self.wandb_run.log({"epoch":n})
             losses=[]
             self.model.to(self.device)
             for _ in range(int(len(self.buffer)//self.batch_size)):
-                self.model.preprocess.reset(current_epoch = n,
+                self.model.reset(current_epoch = n,
                                             last_test_rew = self.last_test_rew) # pass last test reward and current epoch to reset (used for adaptive scheduling and interval based scheduling  of slopes, respectively)
                 batch = self.buffer.sample(self.batch_size)[0]
                 
@@ -403,28 +401,31 @@ class TD3BC_Online:
                       size:int = 2500, 
                       rollout_len:int = 501, 
                       jump_start_len:int|None = None,
-                      keep_og:bool = False,
-                      slicing_interval:int = 50,
-                      sequence_length:int = 100):
-        print("Gathering buffer...")
+                      keep_og:bool = False,):
+        # print("Gathering buffer...")
         # at least batch_size or size * (rollout_len/100)*2
         # gather new buffer - size should be large enough to hold all rollout data
-        samples_per_rollout = int(rollout_len/sequence_length)*sequence_length/slicing_interval # best case scenario
-        samples_per_rollout_worst = sequence_length/slicing_interval # worst case scenario
+        samples_per_rollout = int(rollout_len/self.sequence_length)*self.sequence_length/self.slicing_interval # best case scenario
+        samples_per_rollout_worst = self.sequence_length/self.slicing_interval # worst case scenario
         n_rollouts = max(np.ceil(self.batch_size/samples_per_rollout_worst), np.ceil(size / samples_per_rollout_worst))
 
         buffer_size = self.batch_size if self.batch_size > size + len(self.buffer) else size
         buffer = ReplayBuffer(size=buffer_size) # each sample is 100 in length
         js = jump_start_len if jump_start_len is not None else 0
-        for _ in tqdm(range(int(n_rollouts)), desc="Gathering buffer"):
+        # for _ in tqdm(range(int(n_rollouts)), desc="Gathering buffer"):
+        # pbar = tqdm(total=buffer_size, desc="Gathering buffer")
+        safety_counter = 0
+        while len(buffer) <= buffer.maxsize-1 and safety_counter<size*self.batch_size:
+            safety_counter+=1
+            # print(f"Gathering buffer... {len(buffer)}/{buffer.maxsize}")
             # assure that we get usable sequences, by discarding rollouts that crash too fast or all the way at the end
             partial_rollout = True
             
             # make sure to gather full rollouts
-            if len(buffer) >= size:
-                print("Buffer is full, stopping rollout")
-                break
-            while partial_rollout and len(buffer) < size:
+            # if len(buffer) >= buffer_size:
+            #     print("Buffer is full, stopping rollout")
+            #     break
+            while partial_rollout:
                 # creates lists
                 obs_lst = []
                 action_lst = []
@@ -433,38 +434,43 @@ class TD3BC_Online:
                 # obs_next_lst = []
 
                 returns = []
-                obs = env.reset()[0]
+                obs = self.env.reset()[0]
                 partial_rollout = False # assume full rollout unless dones before end of range
                 t_warmup = 0 # timestep in rollout (used after crash)
                 i = 0
                 dones = False
                 while i < rollout_len and not dones:
                     
-                    obs = torch.tensor(obs,device=self.device)
+                    obs = torch.tensor(obs,device=self.device, dtype=torch.float32)
                     if t_warmup<max(self.warmup,js):
                         t_warmup+=1
                         action = self.controller(obs)
-                        _ = self.model(obs[:18])
+                        _ = self.model(obs[:self.actor_obs_size])
                     else:
-                        action = self.model(obs[:18])
+                        action = self.model(obs[:self.actor_obs_size])
+                        # reshape in place
+                        action = action.reshape(self.action_size,)
+                        # add noise
+                        noise = torch.randn_like(action) * self.policy_noise
+                        if self.noise_clip > 0.0:
+                            noise = noise.clamp(-self.noise_clip, self.noise_clip)
+                        action += noise
 
                     obs_lst.append(obs.cpu().numpy())
-                    obs, rewards, dones,_, info = env.step(action.cpu().detach().numpy()) 
+                    obs, rewards, dones,_, info = self.env.step(action.cpu().detach().numpy()) 
 
                     # obs_next_lst.append(obs)
-                    action_lst.append(action.cpu().detach().numpy().reshape(4,))
+                    action_lst.append(action.cpu().detach().numpy().reshape(self.action_size,))
                     rewards_lst.append(rewards)
                     dones_lst.append(dones)
                     i += 1
-
-
-                   
-                obs = env.reset()[0]
+     
+                obs = self.env.reset()[0]
 
                 t_warmup = 0
                 # if our rollout crashses before 2x warmup, we discard it, it is not worth to warmup the model for only a few timesteps
                 # if our rollout crashes after rolloutlen - 2x warmup, we also wouldnt have at least the warmup length to trian on
-                if (self.warmup*2<i):
+                if (self.sequence_length<i):
                     obs_stack = np.hstack((np.array(obs_lst), np.array(action_lst), np.array(rewards_lst).reshape(-1,1), np.array(dones_lst).reshape(-1,1)))
                     partial_rollout = False
                     # once stacked, remove original lists to save memory
@@ -476,29 +482,31 @@ class TD3BC_Online:
                     
                     # add the rollout to the buffer
                     # chop up in sequence_length step sequences with step size of 50 (0-sequence_length,50-150,sequence_length-200,150-250,...)
-                    for j in range(0,obs_stack.shape[0]-sequence_length,slicing_interval):
+                    for j in range(0,obs_stack.shape[0]-self.sequence_length,self.slicing_interval):
                         # Extract data from obs_stack: obs (0:146), actions (146:150), rewards (150:151), dones (151:152)
                         # NOTE only obs_stack is used, rest is saved for compatibility purposes
                         buffer.add(Batch({
-                            'obs': obs_stack[j:j+sequence_length],
-                            'act': obs_stack[j:j+sequence_length, 146:150][-1],
-                            'rew': float(obs_stack[j:j+sequence_length, 150:151][-1].item()),
-                            'terminated': bool(obs_stack[j:j+sequence_length, 151:152][-1].item()),
-                            'truncated': bool(obs_stack[j:j+sequence_length, 151:152][-1].item())
+                            'obs': obs_stack[j:j+self.sequence_length],
+                            'act': obs_stack[j:j+self.sequence_length, self.priveliged_obs_size:self.priveliged_obs_size+self.action_size][-1],
+                            'rew': float(obs_stack[j:j+self.sequence_length, self.priveliged_obs_size+self.action_size:self.priveliged_obs_size+self.action_size+1][-1].item()),
+                            'terminated': bool(obs_stack[j:j+self.sequence_length, self.priveliged_obs_size+self.action_size+1:self.priveliged_obs_size+self.action_size+2][-1].item()),
+                            'truncated': bool(obs_stack[j:j+self.sequence_length, self.priveliged_obs_size+self.action_size+1:self.priveliged_obs_size+self.action_size+2][-1].item())
                         }))
+                        # pbar.update(1)
 
-                    # now add the last bit obs_stack.shape[0]%sequence_length to the buffer
-                    if obs_stack.shape[0]%sequence_length>0:
-                        # Extract data from the last sequence_length elements of obs_stack
+                    # now add the last bit obs_stack.shape[0]%self.sequence_length to the buffer
+                    if obs_stack.shape[0]%self.sequence_length>0:
+                        # Extract data from the last self.sequence_length elements of obs_stack
                         buffer.add(Batch({
-                            'obs': obs_stack[-sequence_length:],
-                            'act': obs_stack[-sequence_length:, 146:150][-1],
-                            'rew': float(obs_stack[-sequence_length:, 150:151][-1].item()),
-                            'terminated': bool(obs_stack[-sequence_length:, 151:152][-1].item()),
-                            'truncated': bool(obs_stack[-sequence_length:, 151:152][-1].item())
+                            'obs': obs_stack[-self.sequence_length:],
+                            'act': obs_stack[-self.sequence_length:, self.priveliged_obs_size:self.priveliged_obs_size+self.action_size][-1],
+                            'rew': float(obs_stack[-self.sequence_length:, self.priveliged_obs_size+self.action_size:self.priveliged_obs_size+self.action_size+1][-1].item()),
+                            'terminated': bool(obs_stack[-self.sequence_length:, self.priveliged_obs_size+self.action_size+1:self.priveliged_obs_size+self.action_size+2][-1].item()),
+                            'truncated': bool(obs_stack[-self.sequence_length:, self.priveliged_obs_size+self.action_size+1:self.priveliged_obs_size+self.action_size+2][-1].item())
                         }))
+                        # pbar.update(1)
                     self.envsteps+=obs_stack.shape[0]
-                    wandb.log({'environment interactions': self.envsteps})
+                    self.wandb_run.log({'environment interactions': self.envsteps})
                 else:
                     partial_rollout = True    
                     obs_lst.clear()
@@ -515,13 +523,14 @@ class TD3BC_Online:
                     # obs_next_lst = []
 
                     returns = []
-                    obs = env.reset()[0]
+                    obs = self.env.reset()[0]
                     t_warmup = 0 # timestep in rollout (used after crash)
                             
                     
 
         # create buffer with old and new data
         self.buffer.update(buffer)
+        # pbar.close()
         
         return buffer
     
@@ -554,14 +563,14 @@ class TD3BC_Online:
         curriculum_update_count = 0
         for i in iterator:
             if jumpstart and not self.jumpstart_only_for_warmup:
-                self.gather_buffer(jump_start_len=500-i*factor_i, size=n_samples_per_gather, slicing_interval=25, sequence_length=100)
-                wandb.log({"jump start steps (500 - n)": i})
+                self.gather_buffer(jump_start_len=500-i*factor_i, size=n_samples_per_gather)
+                self.wandb_run.log({"jump start steps (500 - n)": i})
             elif self.jumpstart_only_for_warmup:
-                self.gather_buffer(jump_start_len=100, size=n_samples_per_gather, slicing_interval=25, sequence_length=100)
-                wandb.log({"jump start steps (100)": 100})
+                self.gather_buffer(jump_start_len=100, size=n_samples_per_gather)
+                self.wandb_run.log({"jump start steps (100)": 100})
             else:
-                self.gather_buffer(size=n_samples_per_gather, slicing_interval=25, sequence_length=100)
-            wandb.log({"behavorial cloning coefficient": self.bc_coeff})
+                self.gather_buffer(size=n_samples_per_gather)
+            self.wandb_run.log({"behavorial cloning coefficient": self.bc_coeff})
             self.learn(epoch=cur_epoch, end_epoch=cur_epoch+epochs_per_gather)
             n_epochs_tot+=10
             self.bc_coeff *= self.bc_factor
@@ -578,7 +587,7 @@ class TD3BC_Online:
             cur_epoch+=epochs_per_gather
             filename = f"TD3BC_Online_TEMP_{self.timestamp}_epoch_{cur_epoch}.pth"
             checkpoint_path = save_checkpoint(self.model.state_dict(), filename)
-            # wandb.run.log_artifact(checkpoint_path, name='policy_streaming', type='model')
+            # self.wandb_run.log_artifact(checkpoint_path, name='policy_streaming', type='model')
             # Update curriculum every 6 epochs in the final training phase
             if self.curriculum and (cur_epoch // epochs_per_gather) % curriculum_interval == 0 and cur_epoch > 0:
                 self.env.update_curriculum()
@@ -591,23 +600,25 @@ def dist_fion(mu,sigma):
     return Independent(Normal(loc=mu, scale=torch.clamp(sigma, min=SIGMA_MIN, max=SIGMA_MAX).exp()), 1)
 
 class Wrapper(nn.Module):
-    def __init__(self,model , size=128,stoch=False):
+    def __init__(self,model , size=128, action_size=4,stoch=False):
         super().__init__()
         self.preprocess = model
-        self.mu = nn.Linear(size,4)
-        self.sigma = nn.Linear(size,4)
+        self.mu = nn.Linear(size,action_size)
+        self.sigma = nn.Linear(size,action_size)
         if stoch:
             self.dist = dist_fion
     def forward(self, x):
+        if len(x.shape) == 1:
+            x = x.unsqueeze(0)
         x = self.preprocess(x)
         if isinstance(x, tuple):
             x = x[0]    #spiking
         if hasattr(self, 'dist'):
             return self.dist(nn.Tanh()(self.mu(x)), self.sigma(x)).rsample()
         return nn.Tanh()(self.mu(x))
-    def reset(self, current_epoch=None):
+    def reset(self, **kwargs):
         if hasattr(self.preprocess, 'reset'):
-            self.preprocess.reset(current_epoch=current_epoch)
+            self.preprocess.reset(**kwargs)
     def to_cuda(self):
         return self.preprocess.to(self.device)
 
@@ -624,7 +635,6 @@ if __name__ == "__main__":
     import torch
     from tianshou.data import Collector, CollectStats, ReplayBuffer, VectorReplayBuffer
     from tianshou.highlevel.logger import LoggerFactoryDefault
-    from tianshou.policy import SACPolicy
     from tianshou.policy.base import BasePolicy
     from tianshou.trainer import OffpolicyTrainer
     from tianshou.utils.net.common import Net
@@ -665,7 +675,7 @@ if __name__ == "__main__":
 
         parser.add_argument("--alpha", type=float, default=2.5)
         parser.add_argument("--exploration-noise", type=float, default=0.1)
-        parser.add_argument("--policy-noise", type=float, default=0.)
+        parser.add_argument("--policy-noise", type=float, default=0.1)
         parser.add_argument("--noise-clip", type=float, default=0.5)
         parser.add_argument("--update-actor-freq", type=int, default=2)
         parser.add_argument("--tau", type=float, default=0.005)
@@ -820,7 +830,7 @@ if __name__ == "__main__":
     # model.load_state_dict(torch.load("TD3BC_Online_TEMP.pth", map_location="cpu"))
 
     print(model)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(model.parameters(), lr=5e-4)
 
     net_c1 = Net(
         state_shape=146,
@@ -853,7 +863,10 @@ if __name__ == "__main__":
                 curriculum=args.curriculum,
                 bc_val=args.bc_val,
                 bc_factor=args.bc_factor,
-                jumpstart_only_for_warmup=args.jumpstart_only_for_warmup,)
+                jumpstart_only_for_warmup=args.jumpstart_only_for_warmup,
+                wandb_run=wandb.run,
+                policy_noise=args.policy_noise,
+                noise_clip=args.noise_clip)
 
     # learn the model
     trainer.run(jumpstart=args.jumpstart, 
