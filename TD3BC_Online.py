@@ -38,7 +38,11 @@ class TD3BC_Online:
                  wandb_run=None, 
                  policy_noise:float = 0.2,
                  noise_clip:float = 0.5,
-                 alpha:float = 5):
+                 alpha:float = 2.5,
+                 tau:float = 0.001,
+                 freq:int = 2,
+                 gamma:float = 0.99
+                 ):
         self.env = env
         self.device = device
         self.actor = model
@@ -85,9 +89,9 @@ class TD3BC_Online:
 
         self.alpha = alpha
         self._alpha = alpha
-        self.gamma = 0.99
-        self.tau = 0.005
-        self._freq = 1
+        self.gamma = gamma
+        self.tau = tau
+        self._freq = freq
         self._cnt = 0
         self.controller = controller
         # create deep copies of the critic networks
@@ -405,7 +409,7 @@ class TD3BC_Online:
             
             lmbda = self._alpha / q_value.abs().mean().detach()
             bc_loss = F.mse_loss(current_actions_train, act)
-            actor_loss = lmbda * bc_loss - q_value.mean()
+            actor_loss = -(lmbda * q_value.mean() - bc_loss)
             # actor_loss = -lmbda * q_value.mean() + self.bc_coeff * F.mse_loss(
             #     current_actions_train, act
             # )
@@ -605,19 +609,25 @@ class TD3BC_Online:
         # self.gather_buffer(jump_start_len=490, size=1000)
         n_epochs_tot = 0
         iterator = range(0,max_epochs,epochs_per_gather)
-        factor_i = 500/0.8/max_epochs # we want to be fully relying on the model by 80 percent of the end of the training
+        rollout_len = 501
+        factor_i = rollout_len/5/max_epochs # we want to be fully relying on the model by 80 percent of the end of the training
         # Update curriculum every 6 training cycles (more intuitive than len(iterator)//6)
-        curriculum_interval = 1e4
+        curriculum_interval = 3e4
+        n_samples_collected = 0
         curriculum_update_count = 0
         for i in iterator:
             if jumpstart and not self.jumpstart_only_for_warmup:
-                self.gather_buffer(jump_start_len=500-i*factor_i, size=n_samples_per_gather)
+                buffer = self.gather_buffer(jump_start_len=int(500-i*factor_i), size=n_samples_per_gather)
                 self.wandb_run.log({"jump start steps (500 - n)": i})
             elif self.jumpstart_only_for_warmup:
-                self.gather_buffer(jump_start_len=100, size=n_samples_per_gather)
+                buffer = self.gather_buffer(jump_start_len=int(100), size=n_samples_per_gather)
                 self.wandb_run.log({"jump start steps (100)": 100})
             else:
-                self.gather_buffer(size=n_samples_per_gather)
+                buffer = self.gather_buffer(size=n_samples_per_gather)
+            
+            # Log the number of samples collected in this gathering phase
+            n_samples_collected += len(buffer)
+            self.wandb_run.log({"n_samples_collected": n_samples_collected})
             self.wandb_run.log({"behavorial cloning coefficient": self.bc_coeff})
             self.learn(epoch=cur_epoch, end_epoch=cur_epoch+epochs_per_gather)
             n_epochs_tot+=10
@@ -639,9 +649,15 @@ class TD3BC_Online:
             # self.wandb_run.log_artifact(checkpoint_path, name='policy_streaming', type='model')
             # Update curriculum every 6 epochs in the final training phase
             if self.curriculum and (cur_epoch // epochs_per_gather) % curriculum_interval == 0 and cur_epoch > 0:
+                filename = f"TD3BC_Online_Curriculum_{self.timestamp}_epoch_{cur_epoch}.pth"
+                checkpoint_path = save_checkpoint(self.actor.state_dict(), filename)
+                self.wandb_run.log_artifact(checkpoint_path, name='policy_streaming', type='model')
                 self.env.update_curriculum()
                 print(f"Curriculum updated at epoch {cur_epoch}")
-            self.gather_buffer()
+            buffer = self.gather_buffer()
+            # Log the number of samples collected in this gathering phase
+            n_samples_collected = len(buffer)
+            self.wandb_run.log({"n_samples_collected": n_samples_collected})
 SIGMA_MIN = 1e-3
 SIGMA_MAX = .2
 from torch.distributions import Independent, Normal
@@ -777,6 +793,8 @@ if __name__ == "__main__":
 
     args = get_args()
 
+    args.curriculum = True
+    args.jumpstart = True
     from l2f_agent import ConvertedModel
     controller = ConvertedModel()
     controller.load_state_dict(torch.load("l2f_agent.pth", map_location="cpu"))
@@ -915,7 +933,11 @@ if __name__ == "__main__":
                 jumpstart_only_for_warmup=args.jumpstart_only_for_warmup,
                 wandb_run=wandb.run,
                 policy_noise=args.policy_noise,
-                noise_clip=args.noise_clip)
+                noise_clip=args.noise_clip,
+                alpha=args.alpha,
+                tau=args.tau,
+                freq=args.update_actor_freq,
+                gamma=args.gamma)
 
     # learn the model
     trainer.run(jumpstart=args.jumpstart, 
