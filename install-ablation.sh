@@ -359,5 +359,5 @@ echo "✅ Buffer download step complete!"
 
 ln -s /usr/bin/python3.11 /usr/bin/python
 
-./bash_scripts/ablation-b2048.sh
+./bash_scripts/ablation-b1024.sh
 echo ""

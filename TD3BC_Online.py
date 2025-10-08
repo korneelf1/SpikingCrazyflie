@@ -32,7 +32,7 @@ class TD3BC_Online:
                  device:str = 'cpu', 
                  controller:nn.Module|None = None, 
                  curriculum:bool = False,
-                 bc_val:float = 0.2,
+                 bc_val:float = 1,
                  bc_factor:float = 0.95,
                  jumpstart_only_for_warmup:bool = False,
                  wandb_run=None, 
@@ -409,7 +409,7 @@ class TD3BC_Online:
             
             lmbda = self._alpha / q_value.abs().mean().detach()
             bc_loss = F.mse_loss(current_actions_train, act)
-            actor_loss = -(lmbda * q_value.mean() - bc_loss)
+            actor_loss = -(lmbda * q_value.mean() - self.bc_coeff * bc_loss)
             # actor_loss = -lmbda * q_value.mean() + self.bc_coeff * F.mse_loss(
             #     current_actions_train, act
             # )

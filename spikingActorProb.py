@@ -117,6 +117,7 @@ class SMLP(nn.Module):
         '''
         Forward pass through the network
         '''
+        
         if hidden_states is not None:
             self.cur_in = hidden_states[0]
             self.cur_lst = hidden_states[1:-1]

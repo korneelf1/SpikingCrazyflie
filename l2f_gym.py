@@ -229,8 +229,7 @@ class Learning2Fly(gym.Env):
             self.Crs = 1 # reward for survival
             self.Cab = 2*.334-1 # action baseline
         
-        if stable_flight:
-            self.Cw = .1
+        
         # Curriculum parameters
         self.CpC = 1.2 # position factor
         self.Cplim = 5 # position limit
@@ -240,7 +239,17 @@ class Learning2Fly(gym.Env):
 
         self.CaC = 1.4  # action factor
         self.Calim = .5 # action limit
+        if stable_flight:
+            self.Cw = .1
+            # Curriculum parameters
+            self.CpC = 1.2 # position factor
+            self.Cplim = 20 # position limit
 
+            self.CvC = 1.4 # velocity factor
+            self.Cvlim = 0.5 # velocity limit
+
+            self.CaC = 1.4  # action factor
+            self.Calim = .5 # action limit
         
 
 
