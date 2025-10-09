@@ -4,7 +4,7 @@
 # 6 combinations: normal, drop bc_val to 0, drop jumpstart to False, and all combinations
 
 echo "Starting TD3BC_Online Ablation Study..."
-
+source venv_py311/bin/activate
 # Configuration 1: Normal TD3BC_Online (bc_val=0.2, jumpstart=True)
 # echo "Running Configuration 1: Normal TD3BC_Online (bc_val=0.2, jumpstart=True)"
 # /Users/korneel/code/personal/SpikingCrazyflie/venv_py311/bin/python TD3BC_Online.py --slope 2 --hidden-sizes 256 128 --curriculum --slope_schedule 'adaptive' --scheduling_order 3 --bc-val 1 --jumpstart --wandb-project neurips_ablation --ablation "normal_td3bc_online_no_preload" --batch-size 1024 --buffer-size 25000 --n_rollouts_per_gather 3000 --epochs_per_gather 20 --max_epochs 1000 --update-actor-freq 2 --tau 0.01 --gamma 0.999 --alpha 2.0
