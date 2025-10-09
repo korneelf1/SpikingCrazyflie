@@ -121,8 +121,8 @@ class BufferCollector:
                     # Always use the controller for actions
                     action = self.controller(obs_tensor)
                     
-                    # Store data
-                    obs_lst.append(obs_tensor.cpu().numpy())
+                    # Store data - keep as tensor until final conversion
+                    obs_lst.append(obs_tensor)
                     
                     # Step the environment
                     obs, rewards, dones, _, info = self.env.step(action.cpu().detach().numpy())
@@ -148,12 +148,18 @@ class BufferCollector:
                 
                 # If we have a valid rollout (either complete or partial but long enough)
                 if not partial_rollout:
+                    # Convert tensors to numpy only once for buffer storage
+                    obs_np = torch.stack(obs_lst).cpu().numpy()
+                    action_np = np.array(action_lst)
+                    rewards_np = np.array(rewards_lst).reshape(-1, 1)
+                    dones_np = np.array(dones_lst).reshape(-1, 1)
+                    
                     # Stack observations, actions, rewards, and dones
                     obs_stack = np.hstack((
-                        np.array(obs_lst),
-                        np.array(action_lst),
-                        np.array(rewards_lst).reshape(-1, 1),
-                        np.array(dones_lst).reshape(-1, 1)
+                        obs_np,
+                        action_np,
+                        rewards_np,
+                        dones_np
                     ))
                     
                     # Chop up in sequence_length step sequences with stride of sequence_stride

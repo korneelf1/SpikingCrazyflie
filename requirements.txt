@@ -5,6 +5,7 @@ gymnasium>=0.28.1
 snntorch>=0.9.1
 wandb>=0.17.3
 huggingface_hub[cli]>=0.26.0
+hf_transfer
 
 # Simulation dependencies
 numba>=0.57.1
@@ -18,3 +19,5 @@ pandas>=2.2.2
 
 # Development dependencies
 pytest>=7.0.0
+psutil>=6.0.0
+seaborn>=0.13.2

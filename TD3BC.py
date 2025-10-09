@@ -9,6 +9,7 @@ from tianshou.data import Batch,to_torch_as
 from tqdm import tqdm
 import torch.nn.functional as F
 from torch import nn
+from utils.directory_manager import save_checkpoint
 
 class TD3BC:
     def __init__(self, env, model, optimizer,critic1, critic1_optimizer, critic2, critic2_optimizer, buffer, batch_size=256, warmup=50, device='cpu', curriculum=False, recompute_rewards_curr=False):
@@ -36,12 +37,27 @@ class TD3BC:
         self.curriculum = curriculum  
         self.recompute_rewards_curr = recompute_rewards_curr  
 
+        # Determine model dtype once and store it
+        self.model_dtype = self._get_model_dtype()
+        
         # create deep copies of the critic networks and move to device
         self.critic1_old = deepcopy(critic1).to(device)
         self.critic2_old = deepcopy(critic2).to(device)
 
         self.best_test = 0
         self.last_test_reward = 0
+
+    def _get_model_dtype(self):
+        """Determine the model's dtype by checking its parameters."""
+        if hasattr(self.model, 'preprocess') and hasattr(self.model.preprocess, 'layer0'):
+            return next(self.model.preprocess.layer0.parameters()).dtype
+        elif hasattr(self.model, 'layer0'):
+            return next(self.model.layer0.parameters()).dtype
+        elif hasattr(self.model, 'preprocess') and hasattr(self.model.preprocess, 'layer_in'):
+            return next(self.model.preprocess.layer_in.parameters()).dtype
+        else:
+            # Fallback to default dtype
+            return torch.get_default_dtype()
     def test(self, n_episodes=20,viz=True):
         avg_rew = 0
         avg_len = 0
@@ -53,11 +69,10 @@ class TD3BC:
             t = 0
             actions = []
             while not done:
-                obs = torch.tensor(obs[:18], device=self.device, dtype=torch.float32)
+                obs = torch.tensor(obs[:18], device=self.device, dtype=self.model_dtype)
                 action = self.model(obs)
-                action_np = action.detach().cpu().numpy()
-                actions.append(action_np)
-                obs, rew, done, done, info = self.env.step(action_np)
+                actions.append(action.detach())  # Keep as tensor
+                obs, rew, done, done, info = self.env.step(action.detach().cpu().numpy())
                 t+=1
                 total_rew+= rew
             avg_rew+= total_rew
@@ -65,17 +80,19 @@ class TD3BC:
             # print("Flying for: ",t)
             # plot the actions
         if viz:
-            actions = np.vstack(actions)
+            # Convert to numpy only once for visualization
+            actions_tensor = torch.stack(actions, dim=0)
+            actions_np = actions_tensor.cpu().numpy()
             fig, axs = plt.subplots(4,1,figsize=(10,10))
             for i in range(4):
                 plt.subplot(4,1,i+1)
-                plt.plot(actions[:,i])
+                plt.plot(actions_np[:,i])
                 plt.ylabel(f"Action {i}")
             # plt.show()
             wandb.log({"img": [wandb.Image(fig, caption=f"BC Learning")]})
             batch = self.buffer.sample(1)[0]
-            observations = torch.tensor(batch.obs[:,:, :18], dtype=torch.float32, device=self.device)
-            actions = torch.as_tensor(batch.obs[:,:,146:150], dtype=torch.float32, device=self.device)
+            observations = torch.tensor(batch.obs[:,:, :18], device=self.device, dtype=self.model_dtype)
+            actions = torch.as_tensor(batch.obs[:,:,146:150], device=self.device, dtype=self.model_dtype)
 
             
             outputs = []
@@ -89,9 +106,12 @@ class TD3BC:
             outputs = torch.stack(outputs, dim=1)
             t = np.linspace(0,502,501)
             fig, ax = plt.subplots(4, 1)
+            # Convert to numpy only once for plotting
+            actions_cpu = actions.cpu().detach().numpy()
+            outputs_cpu = outputs.cpu().detach().numpy()
             for i in range(4):
-                ax[i].plot(t,actions.cpu().detach().numpy()[0,:,i], c='g')
-                ax[i].plot(t,outputs.cpu().detach().numpy()[0,:,i], c='r')
+                ax[i].plot(t,actions_cpu[0,:,i], c='g')
+                ax[i].plot(t,outputs_cpu[0,:,i], c='r')
             
             # plt.show()
             wandb.log({"img": [wandb.Image(fig, caption=f"Compared to true")]})
@@ -100,8 +120,8 @@ class TD3BC:
         self.last_test_reward = avg_rew/n_episodes
         if avg_rew/n_episodes > self.best_test:
             self.best_test = avg_rew/n_episodes
-            torch.save(self.model.state_dict(), 'TD3BC_TEMP.pth')
-            wandb.run.log_artifact("TD3BC_TEMP.pth", name='policy_streaming', type='model')
+            checkpoint_path = save_checkpoint(self.model.state_dict(), 'TD3BC_TEMP.pth')
+            wandb.run.log_artifact(checkpoint_path, name='policy_streaming', type='model')
 
     def compute_returns(self,batch, nstep=1):
         '''Compute returns from rewards using discounted rewards:
@@ -191,7 +211,7 @@ class TD3BC:
             rewards[:, t] = self.env._reward(obs_cpu[:, t], act_cpu[:, t])
 
         # Move back to torch with proper device and dtype
-        batch.rew = torch.as_tensor(rewards, device=self.device, dtype=torch.float32)
+        batch.rew = torch.as_tensor(rewards, device=self.device, dtype=self.model_dtype)
 
     def learn_batch(self, batch, length = 100):
         # create batch from first observations
@@ -207,7 +227,10 @@ class TD3BC:
         actions = batch.obs[:,:, 146:150]
         rewards = batch.obs[:,:, 150]
         terminated = batch.obs[:,:, 151]
-        observations_next = np.hstack((batch.obs[:,1:, :146], np.zeros((batch.obs.shape[0],1, 146))),dtype=np.float32)
+        # Use torch.cat instead of np.hstack for GPU operations
+        # Convert to tensor first with model dtype
+        obs_tensor = torch.tensor(batch.obs, device=self.device, dtype=self.model_dtype)
+        observations_next = torch.cat([obs_tensor[:,1:,:146], torch.zeros(obs_tensor.shape[0],1,146, device=obs_tensor.device, dtype=obs_tensor.dtype)], dim=1)
 
         
 
@@ -221,7 +244,19 @@ class TD3BC:
             obs_next=observations_next,
             returns=np.empty((1,),dtype=np.float32)
         )
-        batch = to_torch_as(batch, torch.zeros((1,), device=self.device, dtype=torch.float32))
+        # Ensure all numpy arrays are converted to the correct dtype
+        if self.model_dtype == torch.float32:
+            if hasattr(batch.obs, 'astype'):  # Check if it's a numpy array
+                batch.obs = batch.obs.astype(np.float32)
+            if hasattr(batch.act, 'astype'):
+                batch.act = batch.act.astype(np.float32)
+            if hasattr(batch.rew, 'astype'):
+                batch.rew = batch.rew.astype(np.float32)
+            if hasattr(batch.done, 'astype'):
+                batch.done = batch.done.astype(np.float32)
+            if hasattr(batch.obs_next, 'astype'):
+                batch.obs_next = batch.obs_next.astype(np.float32)
+        batch = to_torch_as(batch, torch.zeros((1,), device=self.device, dtype=self.model_dtype))
         # if curriculum, we need to recompute the rewards
         if self.curriculum and self.recompute_rewards_curr:
             self.recompute_rewards(batch)
@@ -259,7 +294,8 @@ class TD3BC:
             outputs = []
             # hidden = None
             # print(self.model.device)
-            priv_obs = batch.obs[:,:, :18].clone().detach().requires_grad_(True)
+            # Ensure priv_obs matches the model's dtype
+            priv_obs = batch.obs[:,:, :18].clone().detach().requires_grad_(True).to(self.device, dtype=self.model_dtype)
             for t in range(observations.shape[1]):
                 mu = self.model(priv_obs[:, t])
                 output = mu # actor
@@ -272,8 +308,10 @@ class TD3BC:
             q_value = q_value[:,self.warmup:]
             act = act[:,self.warmup:]
             lmbda = self._alpha / q_value.abs().mean().detach()
+            # Ensure batch.act is on the same device as act to avoid redundant to_torch_as
+            target_actions = batch.act[:,self.warmup:].to(act.device)
             actor_loss = -lmbda * q_value.mean() + F.mse_loss(
-                act, to_torch_as(batch.act[:,self.warmup:], act)
+                act, target_actions
             )
             actor_loss.backward()
             self._last = actor_loss.item()
@@ -345,7 +383,7 @@ if __name__ == "__main__":
         parser.add_argument(
             "--device",
             type=str,
-            default="cuda:1" if torch.cuda.is_available() else "cpu",
+            default="cuda" if torch.cuda.is_available() else "cpu",
         )
         parser.add_argument("--resume-path", type=str, default=None)
         parser.add_argument("--resume-id", type=str, default=None)
@@ -355,7 +393,7 @@ if __name__ == "__main__":
             default="tensorboard",
             choices=["tensorboard", "wandb"],
         )
-        parser.add_argument("--wandb-project", type=str, default="offline_l2f.benchmark")
+        parser.add_argument("--wandb-project", type=str, default="l2f_bc")
         parser.add_argument(
             "--watch",
             default=False,
@@ -370,6 +408,7 @@ if __name__ == "__main__":
         
         # Use 'store_true' for interval if you want it as a flag, or use 'type=int' if it's an integer
         parser.add_argument("--interval", type=int, default=1, help="Interval flag")
+        parser.add_argument("--buffer-path", type=str, default='buffers/l2f_buffer_1996.hdf5', help="Buffer path")
         return parser.parse_args()
 
 
@@ -419,24 +458,27 @@ if __name__ == "__main__":
             # return self.preprocess.to(device)
 
         
+    # get args
+    args = get_args()
 
-
-    # prepare the data
-    buffer_sim = ReplayBuffer.load_hdf5('buffers/l2f_buffer_1996.hdf5')
+    
     # buffer_real = ReplayBuffer.load_hdf5('real_data_buffer_no_zeros.hdf5')
     buffer = ReplayBuffer(size=20000)
-    buffer.update(buffer_sim)
+    if args.buffer_path:
+        # prepare the data
+        buffer_sim = ReplayBuffer.load_hdf5(args.buffer_path)
+        buffer.update(buffer_sim)
     # buffer.update(buffer_real)
     env = Learning2Fly(fast_learning=False, manual_curriculum=True)
     # list all availabel devices
     print("Available devices:",torch.cuda.device_count())
-    # print(torch.device("cuda:1"))
-    # device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+    # print(torch.device("cuda"))
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    args = get_args()
+    
     device = args.device
     wandb_args = {"spiking":True, 'Slope': args.slope,'Schedule': args.slope_schedule, 'Algo':'TD3BC', 'fast_learning':False, 'scheduling_order':args.scheduling_order}
-    wandb.init(project="l2f_bc", config=wandb_args)
+    wandb.init(project=args.wandb_project, config=wandb_args)
     # wandb.init(mode="disabled")
 
     wandb.define_metric("*", step_metric="epoch")
@@ -511,4 +553,4 @@ if __name__ == "__main__":
     wandb.run.finish()
     timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
 
-    torch.save(model.state_dict(),f'td3bc_{timestamp}.pth')
+    save_checkpoint(model.state_dict(), f'td3bc_{timestamp}.pth')

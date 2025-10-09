@@ -1,0 +1,1 @@
+python TD3BC_Online.py --slope 2 --hidden-sizes 256 128 --curriculum --slope_schedule 'adaptive' --scheduling_order 3 --bc-val 0.2 --jumpstart --wandb-project l2f_stable --ablation "stable_flight" --batch-size 2048 --max_epochs 2000 --epochs_per_gather 20 --n_rollouts_per_gather 5000 --buffer-size 50000 --stable_flight --n-step 1

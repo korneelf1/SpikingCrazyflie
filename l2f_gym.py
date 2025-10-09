@@ -163,7 +163,7 @@ class Learning2Fly(gym.Env):
         _check_done(self):
             Checks if the episode is done based on the current state.
     '''
-    def __init__(self, fast_learning=False,seed=None, manual_curriculum=True) -> None:
+    def __init__(self, fast_learning=False,seed=None, manual_curriculum=True, stable_flight=False) -> None:
         super().__init__()
         
         # Print thread usage at initialization
@@ -228,7 +228,8 @@ class Learning2Fly(gym.Env):
             self.Cw = .000 # angular velocity weight 
             self.Crs = 1 # reward for survival
             self.Cab = 2*.334-1 # action baseline
-
+        
+        
         # Curriculum parameters
         self.CpC = 1.2 # position factor
         self.Cplim = 5 # position limit
@@ -238,7 +239,17 @@ class Learning2Fly(gym.Env):
 
         self.CaC = 1.4  # action factor
         self.Calim = .5 # action limit
+        if stable_flight:
+            self.Cw = .1
+            # Curriculum parameters
+            self.CpC = 1.2 # position factor
+            self.Cplim = 20 # position limit
 
+            self.CvC = 1.4 # velocity factor
+            self.Cvlim = 0.5 # velocity limit
+
+            self.CaC = 1.4  # action factor
+            self.Calim = .5 # action limit
         
 
 
@@ -250,9 +261,8 @@ class Learning2Fly(gym.Env):
         return np.array(self.observation.observation,dtype=np.float32)
 
     def step(self, action):
-        # self.action = power_distribution_force_torque(action.reshape((4,)))
         self.action.motor_command = action.reshape((4,))
-        # print(self.action)
+
         step(self.device, self.env, self.params, self.state, self.action, self.next_state, self.rng)
         self.state = self.next_state
 
@@ -260,16 +270,10 @@ class Learning2Fly(gym.Env):
 
         self.t += 1
         self.step_count += 1
-        
-        # Print thread usage every N steps
-        if self.step_count % self.thread_monitor_interval == 0:
-            print(f"=== Step {self.step_count} Thread Usage ===")
-            print_thread_usage()
 
         done = self._check_done()
-        # print("Step: ", self.t, "Done: ", done)
         reward = self._reward()
-        # print(self.obs)
+
         return self.obs, reward, done,done, {}
     
     def reset(self,seed=None):
@@ -280,9 +284,6 @@ class Learning2Fly(gym.Env):
         observe(self.device, self.env, self.params, self.state, self.observation, self.rng)
         self.t = 0
         self.step_count = 0  # Reset step counter
-        
-        print("=== Environment Reset - Thread Usage ===")
-        print_thread_usage()
         
         return self.obs, {}
     
