@@ -865,7 +865,7 @@ if __name__ == "__main__":
     print("Curriculum:",args.curriculum)
     print("Jumpstart:",args.jumpstart)
     print("Jumpstart only for warmup:",args.jumpstart_only_for_warmup)
-    args.jumpstart = True
+
     wandb.config.update({"device":device})
     wandb.config.update({"slope":args.slope})
     wandb.config.update({"surrogate_scheduling":args.surrogate_scheduling})
