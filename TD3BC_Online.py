@@ -41,7 +41,8 @@ class TD3BC_Online:
                  alpha:float = 2.5,
                  tau:float = 0.001,
                  freq:int = 2,
-                 gamma:float = 0.99
+                 gamma:float = 0.99,
+                 curriculum_update_interval:int = 30000
                  ):
         self.env = env
         self.device = device
@@ -93,6 +94,7 @@ class TD3BC_Online:
         self.tau = tau
         self._freq = freq
         self._cnt = 0
+        self.curriculum_update_interval = curriculum_update_interval
         self.controller = controller
         # create deep copies of the critic networks
         self.critic1_old = deepcopy(critic1).to(device)
@@ -612,7 +614,7 @@ class TD3BC_Online:
         rollout_len = 501
         factor_i = rollout_len/5/max_epochs # we want to be fully relying on the model by 80 percent of the end of the training
         # Update curriculum every 6 training cycles (more intuitive than len(iterator)//6)
-        curriculum_interval = 3e4
+        curriculum_interval = self.curriculum_update_interval
         n_samples_collected = 0
         curriculum_update_count = 0
         for i in iterator:
@@ -635,7 +637,7 @@ class TD3BC_Online:
             cur_epoch+=epochs_per_gather
             
             # Update curriculum every curriculum_interval training cycles
-            if self.curriculum and curriculum_update_count - curriculum_interval > 0 and curriculum_update_count > 0:
+            if self.curriculum and curriculum_update_count - self.curriculum_update_interval > 0 and curriculum_update_count > 0:
                 self.env.update_curriculum()
                 print(f"Curriculum updated at training cycle {curriculum_update_count}")
                 curriculum_update_count = 0
@@ -648,7 +650,7 @@ class TD3BC_Online:
             checkpoint_path = save_checkpoint(self.actor.state_dict(), filename)
             # self.wandb_run.log_artifact(checkpoint_path, name='policy_streaming', type='model')
             # Update curriculum every 6 epochs in the final training phase
-            if self.curriculum and (cur_epoch // epochs_per_gather) % curriculum_interval == 0 and cur_epoch > 0:
+            if self.curriculum and (cur_epoch // epochs_per_gather) % self.curriculum_update_interval == 0 and cur_epoch > 0:
                 filename = f"TD3BC_Online_Curriculum_{self.timestamp}_epoch_{cur_epoch}.pth"
                 checkpoint_path = save_checkpoint(self.actor.state_dict(), filename)
                 self.wandb_run.log_artifact(checkpoint_path, name='policy_streaming', type='model')
@@ -917,7 +919,10 @@ if __name__ == "__main__":
     critic_optim = torch.optim.Adam(critic.parameters(), lr=args.critic_lr)
     critic2 = Critic(net_c2, device=args.device, flatten_input=False).to(args.device)
     critic2_optim = torch.optim.Adam(critic2.parameters(), lr=args.critic_lr)
-
+    if args.stable_flight:
+        curriculum_update_interval = 100000
+    else:
+        curriculum_update_interval = 30000
     controller.to(device)
     trainer = TD3BC_Online(env,model, optimizer,
                controller=controller,
@@ -937,7 +942,8 @@ if __name__ == "__main__":
                 alpha=args.alpha,
                 tau=args.tau,
                 freq=args.update_actor_freq,
-                gamma=args.gamma)
+                gamma=args.gamma,
+                curriculum_update_interval=curriculum_update_interval)
 
     # learn the model
     trainer.run(jumpstart=args.jumpstart, 

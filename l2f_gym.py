@@ -250,6 +250,9 @@ class Learning2Fly(gym.Env):
 
             self.CaC = 1.4  # action factor
             self.Calim = .5 # action limit
+
+            self.Crs = 3 # reward for survival
+
         
 
 
