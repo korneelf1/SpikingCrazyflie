@@ -10,41 +10,28 @@ In addition to the simulator, this repository includes training scripts for both
 ```bash
 git clone https://github.com/korneelf1/SpikingCrazyflie.git
 cd SpikingCrazyflie
+./install.sh
 ```
 
-2. Create a new virtual environment:
-```bash
-# Using venv (Python's built-in)
-python -m venv venv
-source venv/bin/activate  # On Linux/Mac
-# OR venv\Scripts\activate  # On Windows
 
-# OR using conda
-conda create -n spiking_cf python=3.11
-conda activate spiking_cf
-```
-
-3. Install the requirements:
-```bash
-pip install -r requirements.txt
-hf download korneelf1/neurips --include "l2f_buffer_1996.hdf5" --local-dir buffers --repo-type dataset
-```
-
-4. Install the tianshou package from github:
-```bash
-pip install git+https://github.com/korneelf1/tianshou-1.2.0-dev.git --upgrade
-```
-
-5. install my l2f gym package from github:
-```bash
-git clone https://github.com/korneelf1/l2f_thesis.git
-cd l2f_thesis
-pip install -e .
-```
-
-6. Test the environment:
+2. Test the environment:
 ```bash
 python test_env.py
+```
+
+For the ablation study, you can run:
+```bash
+git clone https://github.com/korneelf1/SpikingCrazyflie.git
+cd SpikingCrazyflie
+./install-ablation.sh
+./bash_scripts/ablation-b1024.sh
+```
+For the stable flight study, you can run:
+```bash
+git clone https://github.com/korneelf1/SpikingCrazyflie.git
+cd SpikingCrazyflie
+./install-stable-flight.sh
+./bash_scripts/stable_flight.sh
 ```
 
 If the test runs successfully, you'll see information about the environment's action and observation spaces, and a confirmation that basic operations work.
