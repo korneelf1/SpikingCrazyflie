@@ -183,7 +183,7 @@ if __name__ == "__main__":
             default="tensorboard",
             choices=["tensorboard", "wandb"],
         )
-        parser.add_argument("--wandb-project", type=str, default="offline_l2f.benchmark")
+        parser.add_argument("--wandb-project", type=str, default="l2f_bc")
         parser.add_argument(
             "--watch",
             default=False,
@@ -194,7 +194,8 @@ if __name__ == "__main__":
         # parser.add_argument("--surrogate-scheduling", type=str, default='adaptive', help="Enable surrogate scheduling, options: fixed, interval, adaptive")
         parser.add_argument("--slope", type=int, default=2, help="Slope value")
         parser.add_argument("--slope_schedule", type=str, default='adaptive')
-        parser.add_argument("--scheduling_order", type=int, default=1)
+        parser.add_argument("--scheduling_order", type=int, default=3)
+        parser.add_argument("--max_epochs", type=int, default=300, help="Max epochs")
         
         # Use 'store_true' for interval if you want it as a flag, or use 'type=int' if it's an integer
         parser.add_argument("--interval", type=int, default=1, help="Interval flag")
@@ -252,7 +253,7 @@ if __name__ == "__main__":
     args = get_args()
     
     wandb_args = {"spiking":True, 'Slope': args.slope,'Schedule': args.slope_schedule, 'Algo':'BC', 'fast_learning':False, 'scheduling_order':args.scheduling_order}
-    wandb.init(project="l2f_bc", config=wandb_args)
+    wandb.init(project=args.wandb_project, config=wandb_args)
     # wandb.init(mode="disabled")
 
     wandb.define_metric("*", step_metric="epoch")
@@ -273,8 +274,8 @@ if __name__ == "__main__":
                                 slope=args.slope,
                                 schedule=args.slope_schedule,
                                 order=args.scheduling_order,
-                                reward_range=(0,400),
-                                max_slope=50,
+                                reward_range=(-400,400),
+                                max_slope=20,
                                 verbose=True).to(device)
     
     model = Wrapper(spiking_module, size=args.hidden_sizes[-1]).to(device)
@@ -284,6 +285,6 @@ if __name__ == "__main__":
     # prepare the BC  
     bc = BC(env,model, optimizer, buffer, batch_size=50, device=device, noise=args.policy_noise)
     # learn the model
-    loss = bc.learn(epoch=300)
+    loss = bc.learn(epoch=args.max_epochs)
     print(loss)
     wandb.run.finish()

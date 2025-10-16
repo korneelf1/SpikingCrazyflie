@@ -796,7 +796,7 @@ if __name__ == "__main__":
 
     args = get_args()
 
-    args.curriculum = True
+
     # args.jumpstart = True
     from l2f_agent import ConvertedModel
     controller = ConvertedModel()
