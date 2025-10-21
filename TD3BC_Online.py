@@ -117,8 +117,8 @@ class TD3BC_Online:
     def test(self, 
              n_episodes:int = 30,
              viz:bool = True):
-        avg_rew = 0
-        avg_len = 0
+        rewards = []
+        lengths = []
         for episode in range(n_episodes):
             obs = self.env.reset()[0]
             done= False
@@ -140,8 +140,8 @@ class TD3BC_Online:
                 done = done or term
                 t+=1
                 total_rew+= rew
-            avg_rew+= total_rew
-            avg_len+= t
+            rewards.append(total_rew)
+            lengths.append(t)
             # print("Flying for: ",t)
             # plot the actions
         if viz:
@@ -175,8 +175,27 @@ class TD3BC_Online:
             # plt.show()
             self.wandb_run.log({"img": [wandb.Image(fig, caption=f"Compared to true")]})
 
-        self.last_test_rew = avg_rew/n_episodes
-        self.wandb_run.log({'test reward': self.last_test_rew,'test len': avg_len/n_episodes})
+        # Calculate statistics
+        avg_rew = np.mean(rewards)
+        avg_len = np.mean(lengths)
+        min_rew = np.min(rewards)
+        max_rew = np.max(rewards)
+        median_rew = np.median(rewards)
+        min_len = np.min(lengths)
+        max_len = np.max(lengths)
+        median_len = np.median(lengths)
+        
+        self.last_test_rew = avg_rew
+        self.wandb_run.log({
+            'test reward': avg_rew,
+            'test len': avg_len,
+            'test reward min': min_rew,
+            'test reward max': max_rew,
+            'test reward median': median_rew,
+            'test len min': min_len,
+            'test len max': max_len,
+            'test len median': median_len
+        })
         if self.last_test_rew > self.best_test:
             self.best_test = self.last_test_rew
             filename = f"TD3BC_Online_TEMP_{self.timestamp}.pth"

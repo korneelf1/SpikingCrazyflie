@@ -20,8 +20,8 @@ class BC:
         self.test_reward = 0
 
     def test(self, n_episodes=20,viz=False):
-        avg_rew = 0
-        avg_len = 0
+        rewards = []
+        lengths = []
         for episode in range(n_episodes):
             obs = self.env.reset()[0]
             done= False
@@ -38,8 +38,8 @@ class BC:
                 obs, rew, done, done, info = self.env.step(np.array(action.detach().cpu()))
                 t+=1
                 total_rew+= rew
-            avg_rew+= total_rew
-            avg_len+= t
+            rewards.append(total_rew)
+            lengths.append(t)
             # print("Flying for: ",t)
             # plot the actions
         if viz:
@@ -77,8 +77,27 @@ class BC:
             # plt.show()
             # wandb.log({"img": [wandb.Image(fig, caption=f"Compared to true")]})
 
-        wandb.log({'test reward': avg_rew/n_episodes,'test len': avg_len/n_episodes})
-        self.test_reward = avg_rew/n_episodes
+        # Calculate statistics
+        avg_rew = np.mean(rewards)
+        avg_len = np.mean(lengths)
+        min_rew = np.min(rewards)
+        max_rew = np.max(rewards)
+        median_rew = np.median(rewards)
+        min_len = np.min(lengths)
+        max_len = np.max(lengths)
+        median_len = np.median(lengths)
+        
+        wandb.log({
+            'test reward': avg_rew,
+            'test len': avg_len,
+            'test reward min': min_rew,
+            'test reward max': max_rew,
+            'test reward median': median_rew,
+            'test len min': min_len,
+            'test len max': max_len,
+            'test len median': median_len
+        })
+        self.test_reward = avg_rew
 
 
     def learn(self, epoch=50):
@@ -128,7 +147,7 @@ class BC:
                 self.best_epoch_loss = np.mean(losses)
                 torch.save(self.model.state_dict(), "model_bc.pth")
                 wandb.run.log_artifact("model_bc.pth", name='policy_streaming', type='model')
-            if n%10==0:
+            if n%5==0:
                 self.test(viz=True)
                 
         
