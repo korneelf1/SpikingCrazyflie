@@ -302,7 +302,7 @@ if __name__ == "__main__":
     print(model)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     # prepare the BC  
-    bc = BC(env,model, optimizer, buffer, batch_size=50, device=device, noise=args.policy_noise)
+    bc = BC(env,model, optimizer, buffer, batch_size=args.batch_size, device=device, noise=args.policy_noise)
     # learn the model
     loss = bc.learn(epoch=args.max_epochs)
     print(loss)

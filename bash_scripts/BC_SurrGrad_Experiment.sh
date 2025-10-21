@@ -1,5 +1,5 @@
-python BC.py --slope 2 --hidden-sizes  256 128 --slope_schedule 'adaptive' --scheduling_order 3 --wandb-project surrogate_gradient_experiment --max_epochs 250
-python BC.py --slope 2 --hidden-sizes  256 128 --slope_schedule 'interval' --scheduling_order 3 --wandb-project surrogate_gradient_experiment --max_epochs 250
-python BC.py --slope 2 --hidden-sizes  256 128 --slope_schedule 'fixed' --scheduling_order 3 --wandb-project surrogate_gradient_experiment --max_epochs 250
-python BC.py --slope 50 --hidden-sizes  256 128 --slope_schedule 'fixed' --scheduling_order 3 --wandb-project surrogate_gradient_experiment --max_epochs 250
-python BC.py --slope 100 --hidden-sizes  256 128 --slope_schedule 'fixed' --scheduling_order 3 --wandb-project surrogate_gradient_experiment --max_epochs 250
+python BC.py --slope 2 --hidden-sizes  256 128 --slope_schedule 'fixed' --scheduling_order 3 --wandb-project surrogate_gradient_experiment --max_epochs 250 --batch-size 1024
+python BC.py --slope 50 --hidden-sizes  256 128 --slope_schedule 'fixed' --scheduling_order 3 --wandb-project surrogate_gradient_experiment --max_epochs 250 --batch-size 1024
+python BC.py --slope 100 --hidden-sizes  256 128 --slope_schedule 'fixed' --scheduling_order 3 --wandb-project surrogate_gradient_experiment --max_epochs 250 --batch-size 1024
+python BC.py --slope 2 --hidden-sizes  256 128 --slope_schedule 'adaptive' --scheduling_order 3 --wandb-project surrogate_gradient_experiment --max_epochs 250 --batch-size 1024
+python BC.py --slope 2 --hidden-sizes  256 128 --slope_schedule 'interval' --scheduling_order 3 --wandb-project surrogate_gradient_experiment --max_epochs 250 --batch-size 1024
