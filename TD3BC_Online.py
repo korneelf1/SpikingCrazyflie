@@ -875,14 +875,14 @@ if __name__ == "__main__":
     # device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     # device = torch.device("cpu")
     # Initialize WandB
-    wandb_args = {"spiking":True, 'Slope': args.slope,'Schedule': args.surrogate_scheduling, 'Algo':'TD3BC_JS_Online', 'fast_learning':False, 'curriculum':args.curriculum}
+    wandb_args = {"spiking":True, 'Slope': args.slope,'Schedule': args.slope_schedule, 'Algo':'TD3BC_JS_Online', 'fast_learning':False, 'curriculum':args.curriculum}
     wandb.init(project=args.wandb_project, config=wandb_args)
 
     wandb.define_metric("*", step_metric="epoch")
 
     print('Device in use:',device)
     print("Initial slope:",args.slope)
-    print("Surrogate scheduling:",args.surrogate_scheduling)
+    print("Surrogate scheduling:",args.slope_schedule)
     print("Hidden sizes:",args.hidden_sizes)
     print("Curriculum:",args.curriculum)
     print("Jumpstart:",args.jumpstart)
@@ -890,14 +890,14 @@ if __name__ == "__main__":
 
     wandb.config.update({"device":device})
     wandb.config.update({"slope":args.slope})
-    wandb.config.update({"surrogate_scheduling":args.surrogate_scheduling})
+    wandb.config.update({"slope_schedule":args.slope_schedule})
     wandb.config.update({"hidden_sizes":args.hidden_sizes})
     wandb.config.update({"curriculum":args.curriculum})
     wandb.config.update({"bc_factor":args.bc_factor})
     wandb.config.update({"jumpstart":args.jumpstart})
     wandb.config.update({"ablation":args.ablation})
     wandb.config.update({"jumpstart_only_for_warmup":args.jumpstart_only_for_warmup})
-    # args.surrogate_scheduling = True
+    # args.slope_schedule = True
 
 
     # Initialize the spiking module
