@@ -199,14 +199,14 @@ class TD3BC_Online:
         })
         if self.last_test_rew > self.best_test:
             self.best_test = self.last_test_rew
-            filename = f"TD3BC_Online_TEMP_{self.timestamp}.pth"
+            filename = f"TD3BC_Online_TEMP_{self.wandb_run.name}_{self.timestamp}.pth"
             checkpoint_path = save_checkpoint(self.actor.state_dict(), filename)
             self.wandb_run.log_artifact(checkpoint_path, name='policy_streaming', type='model')
         
         # Log artifact based on median test length
         if median_len >= self.best_median_test_len:
             self.best_median_test_len = median_len
-            filename = f"TD3BC_Online_MEDIAN_{self.timestamp}.pth"
+            filename = f"TD3BC_Online_MEDIAN_{self.wandb_run.name}_{self.timestamp}.pth"
             checkpoint_path = save_checkpoint(self.actor.state_dict(), filename)
             self.wandb_run.log_artifact(checkpoint_path, name='median_based_artifact', type='model')
 
