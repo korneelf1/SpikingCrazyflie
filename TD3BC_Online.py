@@ -106,6 +106,7 @@ class TD3BC_Online:
 
         self.last_test_rew = 0 # used for adaptive scheduling of slopes
         self.best_test = 0
+        self.best_median_test_len = 0  # track best median test length for artifact logging
         self.envsteps = 0
         self.epoch = 0
 
@@ -201,6 +202,13 @@ class TD3BC_Online:
             filename = f"TD3BC_Online_TEMP_{self.timestamp}.pth"
             checkpoint_path = save_checkpoint(self.actor.state_dict(), filename)
             self.wandb_run.log_artifact(checkpoint_path, name='policy_streaming', type='model')
+        
+        # Log artifact based on median test length
+        if median_len >= self.best_median_test_len:
+            self.best_median_test_len = median_len
+            filename = f"TD3BC_Online_MEDIAN_{self.timestamp}.pth"
+            checkpoint_path = save_checkpoint(self.actor.state_dict(), filename)
+            self.wandb_run.log_artifact(checkpoint_path, name='median_based_artifact', type='model')
 
     def compute_returns(self, batch, actions_current, use_next_actions=False):
         '''Compute returns from rewards using discounted rewards with bootstrapping.
