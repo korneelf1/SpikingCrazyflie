@@ -163,7 +163,7 @@ class Learning2Fly(gym.Env):
         _check_done(self):
             Checks if the episode is done based on the current state.
     '''
-    def __init__(self, fast_learning=False,seed=None, manual_curriculum=True, stable_flight=False, ang_vel_penalty=0.0) -> None:
+    def __init__(self, fast_learning=False,seed=None, manual_curriculum=True, stable_flight=False, ang_vel_penalty=0.0, survival_reward=1.0) -> None:
         super().__init__()
         
         # Print thread usage at initialization
@@ -217,7 +217,7 @@ class Learning2Fly(gym.Env):
             self.Cq = .0 # orientation weight
             self.Ca = .0 # action weight og .334, but just learns to fly out of frame
             self.Cw = ang_vel_penalty # angular velocity weight 
-            self.Crs = 1 # reward for survival
+            self.Crs = survival_reward # reward for survival
             self.Cab = 2*.334-1 # action baseline
         else:
             # Reward parameters
@@ -226,7 +226,7 @@ class Learning2Fly(gym.Env):
             self.Cq = .25 # orientation weight
             self.Ca = .1 # action weight og .334, but just learns to fly out of frame
             self.Cw = ang_vel_penalty # angular velocity weight 
-            self.Crs = 1 # reward for survival
+            self.Crs = survival_reward # reward for survival
             self.Cab = 2*.334-1 # action baseline
         
         
@@ -251,7 +251,7 @@ class Learning2Fly(gym.Env):
             self.CaC = 1.4  # action factor
             self.Calim = .5 # action limit
 
-            self.Crs = 3 # reward for survival
+            self.Crs = survival_reward # reward for survival
 
         
 

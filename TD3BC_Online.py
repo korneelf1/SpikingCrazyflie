@@ -819,6 +819,7 @@ if __name__ == "__main__":
         parser.add_argument("--n_rollouts_per_gather", type=int, default=10, help="Number of rollouts per gather")
         parser.add_argument("--stable_flight", action='store_true', help="Enable stable flight")
         parser.add_argument("--ang_vel_penalty", type=float, default=0.0, help="Angular velocity penalty")
+        parser.add_argument("--survival_reward", type=float, default=1.0, help="Survival reward")
         return parser.parse_args()
 
     args = get_args()
@@ -831,7 +832,7 @@ if __name__ == "__main__":
 
 
     
-    env = Learning2Fly(fast_learning=False, stable_flight=args.stable_flight, ang_vel_penalty=args.ang_vel_penalty)
+    env = Learning2Fly(fast_learning=False, stable_flight=args.stable_flight, ang_vel_penalty=args.ang_vel_penalty, survival_reward=args.survival_reward)
     # list all availabel devices
     print("Available devices:",torch.cuda.device_count())
     # for macos
