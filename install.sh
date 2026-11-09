@@ -317,8 +317,24 @@
 # # Run main function with all arguments
 # main "$@"
 
-# install tianshou
-# install tianshou
+#!/bin/bash
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$REPO_ROOT"
+
+echo "==============================================="
+echo "Setting up Python virtual environment (.venv)..."
+echo "==============================================="
+if [ ! -d ".venv" ]; then
+    python3 -m venv .venv
+fi
+# shellcheck disable=SC1091
+source .venv/bin/activate
+pip install --upgrade pip
+echo "✅ Virtual environment ready: $REPO_ROOT/.venv"
+echo ""
+
 echo "==============================================="
 echo "Cloning and installing tianshou (1.2.0-dev)..."
 echo "==============================================="

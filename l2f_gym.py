@@ -2,60 +2,12 @@ from l2f import Rng, Device, Environment, Action, Parameters, State, Observation
 import gymnasium as gym
 import numpy as np
 
-# for vectorization
-from tianshou.env import SubprocVectorEnv, ShmemVectorEnv
-from typing import List, Callable, Optional, Union
-import multiprocessing as mp
 import traceback
-import logging
-import helpers
-
-# for thread monitoring
-import threading
-import os
-import psutil
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-import wandb
 import math
 
-def print_thread_usage():
-    """Print current thread usage information"""
-    try:
-        # Get current process
-        process = psutil.Process()
-        
-        # Get thread count
-        thread_count = process.num_threads()
-        
-        # Get CPU usage
-        cpu_percent = process.cpu_percent()
-        
-        # Get Numba thread info
-        try:
-            import numba as nb
-            numba_threads = nb.get_num_threads()
-        except:
-            numba_threads = "N/A"
-        
-        # Get environment variables
-        omp_threads = os.environ.get('OMP_NUM_THREADS', 'Not set')
-        mkl_threads = os.environ.get('MKL_NUM_THREADS', 'Not set')
-        numba_env_threads = os.environ.get('NUMBA_NUM_THREADS', 'Not set')
-        
-        print(f"=== Thread Usage Info ===")
-        print(f"Process threads: {thread_count}")
-        print(f"CPU usage: {cpu_percent}%")
-        print(f"Numba threads: {numba_threads}")
-        print(f"OMP_NUM_THREADS: {omp_threads}")
-        print(f"MKL_NUM_THREADS: {mkl_threads}")
-        print(f"NUMBA_NUM_THREADS: {numba_env_threads}")
-        print(f"=========================")
-        
-    except Exception as e:
-        print(f"Error getting thread info: {e}")
+import wandb
+
+
 def observe_rotation_matrix(state):
     # Extract the quaternion components from the state matrix
     qw = state[0]
@@ -95,7 +47,6 @@ def power_distribution_force_torque(control, arm_length=0.046, thrust_to_torque=
     motor_forces[2] = thrust_part + roll_part + pitch_part - yaw_part
     motor_forces[3] = thrust_part + roll_part - pitch_part + yaw_part
 
-    print(motor_forces)
     action = np.zeros(4)
     for motor_index in range(4):
         motor_force = motor_forces[motor_index]
@@ -166,10 +117,6 @@ class Learning2Fly(gym.Env):
     def __init__(self, fast_learning=False,seed=None, manual_curriculum=True, stable_flight=False, ang_vel_penalty=0.0, survival_reward=1.0) -> None:
         super().__init__()
         
-        # Print thread usage at initialization
-        print("=== Learning2Fly Environment Initialization ===")
-        print_thread_usage()
-        
         # L2F initialization
         self.device = Device()
         self.rng = Rng()
@@ -190,10 +137,6 @@ class Learning2Fly(gym.Env):
         # curriculum parameters
         self.Nc = 2.5e3 # interval of application of curriculum, roughly 10 epochs
         
-        # Thread monitoring
-        self.step_count = 0
-        self.thread_monitor_interval = 100  # Print every 100 steps
-
         sample_initial_parameters(self.device, self.env, self.params, self.rng)
 
         sample_initial_state(self.device, self.env, self.params, self.state, self.rng)
@@ -272,7 +215,6 @@ class Learning2Fly(gym.Env):
         observe(self.device, self.env, self.params, self.state, self.observation, self.rng)
 
         self.t += 1
-        self.step_count += 1
 
         done = self._check_done()
         reward = self._reward()
@@ -286,7 +228,6 @@ class Learning2Fly(gym.Env):
 
         observe(self.device, self.env, self.params, self.state, self.observation, self.rng)
         self.t = 0
-        self.step_count = 0  # Reset step counter
         
         return self.obs, {}
     

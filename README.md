@@ -16,7 +16,7 @@ cd SpikingCrazyflie
 
 2. Test the environment:
 ```bash
-python test_env.py
+python -m pytest tests
 ```
 
 For the ablation study, you can run:
@@ -58,6 +58,8 @@ First, SAC was used for training the networks. However, it was found that the en
 
 ### Online-Offline RL
 As controllers for the Crazyflie are readily available, one wonders whether it can be used to kickstart the training of the efficient SNN. In `TD3BC_Online.py`, an implementation of TD3BC which uses Jump-Start RL is presented. One can choose any of the buffers available in this repo, or start with an empty replay buffer and an existing controller. 
+
+Rollouts (training data and the periodic test episodes) run in `--n-workers` parallel processes (default: cores - 2) and the actor is unrolled over whole sequences with a fused BPTT for the LIF layers, so training scales with the number of cores. `--n-workers 0` collects in-process.
 
 During training, the agent initially uses the presented existing controller, and soflty rolls in the SNN, filling the buffer with more and more data gathered with the spiking actor. Several mechanisms are in place to avoid filling the buffer with useless data when early termination occurs.
 
